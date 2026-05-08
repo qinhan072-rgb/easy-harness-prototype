@@ -16,6 +16,13 @@ records, notifications, notification deliveries, service events, and audit logs
 are stored as separate local ledgers. Files are still local metadata only; the
 browser does not upload binary content to a server yet.
 
+Stage 2A backend-readiness files now exist under `supabase/` and `docs/`.
+They define the intended Supabase/PostgreSQL schema, RLS policies, Edge Function
+contracts, and environment variables before PayPal, DHL, domain, email, and
+other offline resources are available.
+The staging Supabase database has been migrated with `stage_2a_schema`,
+`stage_2a_rls`, and `stage_2a_security_hardening`.
+
 ## Run
 
 ```bash
@@ -44,20 +51,31 @@ read:
 ```text
 PROJECT_HANDOFF.md
 NEW_AI_PROMPT.md
+docs/STAGE_2A_BACKEND_READINESS.md
 ```
 
 `PROJECT_HANDOFF.md` is the current project baseline. `NEW_AI_PROMPT.md` is a
 copy-ready prompt for a fresh AI/Codex conversation.
+`docs/STAGE_2A_BACKEND_READINESS.md` explains what is ready for Supabase and
+what still waits on external accounts, credentials, legal text, and customs
+information.
 
 ## Demo Flow
 
-1. Sign in with an account email on the login screen.
-2. Use `customer@example.com` to enter the customer app.
-3. Upload files or click **Use sample request**, then submit.
-4. Watch the checklist transition and enter the request thread. The local
+1. Open the app. Visitors land directly in the customer workspace. Private
+   request and order history appears only after login.
+2. Upload files or click **Use sample request**, accept the upload terms, then submit.
+3. The account modal opens. Use `customer@example.com` to log in, or create a
+   new customer account with an email address and optional nickname. Public
+   registration only creates customer accounts. Google, Microsoft, and Apple
+   sign-in positions are reserved for later provider connection.
+4. Watch the checklist transition and enter the request thread. If the checking
+   result needs more information, the customer thread now shows a clear prompt
+   for the missing details before staff quote work continues. The local
    checking adapter now uses the same result shape expected from a future
    checking service: accepted, needs more information, or unable to review.
-5. Sign out, then use `staff@easyharness.com` to enter the ops workspace.
+5. Use the top-right account menu to sign out, then log in with
+   `staff@easyharness.com` to enter the ops workspace.
 6. Pick a request from the queue.
 7. Reply in the same thread as Easy Harness.
 8. Optionally upload attachments, include an inline table or layout preview, and/or set the harness price.
@@ -65,23 +83,29 @@ copy-ready prompt for a fresh AI/Codex conversation.
    quote record. The quote covers the harness only; shipping, import duties, and
    tax handling remain part of the order checkout.
 10. The customer receives in-app notifications for updates and can confirm once a price is ready.
-11. Confirming a request creates a checkout-style order with a request snapshot, Shenzhen origin, estimated package, service-level shipping options, DAP import-charge boundary, after-sales policy, and checkout total.
+11. Confirming a request creates a checkout-style order with a request snapshot,
+    Shenzhen origin, estimated package, service-level shipping options, DAP
+    import-charge boundary, payment-before-production confirmation rules,
+    after-sales policy, and checkout total. The delivery form is personal-user
+    first; business import fields stay optional and collapsed.
 12. Choose a payment route: hosted card/wallet checkout, PayPal checkout, or bank transfer reference.
     Card and PayPal create a local payment-session record before the payment
     confirmation callback is recorded.
 13. After payment, the order opens as an order-status page instead of a locked checkout form. Customers can review the confirmed item, delivery details, production state, and carrier tracking.
 14. Use the lightweight order message thread for customer questions about
     address, production, tracking, or after-sales.
-15. Sign in with `staff@easyharness.com` to work grouped request/order lanes,
+15. Log in with `staff@easyharness.com` to work grouped request/order lanes,
     update payment state, delivery details, package estimate, selected shipping
     service, production status, shipment tracking, and order messages.
-16. Sign in with `admin@easyharness.com` to manage users, review the roles
-    matrix, inspect requests and orders, review the audit log plus local
-    integration-adapter events, and inspect the backend-shaped data model, API
-    replacement map, and first database schema blueprint.
+16. Log in with `admin@easyharness.com` to open the business dashboard, manage
+    users, review the roles matrix, inspect requests and orders, review the
+    audit log plus local integration-adapter events, and inspect the
+    backend-shaped data model, API replacement map, backend readiness panel, and
+    first database schema blueprint.
 
-Customer accounts also include a minimal account page for profile details and
-upload terms acceptance. A customer must accept the upload terms before
+Customer accounts also include an account page for nickname, email status,
+notification preferences, sign-in status, and upload terms. Delivery address is
+handled during order checkout. A customer must accept the upload terms before
 submitting a request.
 
 If an update is sent without a price, the request remains **In review**. Once a
@@ -110,10 +134,19 @@ to earlier states during later discussion.
   ready to ship, then carrier tracking once shipped.
 - Staff updates, customer confirmations, and payment activity create audit
   records.
-- Role and user management are local only, but sign-in now creates a local
-  session record that should later be connected to a managed identity service.
+- Visitors can enter the customer workspace before login. Login or customer
+  account creation is required before saving requests, orders, and account
+  details.
+- Role and user management are local only, but sign-in and registration now
+  create a local session record that should later be connected to a managed
+  identity service. Public registration only creates customer accounts; staff
+  and admin accounts are invited or created by admin.
 - Local persistence should later be replaced by server tables and managed
   sessions.
+- Stage 2A selects Supabase/PostgreSQL/Supabase Auth/Supabase Storage/Supabase
+  Edge Functions as the first backend path. The repository contains migration
+  and function contracts, but live integration still waits on offline accounts
+  and secrets.
 - Local adapters now mark the handoff points for future checking, storage,
   payment, shipping, tracking, and notification APIs. The current behavior is
   still local, but the data shape is closer to a deployable service boundary.

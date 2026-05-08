@@ -52,12 +52,28 @@ Important context:
 - Backend-shaped local ledgers exist for auth session, request messages, quotes,
   storage objects, payments, shipments, order messages, notification deliveries,
   and service events.
+- Stage 2A backend direction is selected: Supabase Auth, Supabase PostgreSQL,
+  Supabase Storage private buckets, Supabase Edge Functions, Stripe Checkout,
+  PayPal, bank transfer, DHL Express API first, and DAP checkout.
+- Stage 2A backend-readiness files exist in `supabase/migrations`,
+  `supabase/functions`, `.env.example`, and
+  `docs/STAGE_2A_BACKEND_READINESS.md`. They stop at provider boundaries until
+  PayPal/DHL/domain/email/legal/customs resources are available.
 - Preserve role separation:
   - customer@example.com = customer app
   - staff@easyharness.com = ops console
   - admin@easyharness.com = admin console
 - Customer, staff, and admin should not share a visible shortcut between roles.
   They are separate users.
+- Visitors should land in the customer workspace before login. The top-right
+  action is Log in / Create account until a session exists. Private request and
+  order history must stay hidden until login.
+- Public registration creates customer accounts only. Staff and admin accounts
+  must be invited or created by admin.
+- Submitting a request should require login or registration while preserving the
+  visitor's draft.
+- Customer registration is personal-user first: email plus optional nickname.
+  Do not add company, legal name, country, or phone fields to public signup.
 - User-facing text must be written for real customers, not for the project owner
   or developer.
 - Do not expose words such as prototype, mock, Auth provider, human review, or
@@ -67,6 +83,12 @@ Important context:
   price confirmation.
 - Orders are for checkout, payment, production, shipping, and tracking.
 - Do not collapse request and order into one concept.
+- Checkout is personal-user first. Business import details are optional and
+  collapsed. Keep final confirmation, address-change, cancellation, payment
+  timing, DAP import-tax boundary, and after-sales wording visible before
+  payment.
+- If checking finds missing details, the customer thread should ask for those
+  details clearly in the same conversation.
 - Do not optimize only for a pretty screenshot. Make the interaction, state
   changes, and data flow feel like a real platform.
 
@@ -77,6 +99,7 @@ First, perform your own review before proposing changes:
    - create a request
    - upload at least one file
    - submit
+   - use login or customer registration when prompted
    - pass the checking transition
    - inspect the request thread
 3. Use the staff flow:

@@ -221,8 +221,8 @@ const notificationChannels = [
 const apiReplacementMap = [
   {
     adapter: "auth",
-    replace: "signInWithEmailAdapter(email, users) and clearAuthSessionAdapter(session)",
-    input: "email, user status, role, verification state",
+    replace: "signInWithEmailAdapter(email, users), createCustomerAccountAdapter(form), and clearAuthSessionAdapter(session)",
+    input: "email, customer registration form, user status, role, verification state",
     output: "session id, user id, role, issued time, expiry",
     writes: "auth_sessions, profiles.last_active_at, audit_logs, integration_events"
   },
@@ -317,9 +317,24 @@ const databaseSchemaBlueprint = [
     fields: ["id", "order_id", "provider", "session_id", "status", "amount", "currency", "provider_reference", "confirmed_at"]
   },
   {
+    table: "payment_events",
+    owner: "Payment adapter",
+    fields: ["id", "payment_id", "order_id", "provider", "event_type", "provider_event_id", "received_at"]
+  },
+  {
+    table: "shipping_rate_quotes",
+    owner: "Shipping adapter",
+    fields: ["id", "order_id", "provider", "carrier", "service", "amount", "currency", "incoterm", "expires_at"]
+  },
+  {
     table: "shipments",
     owner: "Shipping adapter",
     fields: ["id", "order_id", "carrier", "service", "status", "tracking_number", "tracking_url", "events"]
+  },
+  {
+    table: "tracking_events",
+    owner: "Shipping adapter",
+    fields: ["id", "shipment_id", "order_id", "status", "description", "location", "occurred_at"]
   },
   {
     table: "order_messages",
@@ -345,6 +360,60 @@ const databaseSchemaBlueprint = [
     table: "integration_events",
     owner: "Adapter layer",
     fields: ["id", "adapter", "action", "target_type", "target_id", "detail", "created_at"]
+  },
+  {
+    table: "service_countries",
+    owner: "Configuration",
+    fields: ["country_code", "country_name", "region_group", "checkout_enabled", "dhl_express_enabled", "payment_enabled"]
+  }
+];
+
+const backendStackDecision = [
+  { label: "Backend", value: "Supabase" },
+  { label: "Database", value: "PostgreSQL" },
+  { label: "Auth", value: "Supabase Auth" },
+  { label: "Storage", value: "Supabase Storage private buckets" },
+  { label: "Server functions", value: "Supabase Edge Functions" },
+  { label: "Payment", value: "Stripe Checkout, PayPal, bank transfer" },
+  { label: "Shipping", value: "DHL Express API first" },
+  { label: "Incoterm", value: "DAP" }
+];
+
+const integrationReadinessRows = [
+  {
+    area: "Database and RLS",
+    codeState: "Migration files ready",
+    waitingOn: "Supabase project, database region, production/staging split"
+  },
+  {
+    area: "Auth",
+    codeState: "Supabase Auth boundary ready",
+    waitingOn: "Auth project keys, Google/Apple/Microsoft app credentials, admin invite procedure"
+  },
+  {
+    area: "Storage",
+    codeState: "Private bucket and signed upload contract ready",
+    waitingOn: "Supabase storage bucket, file policy confirmation, signed URL expiry decision"
+  },
+  {
+    area: "Payment",
+    codeState: "Payment session and webhook function contracts ready",
+    waitingOn: "PayPal China merchant account, Stripe eligibility or alternative, bank transfer details"
+  },
+  {
+    area: "Shipping",
+    codeState: "DHL rate, shipment, and tracking function contracts ready",
+    waitingOn: "DHL Express China account, API keys, shipper account, customs template"
+  },
+  {
+    area: "Notifications",
+    codeState: "Multi-channel routing contract ready",
+    waitingOn: "Business email, email provider, WhatsApp/SMS provider choice"
+  },
+  {
+    area: "AI checking",
+    codeState: "Function boundary ready",
+    waitingOn: "Harness knowledge base, validation examples, first AI prompt approval"
   }
 ];
 
@@ -409,8 +478,8 @@ const seedUsers = [
     role: "customer",
     status: "active",
     verified: true,
-    company: "Marv Design",
-    country: "United States",
+    company: "",
+    country: "",
     phone: "",
     termsAccepted: false,
     termsAcceptedAt: "",
@@ -637,6 +706,10 @@ function fileSizeLabel(file) {
   return `${(file.size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function isEmailLike(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
 function draftFileFromBrowser(file) {
   return {
     id: attachmentId(),
@@ -857,6 +930,13 @@ function createLocalAuthSession(user) {
 
 function signInWithEmailAdapter(email, users) {
   const normalized = email.trim().toLowerCase();
+  if (!isEmailLike(normalized)) {
+    return {
+      ok: false,
+      adapter: platformAdapters.auth.id,
+      error: "Enter a valid email address."
+    };
+  }
   const user = users.find(
     (item) => item.status !== "suspended" && item.email.toLowerCase() === normalized
   );
@@ -881,6 +961,66 @@ function signInWithEmailAdapter(email, users) {
       "user",
       user.id,
       `${roleCopy[user.role]} session issued.`
+    )
+  };
+}
+
+function createCustomerAccountAdapter({ nickname = "", email }) {
+  const normalized = email.trim().toLowerCase();
+  if (!isEmailLike(normalized)) {
+    return {
+      ok: false,
+      adapter: platformAdapters.auth.id,
+      error: "Enter a valid email address."
+    };
+  }
+
+  const user = {
+    id: `u_customer_${Date.now()}`,
+    name: nickname.trim() || normalized.split("@")[0],
+    email: normalized,
+    role: "customer",
+    status: "active",
+    verified: true,
+    company: "",
+    country: "",
+    phone: "",
+    termsAccepted: false,
+    termsAcceptedAt: "",
+    notificationPreferences: {
+      email: true,
+      whatsapp: false,
+      inApp: true
+    },
+    defaultAddress: {
+      name: nickname.trim(),
+      company: "",
+      country: "",
+      line1: "",
+      line2: "",
+      city: "",
+      region: "",
+      postalCode: "",
+      phone: "",
+      email: normalized,
+      taxId: ""
+    },
+    authMethods: ["email"],
+    lastActive: "Just now"
+  };
+
+  const session = createLocalAuthSession(user);
+  return {
+    ok: true,
+    adapter: platformAdapters.auth.id,
+    user,
+    session,
+    event: makeServiceEvent(
+      platformAdapters.auth.id,
+      "customer_account_created",
+      "user",
+      user.id,
+      "Customer account and session issued."
     )
   };
 }
@@ -1543,6 +1683,12 @@ function App() {
   const [includeTable, setIncludeTable] = useState(false);
   const [showPayment, setShowPayment] = useState(false);
   const [paymentMethodId, setPaymentMethodId] = useState("stripe_card");
+  const [authModal, setAuthModal] = useState({
+    open: false,
+    mode: "login",
+    reason: "",
+    after: ""
+  });
 
   const uploadRef = useRef(null);
   const userComposerUploadRef = useRef(null);
@@ -1564,8 +1710,8 @@ function App() {
     () =>
       visibleRequests.find((request) => request.id === activeRequestId) ||
       visibleRequests[0] ||
-      requests[0],
-    [activeRequestId, requests, visibleRequests]
+      (currentUser?.role === "staff" ? requests[0] : null),
+    [activeRequestId, currentUser, requests, visibleRequests]
   );
 
   const visibleOrders = useMemo(() => {
@@ -1580,8 +1726,8 @@ function App() {
     () =>
       visibleOrders.find((order) => order.id === activeOrderId) ||
       visibleOrders[0] ||
-      orders[0],
-    [activeOrderId, orders, visibleOrders]
+      (currentUser?.role === "staff" ? orders[0] : null),
+    [activeOrderId, currentUser, orders, visibleOrders]
   );
 
   const visibleNotifications = useMemo(() => {
@@ -1945,8 +2091,24 @@ function App() {
     );
   }
 
-  function signIn(userId, session = null) {
-    const selected = users.find((user) => user.id === userId);
+  function openAuthModal(mode = "login", reason = "", after = "") {
+    setAuthModal({ open: true, mode, reason, after });
+  }
+
+  function closeAuthModal() {
+    setAuthModal((current) => ({ ...current, open: false, reason: "", after: "" }));
+  }
+
+  function completeAuthFlow(user) {
+    const after = authModal.after;
+    closeAuthModal();
+    if (after === "submit_request" && user.role === "customer") {
+      window.setTimeout(() => submitRequestForUser(user), 0);
+    }
+  }
+
+  function signIn(userId, session = null, userOverride = null) {
+    const selected = userOverride || users.find((user) => user.id === userId);
     if (!selected || selected.status === "suspended") return;
     setAuthSession(session || createLocalAuthSession(selected));
     setCurrentUserId(userId);
@@ -1965,6 +2127,25 @@ function App() {
     if (!authResult.ok) return authResult;
     signIn(authResult.user.id, authResult.session);
     setServiceEvents((current) => [authResult.event, ...current]);
+    completeAuthFlow(authResult.user);
+    return authResult;
+  }
+
+  function registerCustomer(form) {
+    const normalized = form.email.trim().toLowerCase();
+    if (users.some((user) => user.email.toLowerCase() === normalized)) {
+      return {
+        ok: false,
+        error: "An account already exists for this email. Log in instead."
+      };
+    }
+    const authResult = createCustomerAccountAdapter(form);
+    if (!authResult.ok) return authResult;
+    setUsers((current) => [authResult.user, ...current]);
+    signIn(authResult.user.id, authResult.session, authResult.user);
+    setServiceEvents((current) => [authResult.event, ...current]);
+    recordAudit("customer_registered", "user", authResult.user.id, `${authResult.user.email} created an account.`, authResult.user);
+    completeAuthFlow(authResult.user);
     return authResult;
   }
 
@@ -2044,17 +2225,33 @@ function App() {
   }
 
   function startRequest() {
-    if (!currentUser) return;
     if (!uploadFiles.length) {
       setFileError("Please upload at least one design file before submitting.");
       return;
     }
-    if (!currentUser.termsAccepted && !termsChecked) {
+    if (!currentUser) {
+      if (!termsChecked) {
+        setTermsError("Please accept the upload and request terms before submitting.");
+        return;
+      }
+      openAuthModal("register", "Sign in or create an account to submit this request.", "submit_request");
+      return;
+    }
+    submitRequestForUser(currentUser);
+  }
+
+  function submitRequestForUser(actor) {
+    if (!actor || actor.role !== "customer") return;
+    if (!uploadFiles.length) {
+      setFileError("Please upload at least one design file before submitting.");
+      return;
+    }
+    if (!actor.termsAccepted && !termsChecked) {
       setTermsError("Please accept the upload and request terms before submitting.");
       return;
     }
-    if (!currentUser.termsAccepted && termsChecked) {
-      updateUser(currentUser.id, {
+    if (!actor.termsAccepted && termsChecked) {
+      updateUser(actor.id, {
         termsAccepted: true,
         termsAcceptedAt: todayLabel()
       }, "upload_terms_accepted");
@@ -2068,8 +2265,8 @@ function App() {
     const firstMessage = customerMessage(text, files);
     const nextRequest = {
       id: nextId,
-      customerId: currentUser.id,
-      customer: currentUser.name,
+      customerId: actor.id,
+      customer: actor.name,
       title: inferTitle(text),
       status: "checking",
       checkResult: {
@@ -2090,14 +2287,14 @@ function App() {
 
     setRequests((current) => [nextRequest, ...current]);
     writeRequestMessageLedger(nextRequest, firstMessage);
-    appendAttachmentRecords(uploadFiles, nextId, firstMessage.id, currentUser.id);
+    appendAttachmentRecords(uploadFiles, nextId, firstMessage.id, actor.id);
     addNotification({
       role: "staff",
       requestId: nextId,
       title: "New request",
       body: `${nextId} is ready for review.`
     });
-    recordAudit("request_created", "request", nextId, `${currentUser.email} created ${nextRequest.title}.`);
+    recordAudit("request_created", "request", nextId, `${actor.email} created ${nextRequest.title}.`, actor);
     setActiveRequestId(nextId);
     setProcessingRequestId(nextId);
     setDescription("");
@@ -2413,11 +2610,7 @@ function App() {
     recordAudit("user_invited", "user", newUser.id, `${newUser.email} invited as ${roleCopy[role]}.`);
   }
 
-  if (!currentUser) {
-    return <LoginScreen signInWithEmail={signInByEmail} />;
-  }
-
-  if (currentUser.role === "admin") {
+  if (currentUser?.role === "admin") {
     return (
       <AdminApp
         users={users}
@@ -2435,7 +2628,7 @@ function App() {
     );
   }
 
-  if (currentUser.role === "staff") {
+  if (currentUser?.role === "staff") {
     return (
       <StaffApp
         requests={visibleRequests}
@@ -2479,6 +2672,7 @@ function App() {
         openRequest={openRequest}
         openOrder={openOrder}
         currentUser={currentUser}
+        requireAuth={(reason, after = "") => openAuthModal("login", reason, after)}
       />
 
       <main className={`workspace workspace-${userView}`}>
@@ -2487,6 +2681,10 @@ function App() {
           user={currentUser}
           signOut={signOut}
           openAccount={() => setUserView("account")}
+          openLogin={() => openAuthModal("login")}
+          openRegister={() => openAuthModal("register")}
+          openRequests={() => setUserView("requests")}
+          openOrders={() => setUserView("orders")}
           notifications={visibleNotifications}
           markNotificationsRead={markVisibleNotificationsRead}
           openNotification={(requestId) => requestId && openRequest(requestId, "user")}
@@ -2525,12 +2723,29 @@ function App() {
         )}
 
         {userView === "account" && (
-          <AccountScreen
-            user={currentUser}
-            updateUser={(patch, action = "profile_updated") =>
-              updateUser(currentUser.id, patch, action)
-            }
-          />
+          currentUser ? (
+            <AccountScreen
+              user={currentUser}
+              updateUser={(patch, action = "profile_updated") =>
+                updateUser(currentUser.id, patch, action)
+              }
+            />
+          ) : (
+            <StartScreen
+              description={description}
+              setDescription={setDescription}
+              files={uploadFiles}
+              uploadRef={uploadRef}
+              handleUpload={handleUpload}
+              fillSampleRequest={fillSampleRequest}
+              startRequest={startRequest}
+              currentUser={currentUser}
+              termsChecked={termsChecked}
+              setTermsChecked={setTermsChecked}
+              termsError={termsError}
+              fileError={fileError}
+            />
+          )
         )}
 
         {userView === "thread" && activeRequest && (
@@ -2570,16 +2785,46 @@ function App() {
           markPaid={markPaid}
         />
       )}
+
+      {authModal.open && (
+        <AuthModal
+          mode={authModal.mode}
+          reason={authModal.reason}
+          close={closeAuthModal}
+          signInWithEmail={signInByEmail}
+          registerCustomer={registerCustomer}
+          switchMode={(mode) => setAuthModal((current) => ({ ...current, mode }))}
+        />
+      )}
     </div>
   );
 }
 
-function LoginScreen({ signInWithEmail }) {
-  const [email, setEmail] = useState("");
+function AuthModal({
+  mode,
+  reason,
+  close,
+  signInWithEmail,
+  registerCustomer,
+  switchMode
+}) {
+  const [loginEmail, setLoginEmail] = useState("");
+  const [registerForm, setRegisterForm] = useState({
+    nickname: "",
+    email: "",
+  });
   const [error, setError] = useState("");
 
-  const submit = () => {
-    const authResult = signInWithEmail(email);
+  useEffect(() => {
+    setError("");
+  }, [mode]);
+
+  const updateRegisterField = (field, value) => {
+    setRegisterForm((current) => ({ ...current, [field]: value }));
+  };
+
+  const submitLogin = () => {
+    const authResult = signInWithEmail(loginEmail);
     if (!authResult.ok) {
       setError(authResult.error);
       return;
@@ -2587,37 +2832,102 @@ function LoginScreen({ signInWithEmail }) {
     setError("");
   };
 
+  const submitRegister = () => {
+    const authResult = registerCustomer(registerForm);
+    if (!authResult.ok) {
+      setError(authResult.error);
+      return;
+    }
+    setError("");
+  };
+
+  const isRegister = mode === "register";
+
   return (
-    <main className="login-screen">
-      <WiringBackdrop />
-      <section className="login-card">
+    <div className="modal-backdrop auth-backdrop">
+      <section className="payment-modal auth-modal" role="dialog" aria-modal="true">
+        <button className="modal-close" onClick={close} aria-label="Close sign-in">
+          x
+        </button>
         <div className="brand-row">
           <Cable size={25} />
           <span>Easy Harness</span>
         </div>
-        <h1>Sign in to Easy Harness</h1>
-        <p>Use the email assigned to your Easy Harness account.</p>
 
-        <div className="login-form">
-          <label className="field">
-            <span>Email</span>
-            <input
-              value={email}
-              onChange={(event) => setEmail(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") submit();
-              }}
-              placeholder="email@example.com"
-            />
-          </label>
-          {error && <div className="form-error">{error}</div>}
-          <button className="publish-button" onClick={submit}>
-            Continue
-            <ArrowRight size={18} />
-          </button>
+        <h2>{isRegister ? "Create your Easy Harness account" : "Log in to Easy Harness"}</h2>
+        <p>
+          {reason || (isRegister
+            ? "Use an email address to save requests, quotes, and orders."
+            : "Access saved requests, orders, and account details.")}
+        </p>
+
+        <div className="auth-provider-row" aria-label="Additional sign-in options">
+          <button disabled>Google soon</button>
+          <button disabled>Microsoft soon</button>
+          <button disabled>Apple soon</button>
         </div>
+
+        {!isRegister ? (
+          <div className="login-form">
+            <label className="field">
+              <span>Email</span>
+              <input
+                value={loginEmail}
+                onChange={(event) => setLoginEmail(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") submitLogin();
+                }}
+                placeholder="email@example.com"
+              />
+            </label>
+            {error && <div className="form-error">{error}</div>}
+            <button className="publish-button" onClick={submitLogin}>
+              Continue with email
+              <ArrowRight size={18} />
+            </button>
+            <button className="text-button" onClick={() => switchMode("register")}>
+              New to Easy Harness? Create an account
+            </button>
+          </div>
+        ) : (
+          <div className="login-form">
+            <label className="field">
+              <span>Email</span>
+              <input
+                value={registerForm.email}
+                onChange={(event) => updateRegisterField("email", event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") submitRegister();
+                }}
+                placeholder="email@example.com"
+              />
+            </label>
+            <label className="field">
+              <span>Nickname</span>
+              <input
+                value={registerForm.nickname}
+                onChange={(event) => updateRegisterField("nickname", event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") submitRegister();
+                }}
+                placeholder="Optional"
+              />
+            </label>
+            <p className="auth-disclaimer">
+              By creating an account, you can save requests and return to orders.
+            </p>
+            {error && <div className="form-error">{error}</div>}
+            <button className="publish-button" onClick={submitRegister}>
+              Create account
+              <ArrowRight size={18} />
+            </button>
+            <button className="text-button" onClick={() => switchMode("login")}>
+              Already have an account? Log in
+            </button>
+          </div>
+        )}
       </section>
-    </main>
+    </div>
   );
 }
 
@@ -2632,8 +2942,19 @@ function UserSidebar({
   setUserView,
   openRequest,
   openOrder,
-  currentUser
+  currentUser,
+  requireAuth
 }) {
+  const showPrivateNav = !!currentUser;
+
+  const openPrivateView = (view) => {
+    if (!currentUser) {
+      requireAuth("Log in or create an account to view your saved work.");
+      return;
+    }
+    setUserView(view);
+  };
+
   return (
     <aside className={`sidebar ${sidebarOpen ? "open" : "collapsed"}`} aria-label="Navigation">
       <div className="rail-top">
@@ -2658,23 +2979,27 @@ function UserSidebar({
           <Plus size={20} />
           {sidebarOpen && <span>New request</span>}
         </button>
-        <button
-          className={`rail-icon ${userView === "requests" ? "active" : ""}`}
-          onClick={() => setUserView("requests")}
-        >
-          <Folder size={20} />
-          {sidebarOpen && <span>Requests</span>}
-        </button>
-        <button
-          className={`rail-icon ${userView === "orders" || userView === "order" ? "active" : ""}`}
-          onClick={() => setUserView("orders")}
-        >
-          <ReceiptText size={20} />
-          {sidebarOpen && <span>Orders</span>}
-        </button>
+        {showPrivateNav && (
+          <>
+            <button
+              className={`rail-icon ${userView === "requests" ? "active" : ""}`}
+              onClick={() => openPrivateView("requests")}
+            >
+              <Folder size={20} />
+              {sidebarOpen && <span>Requests</span>}
+            </button>
+            <button
+              className={`rail-icon ${userView === "orders" || userView === "order" ? "active" : ""}`}
+              onClick={() => openPrivateView("orders")}
+            >
+              <ReceiptText size={20} />
+              {sidebarOpen && <span>Orders</span>}
+            </button>
+          </>
+        )}
       </nav>
 
-      {sidebarOpen && (
+      {sidebarOpen && showPrivateNav && (requests.length || orders.length) ? (
         <div className="draft-list">
           <div className="sidebar-section-title">Recent requests</div>
           {requests.slice(0, 6).map((request) => (
@@ -2705,13 +3030,23 @@ function UserSidebar({
             </>
           )}
         </div>
-      )}
+      ) : null}
 
       <div className="rail-bottom">
-        <div className="rail-user">
-          <UserCircle size={22} />
-          {sidebarOpen && <span>{currentUser.name}</span>}
-        </div>
+        {currentUser ? (
+          <div className="rail-user">
+            <UserCircle size={22} />
+            {sidebarOpen && <span>{currentUser.name}</span>}
+          </div>
+        ) : (
+          <button
+            className="rail-user rail-user-button"
+            onClick={() => requireAuth("Log in or create an account to save requests and orders.")}
+          >
+            <UserCircle size={22} />
+            {sidebarOpen && <span>Log in</span>}
+          </button>
+        )}
       </div>
     </aside>
   );
@@ -2721,17 +3056,46 @@ function TopAccount({
   user,
   signOut,
   openAccount,
+  openLogin,
+  openRegister,
+  openRequests,
+  openOrders,
   notifications,
   markNotificationsRead,
   openNotification
 }) {
-  const [open, setOpen] = useState(false);
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [accountOpen, setAccountOpen] = useState(false);
   const unreadCount = notifications.filter((notification) => !notification.readAt).length;
 
   const toggleNotifications = () => {
-    setOpen((current) => !current);
-    if (!open) markNotificationsRead();
+    setNotificationsOpen((current) => !current);
+    setAccountOpen(false);
+    if (!notificationsOpen) markNotificationsRead();
   };
+
+  const toggleAccount = () => {
+    setAccountOpen((current) => !current);
+    setNotificationsOpen(false);
+  };
+
+  const chooseAccountItem = (action) => {
+    setAccountOpen(false);
+    action();
+  };
+
+  if (!user) {
+    return (
+      <div className="top-account">
+        <button className="signin-button subtle" onClick={openRegister}>
+          Create account
+        </button>
+        <button className="signin-button primary" onClick={openLogin}>
+          Log in
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="top-account">
@@ -2739,12 +3103,19 @@ function TopAccount({
         <Bell size={18} />
         {!!unreadCount && <span>{unreadCount}</span>}
       </button>
-      <button className="account-icon" aria-label="Open account" onClick={openAccount}>
+      <button className="account-icon" aria-label="Open account menu" onClick={toggleAccount}>
         <UserCircle size={20} />
       </button>
-      <button className="signin-button" onClick={openAccount}>{user.name}</button>
-      <button className="signin-button subtle" onClick={signOut}>Sign out</button>
-      {open && (
+      <button className="signin-button" onClick={toggleAccount}>{user.name}</button>
+      {accountOpen && (
+        <div className="account-menu">
+          <button onClick={() => chooseAccountItem(openAccount)}>Account</button>
+          <button onClick={() => chooseAccountItem(openRequests)}>My requests</button>
+          <button onClick={() => chooseAccountItem(openOrders)}>My orders</button>
+          <button className="danger" onClick={() => chooseAccountItem(signOut)}>Sign out</button>
+        </div>
+      )}
+      {notificationsOpen && (
         <div className="notification-panel">
           <div className="notification-panel-head">
             <strong>Notifications</strong>
@@ -2869,7 +3240,7 @@ function StartScreen({
 
       {fileError && <div className="form-error">{fileError}</div>}
 
-      {!currentUser.termsAccepted && (
+      {!currentUser?.termsAccepted && (
         <label className={`terms-card ${termsError ? "error" : ""}`}>
           <input
             type="checkbox"
@@ -3033,20 +3404,22 @@ function OrderListGroup({ title, orders, openOrder }) {
 }
 
 function AccountScreen({ user, updateUser }) {
+  const preferences = user.notificationPreferences || {};
   const [form, setForm] = useState({
     name: user.name || "",
-    company: user.company || "",
-    country: user.country || "",
-    phone: user.phone || ""
+    notifyEmail: preferences.email !== false,
+    notifyWhatsapp: !!preferences.whatsapp,
+    notifyInApp: preferences.inApp !== false
   });
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
+    const nextPreferences = user.notificationPreferences || {};
     setForm({
       name: user.name || "",
-      company: user.company || "",
-      country: user.country || "",
-      phone: user.phone || ""
+      notifyEmail: nextPreferences.email !== false,
+      notifyWhatsapp: !!nextPreferences.whatsapp,
+      notifyInApp: nextPreferences.inApp !== false
     });
     setSaved(false);
   }, [user.id]);
@@ -3057,7 +3430,14 @@ function AccountScreen({ user, updateUser }) {
   };
 
   const saveProfile = () => {
-    updateUser(form);
+    updateUser({
+      name: form.name,
+      notificationPreferences: {
+        email: form.notifyEmail,
+        whatsapp: form.notifyWhatsapp,
+        inApp: form.notifyInApp
+      }
+    });
     setSaved(true);
   };
 
@@ -3073,7 +3453,7 @@ function AccountScreen({ user, updateUser }) {
       <div className="requests-header">
         <span className="eyebrow">Account</span>
         <h1>Your account</h1>
-        <p>Manage the contact details used for your harness requests.</p>
+        <p>Manage your email, nickname, and notification preferences.</p>
       </div>
 
       <div className="account-grid">
@@ -3088,37 +3468,51 @@ function AccountScreen({ user, updateUser }) {
 
           <div className="profile-form">
             <label className="field">
-              <span>Name</span>
+              <span>Nickname</span>
               <input
                 value={form.name}
                 onChange={(event) => updateField("name", event.target.value)}
-                placeholder="Your name"
+                placeholder="Nickname"
               />
             </label>
             <label className="field">
-              <span>Company</span>
+              <span>Email</span>
               <input
-                value={form.company}
-                onChange={(event) => updateField("company", event.target.value)}
-                placeholder="Company name"
+                value={user.email}
+                disabled
+                readOnly
               />
             </label>
-            <label className="field">
-              <span>Country / region</span>
-              <input
-                value={form.country}
-                onChange={(event) => updateField("country", event.target.value)}
-                placeholder="Country or region"
-              />
-            </label>
-            <label className="field">
-              <span>Default contact</span>
-              <input
-                value={form.phone}
-                onChange={(event) => updateField("phone", event.target.value)}
-                placeholder="Phone, WhatsApp, or WeChat"
-              />
-            </label>
+          </div>
+
+          <div className="profile-subsection">
+            <h3>Notifications</h3>
+            <div className="preference-list">
+              <label>
+                <input
+                  type="checkbox"
+                  checked={form.notifyEmail}
+                  onChange={(event) => updateField("notifyEmail", event.target.checked)}
+                />
+                <span>Email updates</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={form.notifyWhatsapp}
+                  onChange={(event) => updateField("notifyWhatsapp", event.target.checked)}
+                />
+                <span>WhatsApp updates</span>
+              </label>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={form.notifyInApp}
+                  onChange={(event) => updateField("notifyInApp", event.target.checked)}
+                />
+                <span>In-app updates</span>
+              </label>
+            </div>
           </div>
 
           <button className="pay-button profile-save" onClick={saveProfile}>
@@ -3145,6 +3539,10 @@ function AccountScreen({ user, updateUser }) {
             <div className="account-meta-row">
               <span>Email verification</span>
               <strong>{user.verified ? "Verified" : "Pending"}</strong>
+            </div>
+            <div className="account-meta-row">
+              <span>Sign-in methods</span>
+              <strong>{(user.authMethods || ["email"]).join(", ")}</strong>
             </div>
           </div>
 
@@ -3196,11 +3594,18 @@ function RequestWorkspace({
   openOrder,
   linkedOrder
 }) {
+  const missingItems = request.checkResult?.missing || [];
+  const shouldShowMissingInfo =
+    perspective === "user" &&
+    missingItems.length > 0 &&
+    ["needs_info", "in_review"].includes(request.status);
+
   return (
     <section className="request-workspace">
       <div className="thread-layout">
         <div className="thread-main">
           <ThreadHeader request={request} />
+          {shouldShowMissingInfo && <MissingInfoPrompt items={missingItems} />}
           <MessageList request={request} perspective={perspective} />
           <UserComposer
             value={composerValue}
@@ -3222,6 +3627,38 @@ function RequestWorkspace({
       </div>
     </section>
   );
+}
+
+function MissingInfoPrompt({ items }) {
+  return (
+    <section className="missing-info-prompt">
+      <div className="missing-info-icon">
+        <AlertTriangle size={18} />
+      </div>
+      <div>
+        <h2>Details Easy Harness still needs</h2>
+        <p>
+          Reply in the thread with what you know. If one detail is uncertain, say
+          that and Easy Harness can help narrow it down.
+        </p>
+        <div className="missing-info-list">
+          {items.map((item) => (
+            <span key={item}>{formatMissingInfoItem(item)}</span>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function formatMissingInfoItem(item) {
+  const copy = {
+    "target quantity": "Target quantity",
+    "approximate length": "Approximate length",
+    "electrical rating": "Voltage or current rating"
+  };
+
+  return copy[item] || item;
 }
 
 function ThreadHeader({ request }) {
@@ -3476,6 +3913,15 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
   const transferPending = order.paymentStatus === "bank_transfer_pending";
   const providerPending = order.paymentStatus === "payment_pending";
   const canPay = completeAddress && shipping && !isPaid;
+  const [showBusinessFields, setShowBusinessFields] = useState(
+    Boolean(order.address.company || order.address.taxId)
+  );
+
+  useEffect(() => {
+    if (order.address.company || order.address.taxId) {
+      setShowBusinessFields(true);
+    }
+  }, [order.id, order.address.company, order.address.taxId]);
 
   if (isPaid) {
     return <PaidOrderStatusView order={order} request={request} sendOrderMessage={sendOrderMessage} />;
@@ -3576,15 +4022,6 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 />
               </label>
               <label className="field">
-                <span>Company</span>
-                <input
-                  value={order.address.company}
-                  onChange={(event) => updateAddress("company", event.target.value)}
-                  placeholder="Company name"
-                  disabled={isPaid}
-                />
-              </label>
-              <label className="field">
                 <span>Country / region</span>
                 <select
                   value={order.address.country}
@@ -3651,15 +4088,39 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                   disabled={isPaid}
                 />
               </label>
-              <label className="field">
-                <span>VAT / EORI / Tax ID</span>
-                <input
-                  value={order.address.taxId || ""}
-                  onChange={(event) => updateAddress("taxId", event.target.value)}
-                  placeholder="Optional for business import"
+              <div className="business-toggle-row wide">
+                <button
+                  className="secondary-action"
+                  type="button"
+                  onClick={() => setShowBusinessFields((current) => !current)}
                   disabled={isPaid}
-                />
-              </label>
+                >
+                  {showBusinessFields ? "Hide business import details" : "Add business import details"}
+                </button>
+                <span>Only needed if the carrier or customs asks for a company or tax number.</span>
+              </div>
+              {showBusinessFields && (
+                <>
+                  <label className="field">
+                    <span>Company (optional)</span>
+                    <input
+                      value={order.address.company}
+                      onChange={(event) => updateAddress("company", event.target.value)}
+                      placeholder="Company name"
+                      disabled={isPaid}
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Tax ID (optional)</span>
+                    <input
+                      value={order.address.taxId || ""}
+                      onChange={(event) => updateAddress("taxId", event.target.value)}
+                      placeholder="VAT, EORI, or local tax number"
+                      disabled={isPaid}
+                    />
+                  </label>
+                </>
+              )}
             </div>
           </section>
 
@@ -3702,6 +4163,19 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 carrier brokerage may be collected by the carrier or local authority
                 before delivery.
               </p>
+            </div>
+          </section>
+
+          <section className="order-card">
+            <div className="order-section-title">
+              <CheckCircle2 size={18} />
+              <h2>Before you pay</h2>
+            </div>
+            <div className="policy-list">
+              <p><strong>Final confirmation:</strong> Payment confirms the harness request, latest Easy Harness update, delivery address, selected shipping method, and DAP import-tax boundary.</p>
+              <p><strong>Address changes:</strong> Ask Easy Harness in the order messages before production starts if the delivery address needs to change.</p>
+              <p><strong>Payment timing:</strong> Card and wallet orders move forward after provider confirmation. Bank transfer orders move forward after receipt is confirmed.</p>
+              <p><strong>Cancellation:</strong> You can ask to cancel before production starts. Once production starts, the harness is made to the confirmed request.</p>
             </div>
           </section>
 
@@ -3783,7 +4257,7 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
             )}
             <p className="checkout-note">
               {completeAddress
-                ? "Card and wallet payments open through the secure payment provider. Bank transfer starts after receipt is confirmed."
+                ? "Choose a payment method only after the request, address, shipping method, and import-tax boundary look correct."
                 : "Add a complete delivery address before choosing a payment method."}
             </p>
           </div>
@@ -3982,9 +4456,9 @@ function PaidOrderStatusView({ order, request, sendOrderMessage }) {
               <Readout label="Recipient" value={order.address.name} />
               <Readout label="Email" value={order.address.email} />
               <Readout label="Phone" value={order.address.phone || "Not provided"} />
-              <Readout label="Company" value={order.address.company || "Not provided"} />
               <Readout label="Address" value={addressLines.join(", ")} wide />
-              <Readout label="Import tax ID" value={order.address.taxId || "Not provided"} />
+              {order.address.company && <Readout label="Company" value={order.address.company} />}
+              {order.address.taxId && <Readout label="Import tax ID" value={order.address.taxId} />}
               <Readout label="Incoterm" value={order.incoterm} />
             </div>
           </section>
@@ -4286,7 +4760,7 @@ function AdminApp({
   updateUser,
   inviteUser
 }) {
-  const [adminView, setAdminView] = useState("users");
+  const [adminView, setAdminView] = useState("dashboard");
   const [selectedUserId, setSelectedUserId] = useState("all");
   const [inviteName, setInviteName] = useState("");
   const [inviteEmail, setInviteEmail] = useState("");
@@ -4322,6 +4796,12 @@ function AdminApp({
           <Cable size={22} />
           <span>Easy Harness Admin</span>
         </div>
+        <button
+          className={`staff-nav ${adminView === "dashboard" ? "active" : ""}`}
+          onClick={() => setAdminView("dashboard")}
+        >
+          Dashboard
+        </button>
         <button
           className={`staff-nav ${adminView === "users" ? "active" : ""}`}
           onClick={() => setAdminView("users")}
@@ -4368,7 +4848,7 @@ function AdminApp({
           <div>
             <span className="eyebrow">Admin console</span>
             <h1>{adminTitle(adminView)}</h1>
-            <p>Manage account access, roles, and request visibility.</p>
+            <p>Review account access, request activity, order state, and service handoffs.</p>
           </div>
           <button className="drawer-close" onClick={signOut}>Sign out</button>
         </header>
@@ -4379,6 +4859,16 @@ function AdminApp({
           <StatCard label="Attachments" value={attachmentRecords.length} />
           <StatCard label="Service events" value={serviceEvents.length} />
         </section>
+
+        {adminView === "dashboard" && (
+          <AdminDashboardView
+            users={users}
+            requests={requests}
+            orders={orders}
+            auditLogs={auditLogs}
+            serviceEvents={serviceEvents}
+          />
+        )}
 
         {adminView === "users" && (
           <AdminUsersView
@@ -4433,12 +4923,122 @@ function AdminApp({
 }
 
 function adminTitle(view) {
+  if (view === "dashboard") return "Business dashboard";
   if (view === "roles") return "Roles and permissions";
   if (view === "requests") return "Request management";
   if (view === "orders") return "Order management";
   if (view === "audit") return "Audit log";
   if (view === "data") return "Data model";
   return "User management";
+}
+
+function AdminDashboardView({ users, requests, orders, auditLogs, serviceEvents }) {
+  const activeCustomers = users.filter((user) => user.role === "customer" && user.status === "active");
+  const requestsNeedingWork = requests.filter((request) =>
+    ["needs_info", "in_review"].includes(request.status)
+  );
+  const readyRequests = requests.filter((request) => request.status === "ready_to_confirm");
+  const checkoutOrders = orders.filter((order) => order.paymentStatus !== "paid");
+  const productionOrders = orders.filter((order) =>
+    order.paymentStatus === "paid" && !["shipped", "delivered"].includes(order.status)
+  );
+  const shippedOrders = orders.filter((order) => ["shipped", "delivered"].includes(order.status));
+  const attentionItems = [
+    ...requestsNeedingWork.slice(0, 3).map((request) => ({
+      id: request.id,
+      title: request.title,
+      body: requestNextAction(request),
+      state: statusCopy[request.status]
+    })),
+    ...checkoutOrders.slice(0, 3).map((order) => ({
+      id: order.id,
+      title: order.title,
+      body: orderNextAction(order),
+      state: paymentStatusCopy[order.paymentStatus] || orderStatusCopy[order.status]
+    }))
+  ].slice(0, 5);
+
+  return (
+    <>
+      <section className="admin-grid">
+        <div className="admin-card">
+          <div className="admin-card-header">
+            <div>
+              <h2>Business overview</h2>
+              <p>Operational counts for customer activity, quote readiness, checkout, and fulfillment.</p>
+            </div>
+          </div>
+          <div className="business-metric-grid">
+            <StatCard label="Active customers" value={activeCustomers.length} />
+            <StatCard label="Requests to work" value={requestsNeedingWork.length} />
+            <StatCard label="Awaiting confirmation" value={readyRequests.length} />
+            <StatCard label="Checkout orders" value={checkoutOrders.length} />
+            <StatCard label="In production" value={productionOrders.length} />
+            <StatCard label="Shipped / delivered" value={shippedOrders.length} />
+          </div>
+        </div>
+
+        <aside className="admin-card">
+          <div className="admin-card-header">
+            <div>
+              <h2>Needs attention</h2>
+              <p>Where staff or admin should look first.</p>
+            </div>
+          </div>
+          <div className="attention-list">
+            {attentionItems.length ? (
+              attentionItems.map((item) => (
+                <div className="attention-row" key={item.id}>
+                  <strong>{item.id}</strong>
+                  <span>{item.title}</span>
+                  <small>{item.state} - {item.body}</small>
+                </div>
+              ))
+            ) : (
+              <div className="empty-state compact">
+                <p>No active request or checkout issues.</p>
+              </div>
+            )}
+          </div>
+          <div className="admin-dashboard-foot">
+            <small>Latest audit records: {auditLogs.length}</small>
+            <small>Latest service handoffs: {serviceEvents.length}</small>
+          </div>
+        </aside>
+      </section>
+
+      <section className="admin-card backend-readiness-card">
+        <div className="admin-card-header">
+          <div>
+            <h2>Backend readiness</h2>
+            <p>Stage 2A is prepared for Supabase, hosted payments, DHL Express, private storage, and provider callbacks.</p>
+          </div>
+        </div>
+        <div className="stack-decision-grid">
+          {backendStackDecision.map((item) => (
+            <div className="stack-decision" key={item.label}>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </div>
+          ))}
+        </div>
+        <div className="readiness-table">
+          <div className="readiness-row readiness-head">
+            <span>Area</span>
+            <span>Code state</span>
+            <span>Waiting on</span>
+          </div>
+          {integrationReadinessRows.map((row) => (
+            <div className="readiness-row" key={row.area}>
+              <strong>{row.area}</strong>
+              <span>{row.codeState}</span>
+              <small>{row.waitingOn}</small>
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
 }
 
 function AdminUsersView({
@@ -5027,6 +5627,32 @@ function staffOrderBuckets(orders) {
   ];
 }
 
+function requestNextAction(request) {
+  if (request.status === "needs_info") {
+    const missing = request.checkResult?.missing || [];
+    return missing.length
+      ? `Ask customer for ${missing.join(", ")}`
+      : "Ask customer for the missing request details";
+  }
+  if (request.status === "in_review" && request.price) return "Send final confirmation note";
+  if (request.status === "in_review") return "Review files, prepare draft, and set harness price";
+  if (request.status === "ready_to_confirm") return "Wait for customer confirmation";
+  if (request.status === "confirmed") return "Watch checkout and payment";
+  if (request.status === "paid") return "Continue in order console";
+  return "Review latest customer activity";
+}
+
+function orderNextAction(order) {
+  if (order.paymentStatus === "bank_transfer_pending") return "Confirm transfer receipt or message customer";
+  if (order.paymentStatus !== "paid") return "Wait for checkout or help with payment questions";
+  if (order.status === "scheduled") return "Start production when materials are ready";
+  if (order.status === "in_production") return "Update ready-to-ship when finished";
+  if (order.status === "ready_to_ship") return "Add carrier tracking";
+  if (order.status === "shipped") return "Monitor tracking until delivery";
+  if (order.status === "delivered") return "Watch for after-sales messages";
+  return "Review order status";
+}
+
 function StaffQueue({ requests, openRequest, currentUser, signOut }) {
   const buckets = staffRequestBuckets(requests);
 
@@ -5065,6 +5691,7 @@ function StaffQueue({ requests, openRequest, currentUser, signOut }) {
                       {request.checkResult?.missing?.length ? (
                         <small>Missing: {request.checkResult.missing.join(", ")}</small>
                       ) : null}
+                      <small className="next-action">Next: {requestNextAction(request)}</small>
                     </div>
                     <StatusBadge status={request.status} />
                     <small>{request.updated}</small>
@@ -5120,6 +5747,7 @@ function StaffOrders({ orders, openOrder, signOut }) {
                         <strong>{order.id}</strong>
                         <span>{order.title}</span>
                         <small>{paymentStatusCopy[order.paymentStatus] || orderStatusCopy[order.status]}</small>
+                        <small className="next-action">Next: {orderNextAction(order)}</small>
                       </div>
                       <StatusBadge status={order.status} />
                       <small>{order.updated}</small>

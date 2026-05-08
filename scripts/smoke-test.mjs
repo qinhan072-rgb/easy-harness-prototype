@@ -4,8 +4,32 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const appPath = resolve(root, "src", "App.jsx");
 const distIndex = resolve(root, "dist", "index.html");
+const schemaPath = resolve(root, "supabase", "migrations", "202605080001_stage_2a_schema.sql");
+const rlsPath = resolve(root, "supabase", "migrations", "202605080002_stage_2a_rls.sql");
+const hardeningPath = resolve(root, "supabase", "migrations", "202605080003_stage_2a_security_hardening.sql");
+const envExamplePath = resolve(root, ".env.example");
+const stage2DocPath = resolve(root, "docs", "STAGE_2A_BACKEND_READINESS.md");
+const paymentFunctionPath = resolve(root, "supabase", "functions", "create-payment-session", "index.ts");
+const shippingFunctionPath = resolve(root, "supabase", "functions", "quote-shipping-rates", "index.ts");
+const shipmentFunctionPath = resolve(root, "supabase", "functions", "create-shipment", "index.ts");
+const storageFunctionPath = resolve(root, "supabase", "functions", "create-storage-upload", "index.ts");
+const checkingFunctionPath = resolve(root, "supabase", "functions", "run-checking", "index.ts");
+
+function readIfExists(path) {
+  return existsSync(path) ? readFileSync(path, "utf8") : "";
+}
 
 const app = readFileSync(appPath, "utf8");
+const schemaSql = readIfExists(schemaPath);
+const rlsSql = readIfExists(rlsPath);
+const hardeningSql = readIfExists(hardeningPath);
+const envExample = readIfExists(envExamplePath);
+const stage2Doc = readIfExists(stage2DocPath);
+const paymentFunction = readIfExists(paymentFunctionPath);
+const shippingFunction = readIfExists(shippingFunctionPath);
+const shipmentFunction = readIfExists(shipmentFunctionPath);
+const storageFunction = readIfExists(storageFunctionPath);
+const checkingFunction = readIfExists(checkingFunctionPath);
 
 const checks = [
   {
@@ -20,6 +44,7 @@ const checks = [
     name: "auth session ledger is present",
     pass: app.includes("easy-harness.authSession") &&
       app.includes("signInWithEmailAdapter") &&
+      app.includes("createCustomerAccountAdapter") &&
       app.includes("clearAuthSessionAdapter")
   },
   {
@@ -81,6 +106,7 @@ const checks = [
   {
     name: "adapter replacement functions are explicit",
     pass: app.includes("signInWithEmailAdapter") &&
+      app.includes("createCustomerAccountAdapter") &&
       app.includes("createStorageUploadAdapter") &&
       app.includes("runCheckingAdapter") &&
       app.includes("createPaymentSessionAdapter") &&
@@ -155,6 +181,63 @@ const checks = [
     pass: app.includes("Please upload at least one design file before submitting.")
   },
   {
+    name: "visitor can enter customer workspace before login",
+    pass: !app.includes("return <LoginScreen") &&
+      app.includes("Log in") &&
+      app.includes("Create account") &&
+      app.includes("openAuthModal")
+  },
+  {
+    name: "request submit gates authentication while preserving draft",
+    pass: app.includes("Sign in or create an account to submit this request.") &&
+      app.includes("submit_request") &&
+      app.includes("completeAuthFlow")
+  },
+  {
+    name: "public registration creates customer accounts only",
+    pass: app.includes("Create account") &&
+      app.includes("customer_account_created") &&
+      app.includes('role: "customer"')
+  },
+  {
+    name: "account menu owns sign out",
+    pass: app.includes("account-menu") &&
+      app.includes("My requests") &&
+      app.includes("My orders") &&
+      !app.includes("signin-button subtle\" onClick={signOut}>Sign out")
+  },
+  {
+    name: "connected account sign-in paths are reserved",
+    pass: app.includes("Google") &&
+      app.includes("Microsoft") &&
+      app.includes("Apple")
+  },
+  {
+    name: "visitor sidebar hides private history lanes",
+    pass: app.includes("showPrivateNav") &&
+      app.includes("Recent requests") &&
+      app.includes("Log in or create an account to save requests and orders.")
+  },
+  {
+    name: "customer request thread prompts missing intake details",
+    pass: app.includes("Details Easy Harness still needs") &&
+      app.includes("formatMissingInfoItem") &&
+      app.includes("Reply in the thread with what you know")
+  },
+  {
+    name: "checkout is personal-user first",
+    pass: app.includes("Add business import details") &&
+      app.includes("Only needed if the carrier or customs asks for a company or tax number.") &&
+      !app.includes('placeholder="Optional for business import"')
+  },
+  {
+    name: "checkout includes normal trade confirmation rules",
+    pass: app.includes("Before you pay") &&
+      app.includes("Final confirmation") &&
+      app.includes("Address changes") &&
+      app.includes("Cancellation")
+  },
+  {
     name: "large files are rejected",
     pass: app.includes("is larger than 25 MB")
   },
@@ -172,7 +255,69 @@ const checks = [
     name: "staff queues are grouped by real work lanes",
     pass: app.includes("Needs customer details") &&
       app.includes("Ready for quote work") &&
-      app.includes("Checkout and payment")
+      app.includes("Checkout and payment") &&
+      app.includes("requestNextAction") &&
+      app.includes("orderNextAction")
+  },
+  {
+    name: "admin opens on a business dashboard",
+    pass: app.includes('useState("dashboard")') &&
+      app.includes("Business dashboard") &&
+      app.includes("Needs attention")
+  },
+  {
+    name: "admin shows stage 2A backend readiness",
+    pass: app.includes("Backend readiness") &&
+      app.includes("Supabase Auth") &&
+      app.includes("DHL Express API first") &&
+      app.includes("integrationReadinessRows")
+  },
+  {
+    name: "stage 2A supabase schema migration exists",
+    pass: schemaSql.includes("create table if not exists public.profiles") &&
+      schemaSql.includes("create table if not exists public.requests") &&
+      schemaSql.includes("create table if not exists public.orders") &&
+      schemaSql.includes("create table if not exists public.shipping_rate_quotes") &&
+      schemaSql.includes("create table if not exists public.service_countries")
+  },
+  {
+    name: "stage 2A rls migration protects role boundaries",
+    pass: rlsSql.includes("enable row level security") &&
+      rlsSql.includes("public.is_staff_or_admin") &&
+      rlsSql.includes("Only admins can change profile role") &&
+      rlsSql.includes("requests_select_owner_or_staff") &&
+      rlsSql.includes("audit_logs_admin_select")
+  },
+  {
+    name: "stage 2A security hardening migration exists",
+    pass: hardeningSql.includes("alter extension citext set schema extensions") &&
+      hardeningSql.includes("set search_path = public") &&
+      hardeningSql.includes("revoke execute on function public.is_admin()")
+  },
+  {
+    name: "stage 2A edge function contracts exist",
+    pass: paymentFunction.includes("STRIPE_SECRET_KEY") &&
+      paymentFunction.includes("PAYPAL_CLIENT_ID") &&
+      shippingFunction.includes("DHL_ACCOUNT_NUMBER") &&
+      shipmentFunction.includes("customs_data_required") &&
+      storageFunction.includes("signed_upload_call_not_enabled") &&
+      checkingFunction.includes("OPENAI_API_KEY")
+  },
+  {
+    name: "stage 2A env template names offline credentials",
+    pass: envExample.includes("VITE_SUPABASE_URL") &&
+      envExample.includes("SUPABASE_SERVICE_ROLE_KEY") &&
+      envExample.includes("PAYPAL_CLIENT_SECRET") &&
+      envExample.includes("DHL_SHIPPER_ACCOUNT") &&
+      envExample.includes("WHATSAPP_ACCESS_TOKEN")
+  },
+  {
+    name: "stage 2A readiness doc separates code from offline resources",
+    pass: stage2Doc.includes("Offline Resources Still Required") &&
+      stage2Doc.includes("PayPal China merchant account") &&
+      stage2Doc.includes("DHL Express China account") &&
+      stage2Doc.includes("HS code") &&
+      stage2Doc.includes("What Should Wait")
   },
   {
     name: "notifications are channel-ready",
