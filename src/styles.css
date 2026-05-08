@@ -522,6 +522,12 @@ button:disabled {
   font-size: 13px;
 }
 
+.auth-provider-row button:not(:disabled) {
+  background: #fff;
+  color: var(--text);
+  font-weight: 760;
+}
+
 .auth-provider-row button:disabled {
   cursor: not-allowed;
 }
@@ -530,27 +536,44 @@ button:disabled {
   z-index: 60;
 }
 
-.auth-modal {
+.payment-modal.auth-modal {
   position: relative;
   display: grid;
-  gap: 14px;
-  width: min(440px, calc(100vw - 28px));
-  max-height: min(760px, 92vh);
+  gap: 16px;
+  width: min(620px, calc(100vw - 36px));
+  max-height: min(720px, calc(100vh - 48px));
+  padding: 30px;
   overflow-x: hidden;
   overflow-y: auto;
   text-align: left;
 }
 
 .auth-modal .brand-row {
-  margin-bottom: 4px;
+  margin-bottom: 0;
 }
 
 .auth-modal h2 {
   margin: 2px 0 0;
+  max-width: 520px;
+  font-size: 28px;
+  line-height: 1.12;
+  letter-spacing: 0;
 }
 
-.auth-modal p {
+.payment-modal.auth-modal p {
   margin: 0;
+}
+
+.payment-modal.auth-modal > p {
+  max-width: 520px;
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-modal .field span {
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 760;
 }
 
 .modal-close {
@@ -593,7 +616,7 @@ button:disabled {
 
 .auth-form-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 0.58fr);
   gap: 12px;
 }
 
@@ -606,6 +629,54 @@ button:disabled {
   color: var(--muted);
   font-size: 13px;
   line-height: 1.45;
+}
+
+.auth-check-email {
+  display: grid;
+  gap: 14px;
+  padding: 14px 0 2px;
+}
+
+.auth-check-icon {
+  display: inline-flex;
+  width: 54px;
+  height: 54px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: rgba(18, 153, 139, 0.12);
+  color: var(--teal);
+}
+
+.auth-check-email h3 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.18;
+}
+
+.auth-check-email p {
+  color: var(--muted);
+  line-height: 1.55;
+}
+
+.auth-check-email strong {
+  color: var(--text);
+}
+
+.auth-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 0.9fr) minmax(0, 1fr);
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.auth-secondary-button {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text);
+  font-weight: 800;
 }
 
 .text-button {
@@ -3684,5 +3755,21 @@ button:disabled {
 @media (max-width: 560px) {
   .top-account .signin-button.subtle {
     display: none;
+  }
+
+  .payment-modal.auth-modal {
+    width: min(100vw - 24px, 620px);
+    max-height: calc(100vh - 24px);
+    padding: 24px 18px;
+  }
+
+  .auth-modal h2 {
+    font-size: 24px;
+  }
+
+  .auth-provider-row,
+  .auth-form-grid,
+  .auth-action-row {
+    grid-template-columns: 1fr;
   }
 }

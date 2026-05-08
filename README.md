@@ -72,6 +72,8 @@ copy-ready prompt for a fresh AI/Codex conversation.
 `docs/STAGE_2A_BACKEND_READINESS.md` explains what is ready for Supabase and
 what still waits on external accounts, credentials, legal text, and customs
 information.
+`docs/AUTH_EMAIL_AND_GOOGLE_SETUP.md` contains the customer-facing Supabase
+email templates and the Google OAuth setup checklist.
 
 ## Demo Flow
 
@@ -82,8 +84,10 @@ information.
    email login and customer registration send a real sign-in email. Without
    those values, use `customer@example.com` to log in locally, or create a new
    customer account with an email address and optional nickname. Public
-   registration only creates customer accounts. Google, Microsoft, and Apple
-   sign-in positions are reserved for later provider connection.
+   registration only creates customer accounts. Google sign-in is wired through
+   Supabase OAuth and works after the Google provider credentials are configured
+   in Supabase. Microsoft and Apple positions remain reserved for later provider
+   connection.
 4. Watch the checklist transition and enter the request thread. If the checking
    result needs more information, the customer thread now shows a clear prompt
    for the missing details before staff quote work continues. The local

@@ -11,6 +11,7 @@ const rlsPath = resolve(root, "supabase", "migrations", "202605080002_stage_2a_r
 const hardeningPath = resolve(root, "supabase", "migrations", "202605080003_stage_2a_security_hardening.sql");
 const envExamplePath = resolve(root, ".env.example");
 const stage2DocPath = resolve(root, "docs", "STAGE_2A_BACKEND_READINESS.md");
+const authSetupDocPath = resolve(root, "docs", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
 const paymentFunctionPath = resolve(root, "supabase", "functions", "create-payment-session", "index.ts");
 const shippingFunctionPath = resolve(root, "supabase", "functions", "quote-shipping-rates", "index.ts");
 const shipmentFunctionPath = resolve(root, "supabase", "functions", "create-shipment", "index.ts");
@@ -29,6 +30,7 @@ const rlsSql = readIfExists(rlsPath);
 const hardeningSql = readIfExists(hardeningPath);
 const envExample = readIfExists(envExamplePath);
 const stage2Doc = readIfExists(stage2DocPath);
+const authSetupDoc = readIfExists(authSetupDocPath);
 const paymentFunction = readIfExists(paymentFunctionPath);
 const shippingFunction = readIfExists(shippingFunctionPath);
 const shipmentFunction = readIfExists(shipmentFunctionPath);
@@ -224,9 +226,18 @@ const checks = [
   },
   {
     name: "connected account sign-in paths are reserved",
-    pass: app.includes("Google") &&
-      app.includes("Microsoft") &&
-      app.includes("Apple")
+    pass: app.includes("signInWithGoogle") &&
+      app.includes("supabase.auth.signInWithOAuth") &&
+      app.includes('provider: "google"') &&
+      app.includes("Microsoft soon") &&
+      app.includes("Apple soon")
+  },
+  {
+    name: "auth email confirmation state is explicit",
+    pass: app.includes("Check your email") &&
+      app.includes("We sent a secure link") &&
+      app.includes("Use another email") &&
+      app.includes("MailCheck")
   },
   {
     name: "visitor sidebar hides private history lanes",
@@ -335,6 +346,14 @@ const checks = [
       stage2Doc.includes("DHL Express China account") &&
       stage2Doc.includes("HS code") &&
       stage2Doc.includes("What Should Wait")
+  },
+  {
+    name: "auth setup doc includes email templates and google checklist",
+    pass: authSetupDoc.includes("Confirm your Easy Harness account") &&
+      authSetupDoc.includes("Your Easy Harness sign-in link") &&
+      authSetupDoc.includes("{{ .ConfirmationURL }}") &&
+      authSetupDoc.includes("Google OAuth") &&
+      authSetupDoc.includes("/auth/v1/callback")
   },
   {
     name: "notifications are channel-ready",

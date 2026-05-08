@@ -17,6 +17,7 @@ import {
   Folder,
   Image as ImageIcon,
   Lock,
+  MailCheck,
   MapPin,
   MessageCircle,
   PackageCheck,
@@ -2313,6 +2314,40 @@ function App() {
     return authResult;
   }
 
+  async function signInWithGoogle() {
+    if (!supabase) {
+      return {
+        ok: false,
+        adapter: supabaseConfigured ? "supabase-auth" : platformAdapters.auth.id,
+        error: "Google sign-in is not available yet. Please use email for now."
+      };
+    }
+
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: getAuthRedirectUrl()
+      }
+    });
+
+    if (error) {
+      recordServiceEvent("supabase-auth", "google_sign_in_failed", "user", "google", error.message);
+      return {
+        ok: false,
+        adapter: "supabase-auth",
+        error: "Google sign-in is not available yet. Please use email for now."
+      };
+    }
+
+    recordServiceEvent("supabase-auth", "google_sign_in_started", "user", "google", "Google sign-in started.");
+    return {
+      ok: true,
+      adapter: "supabase-auth",
+      pending: true,
+      message: "Continue with Google to finish signing in."
+    };
+  }
+
   async function registerCustomer(form) {
     const normalized = form.email.trim().toLowerCase();
     if (!isEmailLike(normalized)) {
@@ -3023,6 +3058,7 @@ function App() {
           reason={authModal.reason}
           close={closeAuthModal}
           signInWithEmail={signInByEmail}
+          signInWithGoogle={signInWithGoogle}
           registerCustomer={registerCustomer}
           authUsesSupabase={supabaseConfigured}
           authProviderStatus={authProviderStatus}
@@ -3038,6 +3074,7 @@ function AuthModal({
   reason,
   close,
   signInWithEmail,
+  signInWithGoogle,
   registerCustomer,
   authUsesSupabase,
   authProviderStatus,
@@ -3049,12 +3086,12 @@ function AuthModal({
     email: "",
   });
   const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
+  const [notice, setNotice] = useState(null);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setError("");
-    setNotice("");
+    setNotice(null);
   }, [mode]);
 
   const updateRegisterField = (field, value) => {
@@ -3063,6 +3100,7 @@ function AuthModal({
 
   const submitLogin = async () => {
     if (loading) return;
+    setError("");
     setLoading(true);
     const authResult = await signInWithEmail(loginEmail);
     setLoading(false);
@@ -3071,14 +3109,38 @@ function AuthModal({
       return;
     }
     if (authResult.pending) {
-      setNotice(authResult.message);
+      setNotice({
+        email: loginEmail.trim().toLowerCase(),
+        message: authResult.message,
+        type: "login"
+      });
       return;
     }
     setError("");
   };
 
+  const submitGoogle = async () => {
+    if (loading) return;
+    setError("");
+    setLoading(true);
+    const authResult = await signInWithGoogle();
+    setLoading(false);
+    if (!authResult.ok) {
+      setError(authResult.error);
+      return;
+    }
+    if (authResult.pending) {
+      setNotice({
+        email: "Google",
+        message: authResult.message,
+        type: "google"
+      });
+    }
+  };
+
   const submitRegister = async () => {
     if (loading) return;
+    setError("");
     setLoading(true);
     const authResult = await registerCustomer(registerForm);
     setLoading(false);
@@ -3087,13 +3149,18 @@ function AuthModal({
       return;
     }
     if (authResult.pending) {
-      setNotice(authResult.message);
+      setNotice({
+        email: registerForm.email.trim().toLowerCase(),
+        message: authResult.message,
+        type: "register"
+      });
       return;
     }
     setError("");
   };
 
   const isRegister = mode === "register";
+  const authUnavailable = authProviderStatus === "unavailable";
 
   return (
     <div className="modal-backdrop auth-backdrop">
@@ -3113,27 +3180,73 @@ function AuthModal({
             : "Access saved requests, orders, and account details.")}
         </p>
 
-        <div className="auth-provider-row" aria-label="Additional sign-in options">
-          <button disabled>Google soon</button>
-          <button disabled>Microsoft soon</button>
-          <button disabled>Apple soon</button>
-        </div>
-        {authUsesSupabase && (
+        {!notice && (
+          <div className="auth-provider-row" aria-label="Additional sign-in options">
+            <button
+              type="button"
+              onClick={submitGoogle}
+              disabled={loading || !authUsesSupabase || authUnavailable}
+            >
+              Google
+            </button>
+            <button type="button" disabled>Microsoft soon</button>
+            <button type="button" disabled>Apple soon</button>
+          </div>
+        )}
+        {!notice && authUsesSupabase && (
           <p className="auth-disclaimer">
             {authProviderStatus === "connecting"
               ? "Checking your saved session..."
               : authProviderStatus === "unavailable"
                 ? "Account access is temporarily unavailable. Please try again later."
-              : "Email sign-in is connected. Staff and admin accounts must be invited before use."}
+              : "Use the email where you want to receive request and order updates."}
           </p>
         )}
-        {!authUsesSupabase && authProviderStatus === "unavailable" && (
+        {!notice && !authUsesSupabase && authProviderStatus === "unavailable" && (
           <p className="auth-disclaimer">
             Account access is temporarily unavailable. Please try again later.
           </p>
         )}
 
-        {!isRegister ? (
+        {notice ? (
+          <div className="auth-check-email">
+            <div className="auth-check-icon">
+              <MailCheck size={30} />
+            </div>
+            <h3>{notice.type === "google" ? "Continue with Google" : "Check your email"}</h3>
+            <p>
+              {notice.type === "google" ? (
+                notice.message
+              ) : (
+                <>
+                  We sent a secure link to <strong>{notice.email}</strong>. Open the link to finish
+                  {notice.type === "register" ? " creating your account." : " logging in."}
+                </>
+              )}
+            </p>
+            {notice.type !== "google" && (
+              <p className="auth-disclaimer">
+                The email can take a minute to arrive. If it does not show up, check spam or use a
+                different email address.
+              </p>
+            )}
+            <div className="auth-action-row">
+              <button
+                type="button"
+                className="auth-secondary-button"
+                onClick={() => {
+                  setNotice(null);
+                  setError("");
+                }}
+              >
+                Use another email
+              </button>
+              <button type="button" className="publish-button" onClick={close}>
+                Done
+              </button>
+            </div>
+          </div>
+        ) : !isRegister ? (
           <div className="login-form">
             <label className="field">
               <span>Email</span>
@@ -3147,7 +3260,6 @@ function AuthModal({
               />
             </label>
             {error && <div className="form-error">{error}</div>}
-            {notice && <div className="form-success">{notice}</div>}
             <button className="publish-button" onClick={submitLogin} disabled={loading}>
               {loading ? "Sending..." : authUsesSupabase ? "Send sign-in link" : "Continue with email"}
               <ArrowRight size={18} />
@@ -3158,33 +3270,34 @@ function AuthModal({
           </div>
         ) : (
           <div className="login-form">
-            <label className="field">
-              <span>Email</span>
-              <input
-                value={registerForm.email}
-                onChange={(event) => updateRegisterField("email", event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") submitRegister();
-                }}
-                placeholder="email@example.com"
-              />
-            </label>
-            <label className="field">
-              <span>Nickname</span>
-              <input
-                value={registerForm.nickname}
-                onChange={(event) => updateRegisterField("nickname", event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Enter") submitRegister();
-                }}
-                placeholder="Optional"
-              />
-            </label>
+            <div className="auth-form-grid">
+              <label className="field">
+                <span>Email</span>
+                <input
+                  value={registerForm.email}
+                  onChange={(event) => updateRegisterField("email", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") submitRegister();
+                  }}
+                  placeholder="email@example.com"
+                />
+              </label>
+              <label className="field">
+                <span>Nickname</span>
+                <input
+                  value={registerForm.nickname}
+                  onChange={(event) => updateRegisterField("nickname", event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") submitRegister();
+                  }}
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
             <p className="auth-disclaimer">
               By creating an account, you can save requests and return to orders.
             </p>
             {error && <div className="form-error">{error}</div>}
-            {notice && <div className="form-success">{notice}</div>}
             <button className="publish-button" onClick={submitRegister} disabled={loading}>
               {loading ? "Sending..." : authUsesSupabase ? "Send account link" : "Create account"}
               <ArrowRight size={18} />
