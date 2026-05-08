@@ -54,10 +54,12 @@ execution policy.
 
 Visitors now land directly in the customer workspace. The top-right action is
 **Log in** / **Create account** until a session exists, and private request or
-order history is hidden until login. Sign-in and customer registration create a
-local `easy-harness.authSession` record with the same role/user boundary a
-managed identity service should later own. Public registration only creates
-customer accounts; staff and admin accounts must be invited or created by admin.
+order history is hidden until login. When Supabase environment variables are
+configured, sign-in and customer registration use Supabase Auth email links and
+load role/status from `public.profiles`. Without those values, the local
+`easy-harness.authSession` adapter remains available for offline development.
+Public registration only creates customer accounts; staff and admin accounts
+must be invited or created by admin.
 
 | Role | Email | Purpose |
 | --- | --- | --- |
@@ -171,6 +173,7 @@ Important files:
 
 ```text
 src/App.jsx
+src/supabaseClient.js
 src/styles.css
 scripts/smoke-test.mjs
 supabase/migrations/202605080001_stage_2a_schema.sql
@@ -234,13 +237,15 @@ offline resources: PayPal China merchant account, Stripe eligibility or
 alternative, DHL Express China account/API credentials, domain/DNS/email,
 customs template including HS code and English product name, and legal terms.
 The staging Supabase project has the Stage 2A schema, RLS, and security
-hardening migrations applied.
+hardening migrations applied. The Vercel front end can now initialize Supabase
+Auth with `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and
+`VITE_APP_BASE_URL`.
 
 Current adapter replacement points:
 
 | Adapter | Replace local function | Future integration |
 | --- | --- | --- |
-| Auth | `signInWithEmailAdapter(email, users)`, `createCustomerAccountAdapter(form)`, and `clearAuthSessionAdapter(session)` | Supabase Auth |
+| Auth | `signInWithEmailAdapter(email, users)`, `createCustomerAccountAdapter(form)`, and `clearAuthSessionAdapter(session)` remain as offline fallback; hosted mode uses `supabase.auth.signInWithOtp`, `onAuthStateChange`, profile loading, and `supabase.auth.signOut` | Supabase Auth |
 | Database | `databaseSchemaBlueprint` plus local table ledgers | Supabase PostgreSQL, row-level access rules, migrations |
 | Checking | `runCheckingAdapter(request)` | AI/service-side intake check |
 | Payment | `createPaymentSessionAdapter(order, method)` and `confirmPaymentCallbackAdapter(order, method)` | Stripe Checkout, PayPal, bank reconciliation, webhooks |
@@ -252,8 +257,10 @@ Current adapter replacement points:
 
 These are not done yet:
 
-- Real Auth: Supabase Auth. The local session ledger is only a replacement
-  contract until the Supabase project and provider credentials exist.
+- Real Auth: partially connected. Supabase Auth email-link login and customer
+  registration are wired in the front end once Vercel/Supabase environment
+  variables are set. Staff/admin still require invited Auth users with
+  `profiles.role` set by admin.
 - Real database: profiles, requests, request_messages, attachments,
   storage_objects, quotes, orders, payments, shipments, order_messages,
   notifications, notification_deliveries, integration_events, audit_logs.

@@ -19,6 +19,7 @@ PROJECT_HANDOFF.md
 README.md
 package.json
 src/App.jsx
+src/supabaseClient.js
 src/styles.css
 scripts/smoke-test.mjs
 ```
@@ -55,6 +56,10 @@ Important context:
 - Stage 2A backend direction is selected: Supabase Auth, Supabase PostgreSQL,
   Supabase Storage private buckets, Supabase Edge Functions, Stripe Checkout,
   PayPal, bank transfer, DHL Express API first, and DAP checkout.
+- Supabase Auth is partially wired on the front end: when Vercel/Supabase
+  public environment variables are present, email login and customer
+  registration use Supabase Auth and load role/status from `public.profiles`.
+  The local auth adapter remains an offline fallback.
 - Stage 2A backend-readiness files exist in `supabase/migrations`,
   `supabase/functions`, `.env.example`, and
   `docs/STAGE_2A_BACKEND_READINESS.md`. They stop at provider boundaries until

@@ -22,6 +22,9 @@ contracts, and environment variables before PayPal, DHL, domain, email, and
 other offline resources are available.
 The staging Supabase database has been migrated with `stage_2a_schema`,
 `stage_2a_rls`, and `stage_2a_security_hardening`.
+The front end now initializes Supabase Auth when `VITE_SUPABASE_URL` and
+`VITE_SUPABASE_PUBLISHABLE_KEY` are configured. Without those values, the app
+keeps the local auth adapter available for offline development.
 
 ## Run
 
@@ -34,6 +37,14 @@ Open:
 
 ```text
 http://127.0.0.1:5173
+```
+
+Optional hosted-auth environment:
+
+```bash
+VITE_SUPABASE_URL=https://your-project.supabase.co
+VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+VITE_APP_BASE_URL=http://127.0.0.1:5173
 ```
 
 Smoke check:
@@ -65,8 +76,10 @@ information.
 1. Open the app. Visitors land directly in the customer workspace. Private
    request and order history appears only after login.
 2. Upload files or click **Use sample request**, accept the upload terms, then submit.
-3. The account modal opens. Use `customer@example.com` to log in, or create a
-   new customer account with an email address and optional nickname. Public
+3. The account modal opens. When Supabase Auth environment variables are set,
+   email login and customer registration send a real sign-in email. Without
+   those values, use `customer@example.com` to log in locally, or create a new
+   customer account with an email address and optional nickname. Public
    registration only creates customer accounts. Google, Microsoft, and Apple
    sign-in positions are reserved for later provider connection.
 4. Watch the checklist transition and enter the request thread. If the checking

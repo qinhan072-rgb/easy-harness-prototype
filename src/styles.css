@@ -803,6 +803,13 @@ button:disabled {
   font-weight: 760;
 }
 
+.form-success {
+  margin-top: 8px;
+  color: var(--teal);
+  font-size: 13px;
+  font-weight: 760;
+}
+
 .file-strip {
   display: flex;
   flex-wrap: wrap;

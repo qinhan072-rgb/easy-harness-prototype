@@ -3,6 +3,8 @@ import { resolve } from "node:path";
 
 const root = resolve(import.meta.dirname, "..");
 const appPath = resolve(root, "src", "App.jsx");
+const supabaseClientPath = resolve(root, "src", "supabaseClient.js");
+const packagePath = resolve(root, "package.json");
 const distIndex = resolve(root, "dist", "index.html");
 const schemaPath = resolve(root, "supabase", "migrations", "202605080001_stage_2a_schema.sql");
 const rlsPath = resolve(root, "supabase", "migrations", "202605080002_stage_2a_rls.sql");
@@ -20,6 +22,8 @@ function readIfExists(path) {
 }
 
 const app = readFileSync(appPath, "utf8");
+const supabaseClient = readIfExists(supabaseClientPath);
+const packageJson = readIfExists(packagePath);
 const schemaSql = readIfExists(schemaPath);
 const rlsSql = readIfExists(rlsPath);
 const hardeningSql = readIfExists(hardeningPath);
@@ -46,6 +50,16 @@ const checks = [
       app.includes("signInWithEmailAdapter") &&
       app.includes("createCustomerAccountAdapter") &&
       app.includes("clearAuthSessionAdapter")
+  },
+  {
+    name: "supabase auth client is wired for hosted login",
+    pass: packageJson.includes("@supabase/supabase-js") &&
+      supabaseClient.includes("createClient") &&
+      supabaseClient.includes("VITE_SUPABASE_URL") &&
+      supabaseClient.includes("VITE_SUPABASE_PUBLISHABLE_KEY") &&
+      app.includes("supabase.auth.signInWithOtp") &&
+      app.includes("syncSupabaseSession") &&
+      app.includes("supabase.auth.signOut")
   },
   {
     name: "storage object ledger is present",
@@ -306,6 +320,7 @@ const checks = [
   {
     name: "stage 2A env template names offline credentials",
     pass: envExample.includes("VITE_SUPABASE_URL") &&
+      envExample.includes("VITE_SUPABASE_PUBLISHABLE_KEY") &&
       envExample.includes("SUPABASE_SERVICE_ROLE_KEY") &&
       envExample.includes("PAYPAL_CLIENT_SECRET") &&
       envExample.includes("DHL_SHIPPER_ACCOUNT") &&

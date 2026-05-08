@@ -39,6 +39,10 @@ and legal/business resources are available.
     `provider_call_not_enabled` until real keys and account approvals exist.
 - `.env.example`
   - Frontend, Supabase, payment, DHL, notification, and AI secret names.
+- `src/supabaseClient.js`
+  - Browser Supabase client initialization for hosted Auth when public
+    environment variables are configured.
+  - Keeps local development usable when hosted variables are absent.
 
 ## Offline Resources Still Required
 
@@ -70,9 +74,11 @@ team before production integration can be completed.
 ## What Can Be Built Next Without Those Resources
 
 - Frontend repository/data adapter split: localStorage adapter plus Supabase
-  adapter behind the same method names.
-- Supabase client initialization and auth callback plumbing using placeholder
-  environment variables.
+  database adapter behind the same method names.
+- Supabase request/order/message/attachment reads and writes behind the
+  existing local adapter contracts.
+- Staff/admin invitation workflow and profile role management UI backed by
+  Supabase Auth admin operations.
 - Admin integration status view driven by configured service state.
 - Server-side validation schemas for requests, checkout address, payment
   sessions, shipping rates, and shipment creation.

@@ -31,6 +31,7 @@ import {
   Upload,
   UserCircle
 } from "lucide-react";
+import { getAuthRedirectUrl, supabase, supabaseConfigured } from "./supabaseClient.js";
 
 const processingSteps = [
   "Upload received",
@@ -928,6 +929,58 @@ function createLocalAuthSession(user) {
   };
 }
 
+function createSupabaseAuthSession(session, user) {
+  return {
+    id: session?.access_token ? `sb_${session.access_token.slice(0, 12)}` : authSessionId(user.id),
+    userId: user.id,
+    email: user.email,
+    role: user.role,
+    status: "active",
+    issuedAt: session?.user?.last_sign_in_at || "Now",
+    expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : "Managed session",
+    revokedAt: "",
+    adapter: "supabase-auth"
+  };
+}
+
+function profileUserFromSupabase(profile, authUser = {}) {
+  const email = profile?.email || authUser.email || "";
+  const nickname = profile?.display_name || authUser.user_metadata?.nickname || email.split("@")[0] || "Customer";
+  return {
+    id: profile?.id || authUser.id,
+    name: nickname,
+    email,
+    role: profile?.role || "customer",
+    status: profile?.status || "active",
+    verified: Boolean(profile?.verified || authUser.email_confirmed_at),
+    company: "",
+    country: "",
+    phone: "",
+    termsAccepted: false,
+    termsAcceptedAt: "",
+    notificationPreferences: {
+      email: Boolean(profile?.notification_preferences?.email ?? true),
+      whatsapp: Boolean(profile?.notification_preferences?.whatsapp ?? false),
+      inApp: true
+    },
+    defaultAddress: {
+      name: nickname,
+      company: "",
+      country: "",
+      line1: "",
+      line2: "",
+      city: "",
+      region: "",
+      postalCode: "",
+      phone: "",
+      email,
+      taxId: ""
+    },
+    authMethods: ["supabase"],
+    lastActive: "Just now"
+  };
+}
+
 function signInWithEmailAdapter(email, users) {
   const normalized = email.trim().toLowerCase();
   if (!isEmailLike(normalized)) {
@@ -1689,6 +1742,9 @@ function App() {
     reason: "",
     after: ""
   });
+  const [authProviderStatus, setAuthProviderStatus] = useState(
+    supabaseConfigured ? "connecting" : "local"
+  );
 
   const uploadRef = useRef(null);
   const userComposerUploadRef = useRef(null);
@@ -1782,6 +1838,50 @@ function App() {
     const selected = users.find((user) => user.id === currentUserId && user.status !== "suspended");
     if (selected) setAuthSession(createLocalAuthSession(selected));
   }, [authSession, currentUserId, setAuthSession, users]);
+
+  useEffect(() => {
+    if (!supabase) return undefined;
+
+    let disposed = false;
+
+    const restoreSession = async () => {
+      setAuthProviderStatus("connecting");
+      const { data, error } = await supabase.auth.getSession();
+      if (disposed) return;
+      if (error) {
+        setAuthProviderStatus("error");
+        return;
+      }
+      if (data.session) {
+        await syncSupabaseSession(data.session, "session_restored");
+        return;
+      }
+      setCurrentUserId("");
+      setAuthSession(null);
+      setAuthProviderStatus("ready");
+    };
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
+      if (!session) {
+        if (event === "SIGNED_OUT") {
+          setCurrentUserId("");
+          setAuthSession(null);
+        }
+        setAuthProviderStatus("ready");
+        return;
+      }
+      window.setTimeout(() => {
+        syncSupabaseSession(session, event.toLowerCase());
+      }, 0);
+    });
+
+    restoreSession();
+
+    return () => {
+      disposed = true;
+      listener.subscription.unsubscribe();
+    };
+  }, []);
 
   useEffect(() => {
     const records = requests.flatMap((request) =>
@@ -2107,6 +2207,44 @@ function App() {
     }
   }
 
+  async function fetchSupabaseProfile(authUser) {
+    if (!supabase || !authUser?.id) return null;
+    const { data, error } = await supabase
+      .from("profiles")
+      .select("id,email,display_name,role,status,verified,notification_preferences,last_active_at")
+      .eq("id", authUser.id)
+      .maybeSingle();
+
+    if (error) {
+      recordServiceEvent("supabase-auth", "profile_load_failed", "user", authUser.id, error.message);
+      return null;
+    }
+    return data;
+  }
+
+  async function syncSupabaseSession(session, action = "session_created") {
+    if (!session?.user) return null;
+    const profile = await fetchSupabaseProfile(session.user);
+    const user = profileUserFromSupabase(profile, session.user);
+
+    if (!user.id || user.status === "suspended") {
+      await supabase?.auth.signOut();
+      return null;
+    }
+
+    setUsers((current) => {
+      const exists = current.some((item) => item.id === user.id);
+      return exists
+        ? current.map((item) => (item.id === user.id ? { ...item, ...user } : item))
+        : [user, ...current];
+    });
+
+    signIn(user.id, createSupabaseAuthSession(session, user), user);
+    recordServiceEvent("supabase-auth", action, "user", user.id, `${roleCopy[user.role]} session is active.`);
+    setAuthProviderStatus("ready");
+    return user;
+  }
+
   function signIn(userId, session = null, userOverride = null) {
     const selected = userOverride || users.find((user) => user.id === userId);
     if (!selected || selected.status === "suspended") return;
@@ -2122,7 +2260,43 @@ function App() {
     setStaffView("queue");
   }
 
-  function signInByEmail(email) {
+  async function signInByEmail(email) {
+    const normalized = email.trim().toLowerCase();
+    if (!isEmailLike(normalized)) {
+      return {
+        ok: false,
+        adapter: supabaseConfigured ? "supabase-auth" : platformAdapters.auth.id,
+        error: "Enter a valid email address."
+      };
+    }
+
+    if (supabase) {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: normalized,
+        options: {
+          shouldCreateUser: false,
+          emailRedirectTo: getAuthRedirectUrl()
+        }
+      });
+
+      if (error) {
+        recordServiceEvent("supabase-auth", "sign_in_link_failed", "user", normalized, error.message);
+        return {
+          ok: false,
+          adapter: "supabase-auth",
+          error: "We could not send a sign-in link to this email."
+        };
+      }
+
+      recordServiceEvent("supabase-auth", "sign_in_link_sent", "user", normalized, "Sign-in email sent.");
+      return {
+        ok: true,
+        adapter: "supabase-auth",
+        pending: true,
+        message: "Check your email to finish logging in."
+      };
+    }
+
     const authResult = signInWithEmailAdapter(email, users);
     if (!authResult.ok) return authResult;
     signIn(authResult.user.id, authResult.session);
@@ -2131,8 +2305,46 @@ function App() {
     return authResult;
   }
 
-  function registerCustomer(form) {
+  async function registerCustomer(form) {
     const normalized = form.email.trim().toLowerCase();
+    if (!isEmailLike(normalized)) {
+      return {
+        ok: false,
+        error: "Enter a valid email address."
+      };
+    }
+
+    if (supabase) {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: normalized,
+        options: {
+          shouldCreateUser: true,
+          emailRedirectTo: getAuthRedirectUrl(),
+          data: {
+            nickname: form.nickname?.trim() || normalized.split("@")[0],
+            role: "customer"
+          }
+        }
+      });
+
+      if (error) {
+        recordServiceEvent("supabase-auth", "customer_registration_link_failed", "user", normalized, error.message);
+        return {
+          ok: false,
+          adapter: "supabase-auth",
+          error: "We could not send the account email. Please try again."
+        };
+      }
+
+      recordServiceEvent("supabase-auth", "customer_registration_link_sent", "user", normalized, "Customer account email sent.");
+      return {
+        ok: true,
+        adapter: "supabase-auth",
+        pending: true,
+        message: "Check your email to finish creating your account."
+      };
+    }
+
     if (users.some((user) => user.email.toLowerCase() === normalized)) {
       return {
         ok: false,
@@ -2149,9 +2361,12 @@ function App() {
     return authResult;
   }
 
-  function signOut() {
+  async function signOut() {
     if (currentUser) {
       recordAudit("signed_out", "user", currentUser.id, "Session ended.");
+    }
+    if (supabase && authSession?.adapter === "supabase-auth") {
+      await supabase.auth.signOut();
     }
     if (authSession) {
       const cleared = clearAuthSessionAdapter(authSession);
@@ -2793,6 +3008,8 @@ function App() {
           close={closeAuthModal}
           signInWithEmail={signInByEmail}
           registerCustomer={registerCustomer}
+          authUsesSupabase={supabaseConfigured}
+          authProviderStatus={authProviderStatus}
           switchMode={(mode) => setAuthModal((current) => ({ ...current, mode }))}
         />
       )}
@@ -2806,6 +3023,8 @@ function AuthModal({
   close,
   signInWithEmail,
   registerCustomer,
+  authUsesSupabase,
+  authProviderStatus,
   switchMode
 }) {
   const [loginEmail, setLoginEmail] = useState("");
@@ -2814,28 +3033,45 @@ function AuthModal({
     email: "",
   });
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     setError("");
+    setNotice("");
   }, [mode]);
 
   const updateRegisterField = (field, value) => {
     setRegisterForm((current) => ({ ...current, [field]: value }));
   };
 
-  const submitLogin = () => {
-    const authResult = signInWithEmail(loginEmail);
+  const submitLogin = async () => {
+    if (loading) return;
+    setLoading(true);
+    const authResult = await signInWithEmail(loginEmail);
+    setLoading(false);
     if (!authResult.ok) {
       setError(authResult.error);
+      return;
+    }
+    if (authResult.pending) {
+      setNotice(authResult.message);
       return;
     }
     setError("");
   };
 
-  const submitRegister = () => {
-    const authResult = registerCustomer(registerForm);
+  const submitRegister = async () => {
+    if (loading) return;
+    setLoading(true);
+    const authResult = await registerCustomer(registerForm);
+    setLoading(false);
     if (!authResult.ok) {
       setError(authResult.error);
+      return;
+    }
+    if (authResult.pending) {
+      setNotice(authResult.message);
       return;
     }
     setError("");
@@ -2866,6 +3102,13 @@ function AuthModal({
           <button disabled>Microsoft soon</button>
           <button disabled>Apple soon</button>
         </div>
+        {authUsesSupabase && (
+          <p className="auth-disclaimer">
+            {authProviderStatus === "connecting"
+              ? "Checking your saved session..."
+              : "Email sign-in is connected. Staff and admin accounts must be invited before use."}
+          </p>
+        )}
 
         {!isRegister ? (
           <div className="login-form">
@@ -2881,8 +3124,9 @@ function AuthModal({
               />
             </label>
             {error && <div className="form-error">{error}</div>}
-            <button className="publish-button" onClick={submitLogin}>
-              Continue with email
+            {notice && <div className="form-success">{notice}</div>}
+            <button className="publish-button" onClick={submitLogin} disabled={loading}>
+              {loading ? "Sending..." : authUsesSupabase ? "Send sign-in link" : "Continue with email"}
               <ArrowRight size={18} />
             </button>
             <button className="text-button" onClick={() => switchMode("register")}>
@@ -2917,8 +3161,9 @@ function AuthModal({
               By creating an account, you can save requests and return to orders.
             </p>
             {error && <div className="form-error">{error}</div>}
-            <button className="publish-button" onClick={submitRegister}>
-              Create account
+            {notice && <div className="form-success">{notice}</div>}
+            <button className="publish-button" onClick={submitRegister} disabled={loading}>
+              {loading ? "Sending..." : authUsesSupabase ? "Send account link" : "Create account"}
               <ArrowRight size={18} />
             </button>
             <button className="text-button" onClick={() => switchMode("login")}>
