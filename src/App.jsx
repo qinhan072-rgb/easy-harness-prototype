@@ -31,7 +31,7 @@ import {
   Upload,
   UserCircle
 } from "lucide-react";
-import { getAuthRedirectUrl, supabase, supabaseConfigured } from "./supabaseClient.js";
+import { getAuthRedirectUrl, hostedAuthRequired, supabase, supabaseConfigured } from "./supabaseClient.js";
 
 const processingSteps = [
   "Upload received",
@@ -1743,7 +1743,7 @@ function App() {
     after: ""
   });
   const [authProviderStatus, setAuthProviderStatus] = useState(
-    supabaseConfigured ? "connecting" : "local"
+    supabaseConfigured ? "connecting" : hostedAuthRequired ? "unavailable" : "local"
   );
 
   const uploadRef = useRef(null);
@@ -2297,6 +2297,14 @@ function App() {
       };
     }
 
+    if (hostedAuthRequired) {
+      return {
+        ok: false,
+        adapter: "hosted-auth-required",
+        error: "Account access is not available yet. Please try again later."
+      };
+    }
+
     const authResult = signInWithEmailAdapter(email, users);
     if (!authResult.ok) return authResult;
     signIn(authResult.user.id, authResult.session);
@@ -2342,6 +2350,14 @@ function App() {
         adapter: "supabase-auth",
         pending: true,
         message: "Check your email to finish creating your account."
+      };
+    }
+
+    if (hostedAuthRequired) {
+      return {
+        ok: false,
+        adapter: "hosted-auth-required",
+        error: "Account access is not available yet. Please try again later."
       };
     }
 
@@ -3106,7 +3122,14 @@ function AuthModal({
           <p className="auth-disclaimer">
             {authProviderStatus === "connecting"
               ? "Checking your saved session..."
+              : authProviderStatus === "unavailable"
+                ? "Account access is temporarily unavailable. Please try again later."
               : "Email sign-in is connected. Staff and admin accounts must be invited before use."}
+          </p>
+        )}
+        {!authUsesSupabase && authProviderStatus === "unavailable" && (
+          <p className="auth-disclaimer">
+            Account access is temporarily unavailable. Please try again later.
           </p>
         )}
 

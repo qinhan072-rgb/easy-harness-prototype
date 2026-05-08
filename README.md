@@ -24,7 +24,9 @@ The staging Supabase database has been migrated with `stage_2a_schema`,
 `stage_2a_rls`, and `stage_2a_security_hardening`.
 The front end now initializes Supabase Auth when `VITE_SUPABASE_URL` and
 `VITE_SUPABASE_PUBLISHABLE_KEY` are configured. Without those values, the app
-keeps the local auth adapter available for offline development.
+keeps the local auth adapter available for offline localhost development. Hosted
+deployments do not silently create local accounts if Auth configuration is
+missing.
 
 ## Run
 

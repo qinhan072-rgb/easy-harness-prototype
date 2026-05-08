@@ -8,6 +8,13 @@ const supabaseAnonKey = (
 ).trim();
 
 export const supabaseConfigured = Boolean(supabaseUrl && supabaseAnonKey);
+export const hostedAuthRequired = Boolean(
+  import.meta.env.VITE_VERCEL_ENV ||
+  (
+    typeof window !== "undefined" &&
+    !["localhost", "127.0.0.1"].includes(window.location.hostname)
+  )
+);
 
 export const supabase = supabaseConfigured
   ? createClient(supabaseUrl, supabaseAnonKey, {

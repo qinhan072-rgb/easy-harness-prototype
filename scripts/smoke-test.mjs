@@ -57,9 +57,11 @@ const checks = [
       supabaseClient.includes("createClient") &&
       supabaseClient.includes("VITE_SUPABASE_URL") &&
       supabaseClient.includes("VITE_SUPABASE_PUBLISHABLE_KEY") &&
+      supabaseClient.includes("hostedAuthRequired") &&
       app.includes("supabase.auth.signInWithOtp") &&
       app.includes("syncSupabaseSession") &&
-      app.includes("supabase.auth.signOut")
+      app.includes("supabase.auth.signOut") &&
+      app.includes("Account access is not available yet")
   },
   {
     name: "storage object ledger is present",

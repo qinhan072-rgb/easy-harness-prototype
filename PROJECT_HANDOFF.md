@@ -57,7 +57,8 @@ Visitors now land directly in the customer workspace. The top-right action is
 order history is hidden until login. When Supabase environment variables are
 configured, sign-in and customer registration use Supabase Auth email links and
 load role/status from `public.profiles`. Without those values, the local
-`easy-harness.authSession` adapter remains available for offline development.
+`easy-harness.authSession` adapter remains available for offline localhost
+development only; hosted deployments must not silently create local accounts.
 Public registration only creates customer accounts; staff and admin accounts
 must be invited or created by admin.
 
