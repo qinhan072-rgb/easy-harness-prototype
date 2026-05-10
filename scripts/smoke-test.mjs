@@ -81,6 +81,14 @@ const checks = [
       app.includes("attachments (Supabase live metadata)")
   },
   {
+    name: "supabase staff quote data path is wired",
+    pass: app.includes("persistSupabaseStaffRequestUpdate") &&
+      app.includes("supabaseQuoteInsertFromLocal") &&
+      app.includes("localQuoteFromSupabase") &&
+      app.includes(".from(\"quotes\")") &&
+      app.includes("active_quote_id")
+  },
+  {
     name: "storage object ledger is present",
     pass: app.includes("easy-harness.storageObjects") &&
       app.includes("createStorageUploadAdapter") &&

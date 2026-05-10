@@ -29,8 +29,11 @@ deployments do not silently create local accounts if Auth configuration is
 missing.
 For Supabase-authenticated users, the customer request path now reads and writes
 live Supabase records for `requests`, `request_messages`, and attachment
-metadata. Local storage remains the offline/demo fallback for development and
-for flow areas that have not been moved to the database yet.
+metadata. Staff request replies and released harness quotes now write to
+`request_messages`, `quotes`, and the request's active quote fields when a
+Supabase staff/admin session is present. Local storage remains the offline/demo
+fallback for development and for flow areas that have not been moved to the
+database yet.
 
 ## Run
 

@@ -847,7 +847,7 @@ function supabaseMessageInsertFromLocal(message, requestUuid, authorId) {
   const authorRole = authorRoleToSupabase(message.role);
   return {
     request_id: requestUuid,
-    author_id: authorRole === "customer" ? authorId : null,
+    author_id: authorRole === "customer" || isUuidLike(authorId) ? authorId : null,
     author_role: authorRole,
     body: requestBodyFromBlocks(message.blocks),
     blocks: message.blocks || [],
@@ -876,7 +876,44 @@ function supabaseAttachmentInsertFromLocal(attachment, requestUuid, messageUuid,
   };
 }
 
+function localQuoteFromSupabase(row) {
+  return {
+    id: row.id,
+    requestId: row.request_id,
+    version: row.version,
+    amount: Number(row.amount || 0),
+    currency: row.currency || "USD",
+    scope: "Harness assembly only",
+    excludes: ["Shipping", "Import duties", "VAT", "Carrier brokerage"],
+    basisMessageIds: row.basis_message_ids || [],
+    status: row.status || "released",
+    releasedBy: row.released_by || "",
+    releasedAt: displayTime(row.released_at),
+    validUntil: row.valid_until || ""
+  };
+}
+
+function supabaseQuoteInsertFromLocal(quote, requestUuid, releasedBy) {
+  return {
+    request_id: requestUuid,
+    version: quote.version,
+    amount: quote.amount,
+    currency: quote.currency || "USD",
+    basis_message_ids: (quote.basisMessageIds || []).filter(isUuidLike),
+    status: quote.status || "released",
+    released_by: isUuidLike(releasedBy) ? releasedBy : null,
+    valid_until: quote.validUntil || null
+  };
+}
+
 function localRequestFromSupabase(row, currentUser) {
+  const quotes = [...(row.quotes || [])]
+    .sort((a, b) => (a.version || 0) - (b.version || 0))
+    .map(localQuoteFromSupabase);
+  const activeQuote =
+    quotes.find((quote) => quote.id === row.active_quote_id) ||
+    quotes[quotes.length - 1] ||
+    null;
   const messages = [...(row.request_messages || [])]
     .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
     .map((message) => ({
@@ -902,10 +939,10 @@ function localRequestFromSupabase(row, currentUser) {
       missing: [],
       checkedAt: ""
     },
-    quotes: [],
-    activeQuoteId: row.active_quote_id || "",
+    quotes,
+    activeQuoteId: activeQuote?.id || row.active_quote_id || "",
     confirmedQuoteId: row.confirmed_quote_id || "",
-    price: "",
+    price: activeQuote ? String(activeQuote.amount) : "",
     files,
     updated: displayTime(row.updated_at || row.created_at),
     messages
@@ -2118,6 +2155,17 @@ function App() {
     timers.push(
       window.setTimeout(() => {
         const requestForCheck = requests.find((request) => request.id === processingRequestId);
+        if (requestForCheck?.supabaseId) {
+          recordServiceEvent(
+            platformAdapters.checking.id,
+            "check_queued",
+            "request",
+            processingRequestId,
+            "Request is waiting for Easy Harness checking."
+          );
+          setUserView("thread");
+          return;
+        }
         const adapterResponse = requestForCheck ? runCheckingAdapter(requestForCheck) : null;
         const checkResult = adapterResponse
           ? adapterResponse.result
@@ -2381,6 +2429,18 @@ function App() {
           size_bytes,
           purpose,
           created_at
+        ),
+        quotes (
+          id,
+          request_id,
+          version,
+          amount,
+          currency,
+          basis_message_ids,
+          status,
+          released_by,
+          released_at,
+          valid_until
         )
       `)
       .order("updated_at", { ascending: false });
@@ -2516,6 +2576,57 @@ function App() {
     }
 
     recordServiceEvent("supabase-database", "request_updated", "request", request.id, "Request status saved to Supabase.");
+  }
+
+  async function persistSupabaseStaffRequestUpdate(request, messages = [], quote = null) {
+    if (!supabase || !request?.supabaseId || !isUuidLike(currentUser?.id)) return null;
+    const savedMessages = [];
+
+    if (messages.length) {
+      const { data, error } = await supabase
+        .from("request_messages")
+        .insert(messages.map((message) => supabaseMessageInsertFromLocal(message, request.supabaseId, currentUser.id)))
+        .select("id,created_at,blocks,body,author_role");
+
+      if (error) {
+        recordServiceEvent("supabase-database", "staff_request_message_insert_failed", "request", request.id, error.message);
+      } else {
+        savedMessages.push(...(data || []));
+        recordServiceEvent("supabase-database", "staff_request_message_inserted", "request", request.id, `${data?.length || 0} Easy Harness message(s) saved to Supabase.`);
+      }
+    }
+
+    let savedQuote = null;
+    if (quote) {
+      const { data: quoteRow, error: quoteError } = await supabase
+        .from("quotes")
+        .insert(supabaseQuoteInsertFromLocal(quote, request.supabaseId, currentUser.id))
+        .select("id,request_id,version,amount,currency,basis_message_ids,status,released_by,released_at,valid_until")
+        .single();
+
+      if (quoteError) {
+        recordServiceEvent("supabase-database", "quote_insert_failed", "request", request.id, quoteError.message);
+      } else {
+        savedQuote = localQuoteFromSupabase(quoteRow);
+      }
+    }
+
+    const requestPatch = quote && savedQuote
+      ? { status: "ready_to_confirm", active_quote_id: savedQuote.id, updated_at: new Date().toISOString() }
+      : { status: request.status === "draft_saved" ? "in_review" : request.status, updated_at: new Date().toISOString() };
+
+    const { error: requestError } = await supabase
+      .from("requests")
+      .update(requestPatch)
+      .eq("id", request.supabaseId);
+
+    if (requestError) {
+      recordServiceEvent("supabase-database", "staff_request_update_failed", "request", request.id, requestError.message);
+      return { savedMessages, savedQuote };
+    }
+
+    recordServiceEvent("supabase-database", "staff_request_updated", "request", request.id, "Easy Harness request update saved to Supabase.");
+    return { savedMessages, savedQuote };
   }
 
   async function fetchSupabaseProfile(authUser) {
@@ -2897,18 +3008,31 @@ function App() {
     });
     recordAudit("request_created", "request", nextId, `${actor.email} created ${nextRequest.title}.`, actor);
     setActiveRequestId(savedRequest.id);
-    setProcessingRequestId(savedRequest.id);
     setDescription("");
     setUploadFiles([]);
     setFileError("");
     setTermsChecked(false);
-    setUserView("processing");
+    if (savedRequest.supabaseId) {
+      setProcessingRequestId("");
+      setUserView("thread");
+      recordServiceEvent(
+        platformAdapters.checking.id,
+        "check_queued",
+        "request",
+        savedRequest.id,
+        "Request is waiting for Easy Harness checking."
+      );
+    } else {
+      setProcessingRequestId(savedRequest.id);
+      setUserView("processing");
+    }
   }
 
-  function sendUserMessage() {
+  async function sendUserMessage() {
     const text = userComposer.trim();
     if (!text && !userComposerFiles.length) return;
     const attachedNames = userComposerFiles.map(fileName);
+    const remoteThread = Boolean(supabase && activeRequest.supabaseId && isUuidLike(currentUser?.id));
     const message = {
       id: messageId(),
       role: "customer",
@@ -2924,6 +3048,24 @@ function App() {
     updateRequest(activeRequest.id, (request) => {
       const baseMessages = [...request.messages, message];
       const nextFiles = [...new Set([...(request.files || []), ...attachedNames])];
+      if (remoteThread) {
+        return {
+          ...request,
+          files: nextFiles,
+          status: ["needs_info", "not_supported"].includes(request.status) ? "checking" : request.status,
+          checkResult: ["needs_info", "not_supported"].includes(request.status)
+            ? {
+                status: "queued",
+                adapter: platformAdapters.checking.id,
+                reason: "Customer added details. Easy Harness will continue checking the request.",
+                missing: [],
+                checkedAt: ""
+              }
+            : request.checkResult,
+          updated: "Just now",
+          messages: baseMessages
+        };
+      }
       const shouldRecheck = ["needs_info", "not_supported", "checking"].includes(request.status);
       const adapterResponse = shouldRecheck
         ? runCheckingAdapter({ ...request, files: nextFiles, messages: baseMessages })
@@ -2956,7 +3098,62 @@ function App() {
       };
     });
 
-    appendAttachmentRecords(userComposerFiles, activeRequest.id, message.id, currentUser.id);
+    if (remoteThread) {
+      const { data: messageRow, error: messageError } = await supabase
+        .from("request_messages")
+        .insert(supabaseMessageInsertFromLocal(message, activeRequest.supabaseId, currentUser.id))
+        .select("id,created_at")
+        .single();
+
+      if (messageError) {
+        recordServiceEvent("supabase-database", "request_message_insert_failed", "request", activeRequest.id, messageError.message);
+      } else {
+        updateRequest(activeRequest.id, (request) => ({
+          ...request,
+          messages: request.messages.map((item) =>
+            item.id === message.id
+              ? { ...item, id: messageRow.id, createdAt: displayTime(messageRow.created_at) }
+              : item
+          )
+        }));
+
+        const localAttachments = buildAttachmentRecords(userComposerFiles, activeRequest.id, messageRow.id, currentUser.id);
+        const attachmentRows = localAttachments.map((attachment) =>
+          supabaseAttachmentInsertFromLocal(attachment, activeRequest.supabaseId, messageRow.id, currentUser.id)
+        );
+        const { data: savedAttachments, error: attachmentError } = attachmentRows.length
+          ? await supabase
+              .from("attachments")
+              .insert(attachmentRows)
+              .select("id,name,mime_type,size_bytes,created_at")
+          : { data: [], error: null };
+
+        if (attachmentError) {
+          recordServiceEvent("supabase-database", "attachments_insert_failed", "request", activeRequest.id, attachmentError.message);
+          appendAttachmentRecords(userComposerFiles, activeRequest.id, messageRow.id, currentUser.id);
+        } else if (savedAttachments?.length) {
+          setAttachmentRecords((current) => [
+            ...savedAttachments.map((attachment) => ({
+              id: attachment.id,
+              requestId: activeRequest.id,
+              supabaseRequestId: activeRequest.supabaseId,
+              messageId: messageRow.id,
+              uploadedBy: currentUser.id,
+              name: attachment.name,
+              size: attachment.size_bytes || 0,
+              type: attachment.mime_type || "application/octet-stream",
+              storageObjectId: "",
+              objectPath: "",
+              createdAt: displayTime(attachment.created_at)
+            })),
+            ...current
+          ]);
+        }
+        recordServiceEvent("supabase-database", "request_message_inserted", "request", activeRequest.id, "Customer update saved to Supabase.");
+      }
+    } else {
+      appendAttachmentRecords(userComposerFiles, activeRequest.id, message.id, currentUser.id);
+    }
     writeRequestMessageLedger(activeRequest, message);
     addNotification({
       role: "staff",
@@ -2973,7 +3170,7 @@ function App() {
     setFileError("");
   }
 
-  function sendStaffUpdate() {
+  async function sendStaffUpdate() {
     const text = staffComposer.trim();
     const attachmentFiles = staffAttachment;
     const attachmentNames = attachmentFiles.map(fileName);
@@ -2984,6 +3181,7 @@ function App() {
     if (!hasContent && !hasPrice) return;
     let staffMessageId = "";
     let staffMessage = null;
+    let priceMessage = null;
     let releasedQuote = null;
 
     updateRequest(activeRequest.id, (request) => {
@@ -3008,7 +3206,8 @@ function App() {
       }
 
       if (hasPrice) {
-        messages.push(priceEvent(price));
+        priceMessage = priceEvent(price);
+        messages.push(priceMessage);
       }
 
       return {
@@ -3047,6 +3246,24 @@ function App() {
       recordAudit("price_updated", "request", activeRequest.id, `Harness price set to $${price}.`);
       if (releasedQuote) writeQuoteLedger(releasedQuote);
       recordServiceEvent(platformAdapters.checking.id, "quote_released", "request", activeRequest.id, "Harness quote released from current thread basis.");
+    }
+    if (activeRequest.supabaseId) {
+      const saved = await persistSupabaseStaffRequestUpdate(
+        activeRequest,
+        [staffMessage, priceMessage].filter(Boolean),
+        releasedQuote
+      );
+      if (saved?.savedQuote) {
+        updateRequest(activeRequest.id, (request) => ({
+          ...request,
+          price: String(saved.savedQuote.amount),
+          activeQuoteId: saved.savedQuote.id,
+          quotes: (request.quotes || []).map((quote) =>
+            quote.id === releasedQuote.id ? saved.savedQuote : quote
+          )
+        }));
+        writeQuoteLedger(saved.savedQuote);
+      }
     }
     setStaffComposer("");
     setStaffAttachment([]);
