@@ -2051,6 +2051,7 @@ function App() {
   const [processingRequestId, setProcessingRequestId] = useState("");
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [sendingUserMessage, setSendingUserMessage] = useState(false);
+  const [agentActivity, setAgentActivity] = useState({ requestId: "", mode: "", startedAt: 0 });
   const [userComposer, setUserComposer] = useState("");
   const [userComposerFiles, setUserComposerFiles] = useState([]);
   const [staffComposer, setStaffComposer] = useState("");
@@ -3107,62 +3108,57 @@ function App() {
   async function invokeSupabaseChecking(request, trigger = "manual") {
     if (!supabase || !request?.supabaseId || !currentUser) return null;
 
+    const activityMode = trigger === "initial_request" ? "initial" : "followup";
+    setAgentActivity({ requestId: request.id, mode: activityMode, startedAt: Date.now() });
+
     recordServiceEvent(
       platformAdapters.checking.id,
       "remote_check_started",
       "request",
       request.id,
-      "Easy Harness intake agent is analyzing the latest customer input."
+      activityMode === "initial"
+        ? "Easy Harness intake agent is analyzing the new request."
+        : "Easy Harness intake agent is thinking through the latest customer input."
     );
 
-    const { data, error } = await supabase.functions.invoke("run-checking", {
-      body: {
-        requestId: request.supabaseId,
-        trigger
-      }
-    });
+    try {
+      const { data, error } = await supabase.functions.invoke("run-checking", {
+        body: {
+          requestId: request.supabaseId,
+          trigger
+        }
+      });
 
-    if (error || !data?.ok) {
+      if (error || !data?.ok) {
+        recordServiceEvent(
+          platformAdapters.checking.id,
+          "remote_check_failed",
+          "request",
+          request.id,
+          error?.message || data?.message || data?.code || "Easy Harness intake agent did not finish."
+        );
+        return null;
+      }
+
       recordServiceEvent(
         platformAdapters.checking.id,
-        "remote_check_failed",
+        `remote_check_${data.checkStatus || "completed"}`,
         "request",
         request.id,
-        error?.message || data?.message || data?.code || "Easy Harness intake agent did not finish."
+        data.readiness || "Easy Harness intake agent updated the request draft."
       );
-      return null;
-    }
 
-    recordServiceEvent(
-      platformAdapters.checking.id,
-      `remote_check_${data.checkStatus || "completed"}`,
-      "request",
-      request.id,
-      data.readiness || "Easy Harness intake agent updated the request draft."
-    );
+      const aiMessage = data.message
+        ? {
+            id: `agent_${data.requestId || request.supabaseId}_${data.checkResult?.checkedAt || Date.now()}`,
+            role: "easy",
+            createdAt: "Now",
+            blocks: [{ type: "text", text: data.message }]
+          }
+        : null;
+      const nextStatus = data.status || request.status;
+      const nextCheckResult = data.checkResult || request.checkResult;
 
-    const aiMessage = data.message
-      ? {
-          id: `agent_${data.requestId || request.supabaseId}_${data.checkResult?.checkedAt || Date.now()}`,
-          role: "easy",
-          createdAt: "Now",
-          blocks: [{ type: "text", text: data.message }]
-        }
-      : null;
-    const nextStatus = data.status || request.status;
-    const nextCheckResult = data.checkResult || request.checkResult;
-
-    updateRequest(data.requestNumber || request.id, (current) => ({
-      ...current,
-      status: nextStatus,
-      checkResult: nextCheckResult,
-      updated: "Just now",
-      messages: appendMessageIfMissing(current.messages || [], aiMessage)
-    }));
-
-    await loadSupabaseRequestData(currentUser);
-
-    if (aiMessage) {
       updateRequest(data.requestNumber || request.id, (current) => ({
         ...current,
         status: nextStatus,
@@ -3170,9 +3166,23 @@ function App() {
         updated: "Just now",
         messages: appendMessageIfMissing(current.messages || [], aiMessage)
       }));
+
+      await loadSupabaseRequestData(currentUser);
+
+      if (aiMessage) {
+        updateRequest(data.requestNumber || request.id, (current) => ({
+          ...current,
+          status: nextStatus,
+          checkResult: nextCheckResult,
+          updated: "Just now",
+          messages: appendMessageIfMissing(current.messages || [], aiMessage)
+        }));
+      }
+      if (data.requestNumber) setActiveRequestId(data.requestNumber);
+      return data;
+    } finally {
+      setAgentActivity((current) => current.requestId === request.id ? { requestId: "", mode: "", startedAt: 0 } : current);
     }
-    if (data.requestNumber) setActiveRequestId(data.requestNumber);
-    return data;
   }
 
   async function persistSupabaseStaffRequestUpdate(request, messages = [], quote = null) {
@@ -4195,6 +4205,7 @@ function App() {
             handleUpload={(event) => handleUpload(event, "composer")}
             sendMessage={sendUserMessage}
             sendingMessage={sendingUserMessage}
+            agentActivity={agentActivity}
             confirmRequest={confirmRequest}
             fileError={fileError}
             openOrder={openOrder}
@@ -5139,12 +5150,14 @@ function RequestWorkspace({
   handleUpload,
   sendMessage,
   sendingMessage = false,
+  agentActivity,
   confirmRequest,
   fileError,
   openOrder,
   linkedOrder
 }) {
   const missingItems = request.checkResult?.missing || [];
+  const agentActive = agentActivity?.requestId === request.id;
   const shouldShowMissingInfo =
     perspective === "user" &&
     missingItems.length > 0 &&
@@ -5155,8 +5168,9 @@ function RequestWorkspace({
       <div className="thread-layout">
         <div className="thread-main">
           <ThreadHeader request={request} />
-          {shouldShowMissingInfo && <MissingInfoPrompt items={missingItems} />}
+          {shouldShowMissingInfo && <MissingInfoPrompt items={missingItems} checkResult={request.checkResult} />}
           <MessageList request={request} perspective={perspective} />
+          {agentActive && <AgentActivityCard mode={agentActivity.mode} />}
           <UserComposer
             value={composerValue}
             setValue={setComposerValue}
@@ -5180,18 +5194,21 @@ function RequestWorkspace({
   );
 }
 
-function MissingInfoPrompt({ items }) {
+function MissingInfoPrompt({ items, checkResult }) {
+  const canPrepareDraft = checkResult?.can_prepare_draft !== false;
+  const title = canPrepareDraft ? "Details Easy Harness still needs" : "Harness details needed";
+  const intro = canPrepareDraft
+    ? "Reply in the thread with what you know. If one detail is uncertain, say that and Easy Harness can help narrow it down."
+    : "Easy Harness needs harness-specific information before preparing a draft. A connector photo, old harness sample, simple sketch, or device models will help.";
+
   return (
     <section className="missing-info-prompt">
       <div className="missing-info-icon">
         <AlertTriangle size={18} />
       </div>
       <div>
-        <h2>Details Easy Harness still needs</h2>
-        <p>
-          Reply in the thread with what you know. If one detail is uncertain, say
-          that and Easy Harness can help narrow it down.
-        </p>
+        <h2>{title}</h2>
+        <p>{intro}</p>
         <div className="missing-info-list">
           {items.map((item) => (
             <span key={item}>{formatMissingInfoItem(item)}</span>
@@ -5199,6 +5216,29 @@ function MissingInfoPrompt({ items }) {
         </div>
       </div>
     </section>
+  );
+}
+
+function AgentActivityCard({ mode }) {
+  const isInitial = mode === "initial";
+  return (
+    <article className="message message-easy agent-activity-card">
+      <div className="message-avatar pulsing-avatar">
+        <Cable size={18} />
+      </div>
+      <div className="message-body">
+        <div className="message-meta">
+          <span>Easy Harness</span>
+          <time>Now</time>
+        </div>
+        <div className="agent-thinking">
+          <strong>{isInitial ? "Easy Harness is analyzing your request…" : "Easy Harness is thinking through your update…"}</strong>
+          <p>{isInitial ? "Reading your description and uploaded files, then preparing the next intake result." : "Reviewing the new details and updating the intake draft."}</p>
+          <div className="thinking-dots" aria-label="Agent is working"><span></span><span></span><span></span></div>
+          <small>This can take up to 1–2 minutes with the high-reasoning model.</small>
+        </div>
+      </div>
+    </article>
   );
 }
 
@@ -5468,10 +5508,16 @@ function IntakeDraftCard({ checkResult }) {
   const questions = checkResult?.questions || checkResult?.questions_for_user || [];
   const facts = checkResult?.confirmed_facts || [];
   const draft = checkResult?.factory_draft || {};
+  const canPrepareDraft = checkResult?.can_prepare_draft !== false;
+  const title = canPrepareDraft
+    ? checkResult?.readiness === "ready_for_admin_review" || checkResult?.status === "accepted"
+      ? "Ready for review"
+      : "Intake draft"
+    : "Waiting for harness details";
 
   return (
     <div className="side-card">
-      <h2>Intake draft</h2>
+      <h2>{title}</h2>
       {checkResult?.customer_summary && <p>{checkResult.customer_summary}</p>}
 
       {draft.connection_goal && (

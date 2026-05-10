@@ -3796,3 +3796,65 @@ button:disabled {
   color: var(--teal);
   font-weight: 800;
 }
+
+.agent-activity-card {
+  border-style: dashed;
+  background: rgba(255, 255, 255, 0.9);
+}
+
+.agent-thinking {
+  display: grid;
+  gap: 8px;
+}
+
+.agent-thinking strong {
+  color: #13201d;
+}
+
+.agent-thinking p {
+  margin: 0;
+  color: #64746f;
+  line-height: 1.5;
+}
+
+.agent-thinking small {
+  color: #8a9a95;
+}
+
+.thinking-dots {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  height: 10px;
+}
+
+.thinking-dots span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #0ea897;
+  opacity: 0.35;
+  animation: thinkingDot 1.2s infinite ease-in-out;
+}
+
+.thinking-dots span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.thinking-dots span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
+.pulsing-avatar {
+  animation: agentPulse 1.5s infinite ease-in-out;
+}
+
+@keyframes thinkingDot {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
+  40% { transform: translateY(-3px); opacity: 1; }
+}
+
+@keyframes agentPulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(14, 168, 151, 0.18); }
+  50% { box-shadow: 0 0 0 8px rgba(14, 168, 151, 0); }
+}

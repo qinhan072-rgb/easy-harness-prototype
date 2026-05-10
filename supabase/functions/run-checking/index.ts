@@ -52,6 +52,9 @@ type StorageRow = {
 type IntakeResult = {
   status: "accepted" | "needs_info" | "rejected";
   readiness: "ready_for_admin_review" | "needs_clarification" | "not_supported";
+  intake_stage: "irrelevant" | "not_enough_harness_context" | "needs_harness_details" | "draft_ready_for_review";
+  can_prepare_draft: boolean;
+  customer_message_type: "request_harness_related_input" | "request_core_details" | "draft_needs_details" | "ready_for_review" | "not_supported";
   customer_summary: string;
   confirmed_facts: string[];
   assumptions: string[];
@@ -74,7 +77,7 @@ type IntakeResult = {
   risk_flags: string[];
 };
 
-// Legacy note: OPENAI_API_KEY is no longer used by this function; DEEPSEEK_API_KEY is required.
+// Legacy smoke-test compatibility note: this function no longer uses OPENAI_API_KEY; DeepSeek uses DEEPSEEK_API_KEY.
 const adapterId = "deepseek-intake-agent-v1";
 const supportedStatus = new Set(["draft_saved", "checking", "needs_info", "not_supported", "in_review"]);
 const imageTypes = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
@@ -87,6 +90,9 @@ const intakeSchema = {
     "status",
     "readiness",
     "customer_summary",
+    "intake_stage",
+    "can_prepare_draft",
+    "customer_message_type",
     "confirmed_facts",
     "assumptions",
     "missing_information",
@@ -100,6 +106,9 @@ const intakeSchema = {
     status: { type: "string", enum: ["accepted", "needs_info", "rejected"] },
     readiness: { type: "string", enum: ["ready_for_admin_review", "needs_clarification", "not_supported"] },
     customer_summary: { type: "string" },
+    intake_stage: { type: "string", enum: ["irrelevant", "not_enough_harness_context", "needs_harness_details", "draft_ready_for_review"] },
+    can_prepare_draft: { type: "boolean" },
+    customer_message_type: { type: "string", enum: ["request_harness_related_input", "request_core_details", "draft_needs_details", "ready_for_review", "not_supported"] },
     confirmed_facts: { type: "array", items: { type: "string" } },
     assumptions: { type: "array", items: { type: "string" } },
     missing_information: { type: "array", items: { type: "string" } },
@@ -164,23 +173,52 @@ function normalizeList(value: unknown, fallback: string[] = []) {
 }
 
 function normalizeIntakeResult(value: Partial<IntakeResult> | Record<string, unknown>): IntakeResult {
-  const status = value.status === "accepted" || value.status === "rejected" ? value.status : "needs_info";
-  const readiness =
-    value.readiness === "ready_for_admin_review" || value.readiness === "not_supported"
-      ? value.readiness
-      : status === "accepted"
-        ? "ready_for_admin_review"
-        : status === "rejected"
-          ? "not_supported"
-          : "needs_clarification";
+  const rawStage = String(value.intake_stage || "");
+  const stage = ["irrelevant", "not_enough_harness_context", "needs_harness_details", "draft_ready_for_review"].includes(rawStage)
+    ? rawStage as IntakeResult["intake_stage"]
+    : value.status === "accepted"
+      ? "draft_ready_for_review"
+      : value.status === "rejected"
+        ? "irrelevant"
+        : "needs_harness_details";
+  const canPrepareDraft = typeof value.can_prepare_draft === "boolean"
+    ? value.can_prepare_draft
+    : stage === "needs_harness_details" || stage === "draft_ready_for_review";
+  const status = stage === "draft_ready_for_review"
+    ? "accepted"
+    : stage === "irrelevant"
+      ? "rejected"
+      : "needs_info";
+  const readiness = status === "accepted"
+    ? "ready_for_admin_review"
+    : status === "rejected"
+      ? "not_supported"
+      : "needs_clarification";
+  const rawMessageType = String(value.customer_message_type || "");
+  const customerMessageType = ["request_harness_related_input", "request_core_details", "draft_needs_details", "ready_for_review", "not_supported"].includes(rawMessageType)
+    ? rawMessageType as IntakeResult["customer_message_type"]
+    : stage === "irrelevant"
+      ? "not_supported"
+      : stage === "not_enough_harness_context"
+        ? "request_harness_related_input"
+        : stage === "draft_ready_for_review"
+          ? "ready_for_review"
+          : canPrepareDraft
+            ? "draft_needs_details"
+            : "request_core_details";
   const draft = typeof value.factory_draft === "object" && value.factory_draft ? value.factory_draft as Record<string, unknown> : {};
 
   return {
     status,
     readiness,
+    intake_stage: stage,
+    can_prepare_draft: canPrepareDraft,
+    customer_message_type: customerMessageType,
     customer_summary: typeof value.customer_summary === "string" && value.customer_summary.trim()
       ? value.customer_summary.trim()
-      : "The customer submitted a harness request that needs Easy Harness review.",
+      : canPrepareDraft
+        ? "The customer submitted a harness request that needs Easy Harness review."
+        : "The submission does not contain enough harness-specific information yet.",
     confirmed_facts: normalizeList(value.confirmed_facts),
     assumptions: normalizeList(value.assumptions),
     missing_information: normalizeList(value.missing_information),
@@ -206,23 +244,34 @@ function normalizeIntakeResult(value: Partial<IntakeResult> | Record<string, unk
 }
 
 function buildCustomerMessage(result: IntakeResult) {
-  if (result.status === "rejected") {
-    return "Thanks for the details. This submission does not yet look like a custom wire harness or connector assembly request. Please start a new request or reply with the devices you need to connect, photos of the connector ends, approximate length, and target quantity.";
-  }
-
-  if (result.status === "accepted") {
-    return [
-      "Thanks. Easy Harness has prepared a first harness draft and there is enough information for review to continue.",
-      "The team will review the draft, uploaded files, and manufacturing details before releasing the next update."
-    ].join("\n\n");
-  }
-
   const questions = result.questions_for_user.length
     ? result.questions_for_user
     : result.missing_information.slice(0, 5).map((item) => `Please confirm: ${item}`);
 
+  if (result.intake_stage === "irrelevant" || result.customer_message_type === "not_supported") {
+    return [
+      "Thanks. I can’t identify a wire harness or connector assembly request from this submission yet.",
+      "Please reply with what needs to connect, or upload connector photos, an old harness sample, a pinout, or a simple sketch."
+    ].join("\n\n");
+  }
+
+  if (!result.can_prepare_draft || result.intake_stage === "not_enough_harness_context") {
+    return [
+      "Thanks. I need a little more harness-specific information before preparing a draft.",
+      ...questions.map((question, index) => `${index + 1}. ${question}`),
+      "A photo of the connector ends, an old harness sample, a simple sketch, or the device models would help."
+    ].join("\n\n");
+  }
+
+  if (result.status === "accepted") {
+    return [
+      "Thanks. Easy Harness has prepared an intake draft and there is enough information for review to continue.",
+      "The team will review the draft, uploaded files, and manufacturing details before releasing the next update."
+    ].join("\n\n");
+  }
+
   return [
-    "Thanks. Easy Harness has prepared a first harness draft, but a few details are still needed before review can continue.",
+    "Thanks. Easy Harness has prepared an initial intake draft, but a few details are still needed before review can continue.",
     ...questions.map((question, index) => `${index + 1}. ${question}`),
     "Reply with whatever you know. If one item is uncertain, say so and Easy Harness will keep narrowing it down."
   ].join("\n\n");
@@ -230,14 +279,15 @@ function buildCustomerMessage(result: IntakeResult) {
 
 function requestStatusFor(result: IntakeResult) {
   if (result.status === "accepted") return "in_review";
-  if (result.status === "rejected") return "not_supported";
+  if (result.intake_stage === "irrelevant") return "not_supported";
   return "needs_info";
 }
 
 function checkReasonFor(result: IntakeResult) {
   if (result.status === "accepted") return "The request has enough information to enter Easy Harness review.";
-  if (result.status === "rejected") return "The submission does not appear to be a wiring harness or connector assembly request.";
-  return "The request needs a few more customer details before Easy Harness review can continue.";
+  if (result.intake_stage === "irrelevant") return "The submission does not appear to be a wiring harness or connector assembly request.";
+  if (!result.can_prepare_draft || result.intake_stage === "not_enough_harness_context") return "The request needs harness-specific context before an intake draft can be prepared.";
+  return "The request has an initial intake draft but still needs a few details before Easy Harness review can continue.";
 }
 
 function summarizeRequestForModel(requestRow: RequestRow, messages: MessageRow[], attachments: Array<AttachmentRow & { storage?: StorageRow }>) {
@@ -312,10 +362,14 @@ async function callDeepSeek(inputText: string) {
             "Your job is to convert a non-professional customer description plus uploaded material into a structured wire harness order draft.",
             "Easy Harness serves makers, developers, prototype users, and small-batch customers who may not know harness engineering language.",
             "Do not invent connector models, pinouts, wire gauges, certifications, current ratings, or waterproof levels when evidence is missing.",
+            "First run a relevance gate before drafting: decide whether the customer has provided a real harness/cable/connector assembly need.",
+            "Do not say a draft is prepared unless there is a real connection goal, such as device A to device B, an old harness to copy, connector ends, pinout, cable routing, or clear harness context.",
+            "If the user only asks whether an unrelated/unclear attachment is correct, or provides a generic commercial image/reference without any connection goal, set intake_stage to not_enough_harness_context and can_prepare_draft to false.",
+            "If the submission is clearly unrelated to wire harnesses, cables, connector assemblies, adapters, pigtails, or looms, set intake_stage to irrelevant and status to rejected.",
+            "If there is a connection goal but important parameters are missing, set intake_stage to needs_harness_details and can_prepare_draft to true.",
+            "If enough information exists for a human Easy Harness reviewer to continue, set intake_stage to draft_ready_for_review and status to accepted, even if final quotation, exact materials, or factory confirmation still require staff work.",
             "Separate confirmed facts, assumptions, missing information, customer questions, and manufacturing notes.",
             "Ask at most five user-friendly questions. Prioritize: devices to connect, power/signal/data use, voltage/current, length, quantity, environment, connector photos or model references.",
-            "If the request is not about a wire harness, cable, connector assembly, adapter, pigtail, or loom, mark it rejected.",
-            "If enough information exists for a human Easy Harness reviewer to continue, mark it accepted even if final quotation, exact materials, or factory confirmation still require staff work.",
             "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
             "The JSON object must follow this schema shape:",
             jsonShape
@@ -471,6 +525,9 @@ Deno.serve(async (request) => {
     const customerMessage = buildCustomerMessage(result);
     const checkResult = {
       ...result,
+      intake_stage: result.intake_stage,
+      can_prepare_draft: result.can_prepare_draft,
+      customer_message_type: result.customer_message_type,
       status: result.status,
       adapter: adapterId,
       model,
