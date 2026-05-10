@@ -36,9 +36,11 @@ Supabase database function that confirms the request/quote and creates the
 checkout `orders` row together. Checkout payment route selection and simulated
 payment receipt now write `payments` and `payment_events` records for the
 confirmed order. Staff fulfillment edits now update the order and write
-shipment/tracking records to `shipments` and `tracking_events`. Local storage
-remains the offline/demo fallback for development and for flow areas that have
-not been moved to the database yet.
+shipment/tracking records to `shipments` and `tracking_events`. Order support
+messages, in-app notification records, notification delivery queue rows, and
+audit logs now also have Supabase write paths. Local storage remains the
+offline/demo fallback for development and for flow areas that have not been
+moved to the database yet.
 
 ## Run
 

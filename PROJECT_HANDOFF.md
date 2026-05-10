@@ -245,9 +245,11 @@ messages, attachment metadata, staff request replies, released harness quotes,
 and customer quote-confirmation/order creation now have live database write
 paths. Checkout payment route selection and payment receipt now write
 `payments` and `payment_events` rows. Staff fulfillment edits now update
-orders and write `shipments` / `tracking_events`. Order message, notification
-delivery, and audit persistence still need to move from the local ledgers to
-Supabase.
+orders and write `shipments` / `tracking_events`. Order support messages,
+notifications, notification delivery queue rows, and audit logs now have
+Supabase write paths. The largest remaining local/demo persistence gap is real
+file binary upload/storage-object signing, plus the external AI/payment/DHL
+provider calls.
 
 Current adapter replacement points:
 

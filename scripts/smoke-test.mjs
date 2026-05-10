@@ -13,6 +13,7 @@ const rlsGrantPath = resolve(root, "supabase", "migrations", "202605100001_stage
 const checkingRpcPath = resolve(root, "supabase", "migrations", "202605100002_complete_request_check_rpc.sql");
 const confirmOrderRpcPath = resolve(root, "supabase", "migrations", "202605100003_confirm_request_order_rpc.sql");
 const paymentRpcPath = resolve(root, "supabase", "migrations", "202605100004_order_payment_rpc.sql");
+const notificationAuditRpcPath = resolve(root, "supabase", "migrations", "202605100005_notifications_audit_rpc.sql");
 const envExamplePath = resolve(root, ".env.example");
 const stage2DocPath = resolve(root, "docs", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
@@ -36,6 +37,7 @@ const rlsGrantSql = readIfExists(rlsGrantPath);
 const checkingRpcSql = readIfExists(checkingRpcPath);
 const confirmOrderRpcSql = readIfExists(confirmOrderRpcPath);
 const paymentRpcSql = readIfExists(paymentRpcPath);
+const notificationAuditRpcSql = readIfExists(notificationAuditRpcPath);
 const envExample = readIfExists(envExamplePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
@@ -113,6 +115,14 @@ const checks = [
       app.includes(".from(\"shipments\")") &&
       app.includes(".from(\"tracking_events\")") &&
       app.includes("staff_order_updated")
+  },
+  {
+    name: "supabase order message notification audit paths are wired",
+    pass: app.includes("persistSupabaseOrderMessage") &&
+      app.includes(".from(\"order_messages\")") &&
+      app.includes('supabase.rpc("record_platform_notification"') &&
+      app.includes('supabase.rpc("record_platform_audit"') &&
+      app.includes("loadSupabaseNotificationData")
   },
   {
     name: "storage object ledger is present",
@@ -398,6 +408,14 @@ const checks = [
       paymentRpcSql.includes("insert into public.payments") &&
       paymentRpcSql.includes("insert into public.payment_events") &&
       paymentRpcSql.includes("grant execute on function public.record_order_payment")
+  },
+  {
+    name: "stage 2A notification and audit rpcs record platform events",
+    pass: notificationAuditRpcSql.includes("create or replace function public.record_platform_notification") &&
+      notificationAuditRpcSql.includes("insert into public.notification_deliveries") &&
+      notificationAuditRpcSql.includes("create or replace function public.record_platform_audit") &&
+      notificationAuditRpcSql.includes("insert into public.audit_logs") &&
+      notificationAuditRpcSql.includes("grant execute on function public.record_platform_audit")
   },
   {
     name: "stage 2A edge function contracts exist",

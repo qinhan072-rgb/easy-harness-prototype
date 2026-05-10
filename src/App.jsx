@@ -963,6 +963,40 @@ function orderMessageRecord(order, message) {
   };
 }
 
+function orderAuthorRoleToSupabase(role) {
+  if (role === "customer") return "customer";
+  if (role === "system") return "system";
+  return "easy_harness";
+}
+
+function orderAuthorRoleFromSupabase(role) {
+  if (role === "customer") return "customer";
+  if (role === "system") return "system";
+  return "staff";
+}
+
+function supabaseOrderMessageInsertFromLocal(message, orderUuid, authorId) {
+  const authorRole = orderAuthorRoleToSupabase(message.authorRole);
+  return {
+    order_id: orderUuid,
+    author_id: authorRole === "customer" || isUuidLike(authorId) ? authorId : null,
+    author_role: authorRole,
+    body: message.body,
+    visibility: message.visibility === "internal" ? "internal" : "thread"
+  };
+}
+
+function localOrderMessageFromSupabase(row) {
+  return {
+    id: row.id,
+    authorRole: orderAuthorRoleFromSupabase(row.author_role),
+    authorName: row.author_role === "customer" ? "Customer" : "Easy Harness",
+    body: row.body || "",
+    visibility: row.visibility || "thread",
+    createdAt: displayTime(row.created_at)
+  };
+}
+
 function paymentLedgerRecord(order, override = {}) {
   return {
     id: paymentRecordId(order.id, order.paymentMethodId || "checkout"),
@@ -1367,6 +1401,27 @@ function makeNotification({ userId = "", role = "", requestId = "", title, body 
   };
 }
 
+function localNotificationFromSupabase(row) {
+  return {
+    id: row.id,
+    userId: row.user_id || "",
+    role: row.role || "",
+    requestId: row.requests?.request_number || row.orders?.order_number || "",
+    title: row.title,
+    body: row.body,
+    channels: notificationChannels.map((channel) => ({
+      channel: channel.id,
+      status: channel.id === "in_app" ? "delivered" : "queued",
+      providerMessageId: "",
+      lastAttemptAt: channel.id === "in_app" ? displayTime(row.created_at) : "",
+      error: ""
+    })),
+    adapter: platformAdapters.notifications.id,
+    createdAt: displayTime(row.created_at),
+    readAt: row.read_at ? displayTime(row.read_at) : ""
+  };
+}
+
 function makeServiceEvent(adapter, action, targetType, targetId, detail = "") {
   return {
     id: `svc_${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -1746,6 +1801,9 @@ function localOrderFromSupabase(row, currentUser) {
       : option
   );
   const requestNumber = row.requests?.request_number || row.snapshot?.requestNumber || "";
+  const supportMessages = [...(row.order_messages || [])]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .map(localOrderMessageFromSupabase);
 
   return normalizeOrderShape({
     id: row.order_number,
@@ -1780,7 +1838,7 @@ function localOrderFromSupabase(row, currentUser) {
     carrierTrackingUrl: "",
     trackingSource: "manual",
     trackingEvents: [],
-    supportMessages: [],
+    supportMessages,
     bankTransferReference: `BT-${row.order_number}`,
     internalNotes: "",
     snapshot: row.snapshot || {},
@@ -2456,6 +2514,76 @@ function App() {
     recordServiceEvent("supabase-database", "staff_order_updated", "order", order.id, "Staff order update saved to Supabase.");
   }
 
+  async function persistSupabaseOrderMessage(order, message) {
+    if (!supabase || !order?.supabaseId || !isUuidLike(currentUser?.id)) return null;
+    const { data, error } = await supabase
+      .from("order_messages")
+      .insert(supabaseOrderMessageInsertFromLocal(message, order.supabaseId, currentUser.id))
+      .select("id,author_role,body,visibility,created_at")
+      .single();
+
+    if (error) {
+      recordServiceEvent("supabase-database", "order_message_insert_failed", "order", order.id, error.message);
+      return null;
+    }
+
+    recordServiceEvent("supabase-database", "order_message_inserted", "order", order.id, "Order message saved to Supabase.");
+    return localOrderMessageFromSupabase(data);
+  }
+
+  async function persistSupabaseNotification(payload, localNotification) {
+    if (!supabase || !currentUser?.id) return null;
+    const request = payload.requestId
+      ? requests.find((item) => item.id === payload.requestId)
+      : null;
+    const order = payload.orderId
+      ? orders.find((item) => item.id === payload.orderId)
+      : payload.requestId
+        ? orders.find((item) => item.requestId === payload.requestId)
+        : null;
+
+    const { data, error } = await supabase.rpc("record_platform_notification", {
+      p_user_id: isUuidLike(payload.userId) ? payload.userId : null,
+      p_role: payload.role || null,
+      p_request_id: request?.supabaseId || null,
+      p_order_id: order?.supabaseId || null,
+      p_title: payload.title || localNotification.title,
+      p_body: payload.body || localNotification.body
+    });
+
+    if (error) {
+      recordServiceEvent("supabase-database", "notification_record_failed", "notification", localNotification.id, error.message);
+      return null;
+    }
+
+    recordServiceEvent("supabase-database", "notification_recorded", "notification", localNotification.id, "Notification and delivery queue saved to Supabase.");
+    return localNotificationFromSupabase({
+      ...data,
+      requests: request ? { request_number: request.id } : null,
+      orders: order ? { order_number: order.id } : null
+    });
+  }
+
+  async function persistSupabaseAudit(log) {
+    if (!supabase || !currentUser?.id) return;
+    const { error } = await supabase.rpc("record_platform_audit", {
+      p_action: log.action,
+      p_target_type: log.targetType,
+      p_target_id: log.targetId,
+      p_detail: log.detail || "",
+      p_metadata: {
+        localAuditId: log.id
+      }
+    });
+
+    if (error) {
+      recordServiceEvent("supabase-database", "audit_record_failed", "audit", log.id, error.message);
+      return;
+    }
+
+    recordServiceEvent("supabase-database", "audit_recorded", "audit", log.id, "Audit log saved to Supabase.");
+  }
+
   async function updateOrderFromStaff(orderId, patch, detail) {
     const order = orders.find((item) => item.id === orderId);
     const nextOrder = order ? { ...order, ...patch, updated: "Just now" } : null;
@@ -2497,10 +2625,14 @@ function App() {
   }
 
   function recordAudit(action, targetType, targetId, detail = "", actorOverride = currentUser) {
+    const log = makeAuditLog(action, actorOverride, targetType, targetId, detail);
     setAuditLogs((current) => [
-      makeAuditLog(action, actorOverride, targetType, targetId, detail),
+      log,
       ...current
     ]);
+    if (actorOverride?.id === currentUser?.id && isUuidLike(currentUser?.id)) {
+      persistSupabaseAudit(log);
+    }
   }
 
   function addNotification(payload) {
@@ -2508,6 +2640,16 @@ function App() {
     setNotifications((current) => [routed.notification, ...current]);
     setNotificationDeliveryRecords((current) => mergeById(current, routed.deliveries));
     setServiceEvents((current) => [routed.event, ...current]);
+    persistSupabaseNotification(payload, routed.notification).then((remoteNotification) => {
+      if (!remoteNotification) return;
+      setNotifications((current) => [
+        remoteNotification,
+        ...current.filter((notification) => notification.id !== routed.notification.id)
+      ]);
+      setNotificationDeliveryRecords((current) =>
+        mergeById(current, buildNotificationDeliveryRecords(remoteNotification))
+      );
+    });
   }
 
   function recordServiceEvent(adapter, action, targetType, targetId, detail = "") {
@@ -2714,6 +2856,14 @@ function App() {
         requests (
           request_number,
           customer_label
+        ),
+        order_messages (
+          id,
+          author_id,
+          author_role,
+          body,
+          visibility,
+          created_at
         )
       `)
       .order("updated_at", { ascending: false });
@@ -2732,6 +2882,46 @@ function App() {
       "user",
       user.id,
       `${remoteOrders.length} order record(s) loaded from Supabase.`
+    );
+  }
+
+  async function loadSupabaseNotificationData(user) {
+    if (!supabase || !user?.id) return;
+
+    const { data, error } = await supabase
+      .from("notifications")
+      .select(`
+        id,
+        user_id,
+        role,
+        title,
+        body,
+        read_at,
+        created_at,
+        requests (
+          request_number
+        ),
+        orders (
+          order_number
+        )
+      `)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (error) {
+      recordServiceEvent("supabase-database", "notifications_load_failed", "user", user.id, error.message);
+      return;
+    }
+
+    const remoteNotifications = (data || []).map(localNotificationFromSupabase);
+    setNotifications(remoteNotifications);
+    setNotificationDeliveryRecords(remoteNotifications.flatMap(buildNotificationDeliveryRecords));
+    recordServiceEvent(
+      "supabase-database",
+      "notifications_loaded",
+      "user",
+      user.id,
+      `${remoteNotifications.length} notification record(s) loaded from Supabase.`
     );
   }
 
@@ -2914,6 +3104,7 @@ function App() {
     signIn(user.id, createSupabaseAuthSession(session, user), user);
     await loadSupabaseRequestData(user);
     await loadSupabaseOrderData(user);
+    await loadSupabaseNotificationData(user);
     recordServiceEvent("supabase-auth", action, "user", user.id, `${roleCopy[user.role]} session is active.`);
     setAuthProviderStatus("ready");
     return user;
@@ -3636,7 +3827,7 @@ function App() {
     setShowPayment(false);
   }
 
-  function sendOrderMessage(orderId, body, authorRole = currentUser?.role) {
+  async function sendOrderMessage(orderId, body, authorRole = currentUser?.role) {
     const text = body.trim();
     if (!text) return;
     const order = orders.find((item) => item.id === orderId);
@@ -3652,6 +3843,16 @@ function App() {
       updated: "Just now"
     }));
     writeOrderMessageLedger(order, message);
+    const remoteMessage = await persistSupabaseOrderMessage(order, message);
+    if (remoteMessage) {
+      updateOrder(orderId, (current) => ({
+        ...current,
+        supportMessages: (current.supportMessages || []).map((item) =>
+          item.id === message.id ? remoteMessage : item
+        )
+      }));
+      writeOrderMessageLedger(order, remoteMessage);
+    }
     addNotification({
       userId: authorRole === "customer" ? "" : order.customerId,
       role: authorRole === "customer" ? "staff" : "",
