@@ -855,6 +855,15 @@ function supabaseMessageInsertFromLocal(message, requestUuid, authorId) {
   };
 }
 
+function supabaseSystemMessageFromLocal(message) {
+  const authorRole = authorRoleToSupabase(message.role);
+  return {
+    author_role: authorRole,
+    body: requestBodyFromBlocks(message.blocks),
+    blocks: message.blocks || []
+  };
+}
+
 function supabaseAttachmentInsertFromLocal(attachment, requestUuid, messageUuid, ownerId) {
   return {
     owner_id: ownerId,
@@ -2121,6 +2130,21 @@ function App() {
             };
         const accepted = checkResult.status === "accepted";
         const needsInfo = checkResult.status === "needs_info";
+        const generatedMessages = accepted
+          ? [
+              easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
+              draftMessage(processingRequestId, requestForCheck?.title || "Harness request"),
+              eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
+            ]
+          : needsInfo
+            ? [
+                easyMessage(`We need a little more information before review can start: ${checkResult.missing.join(", ")}. Add the details in this thread and Easy Harness will continue from here.`),
+                eventMessage("More details needed", checkResult.reason)
+              ]
+            : [
+                easyMessage("This request does not look like a wiring harness or connector assembly. Please start a new request with harness photos, drawings, or connector details."),
+                eventMessage("Unable to review", checkResult.reason)
+              ];
         let nextCheckedRequest = null;
         updateRequest(processingRequestId, (request) => {
           nextCheckedRequest = {
@@ -2130,27 +2154,13 @@ function App() {
             updated: "Just now",
             messages: [
               ...request.messages,
-              ...(accepted
-                ? [
-                    easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
-                    draftMessage(request.id, request.title),
-                    eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
-                  ]
-                : needsInfo
-                  ? [
-                      easyMessage(`We need a little more information before review can start: ${checkResult.missing.join(", ")}. Add the details in this thread and Easy Harness will continue from here.`),
-                      eventMessage("More details needed", checkResult.reason)
-                    ]
-                  : [
-                      easyMessage("This request does not look like a wiring harness or connector assembly. Please start a new request with harness photos, drawings, or connector details."),
-                      eventMessage("Unable to review", checkResult.reason)
-                    ])
+              ...generatedMessages
             ]
           };
           return nextCheckedRequest;
         });
         if (nextCheckedRequest) {
-          updateSupabaseRequestFromLocal(nextCheckedRequest);
+          updateSupabaseRequestFromLocal(nextCheckedRequest, generatedMessages);
         }
         recordServiceEvent(
           platformAdapters.checking.id,
@@ -2475,8 +2485,26 @@ function App() {
     };
   }
 
-  async function updateSupabaseRequestFromLocal(request) {
+  async function updateSupabaseRequestFromLocal(request, generatedMessages = []) {
     if (!supabase || !request?.supabaseId) return;
+    if (generatedMessages.length) {
+      const { error } = await supabase.rpc("complete_request_check", {
+        p_request_id: request.supabaseId,
+        p_status: request.status,
+        p_check_status: checkStatusToSupabase(request.checkResult),
+        p_check_result: request.checkResult || {},
+        p_messages: generatedMessages.map(supabaseSystemMessageFromLocal)
+      });
+
+      if (error) {
+        recordServiceEvent("supabase-database", "request_check_complete_failed", "request", request.id, error.message);
+        return;
+      }
+
+      recordServiceEvent("supabase-database", "request_check_completed", "request", request.id, "Request check result and Easy Harness messages saved to Supabase.");
+      return;
+    }
+
     const { error } = await supabase
       .from("requests")
       .update(supabaseRequestUpdateFromLocal(request))

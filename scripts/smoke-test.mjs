@@ -9,6 +9,8 @@ const distIndex = resolve(root, "dist", "index.html");
 const schemaPath = resolve(root, "supabase", "migrations", "202605080001_stage_2a_schema.sql");
 const rlsPath = resolve(root, "supabase", "migrations", "202605080002_stage_2a_rls.sql");
 const hardeningPath = resolve(root, "supabase", "migrations", "202605080003_stage_2a_security_hardening.sql");
+const rlsGrantPath = resolve(root, "supabase", "migrations", "202605100001_stage_2a_rls_function_grants.sql");
+const checkingRpcPath = resolve(root, "supabase", "migrations", "202605100002_complete_request_check_rpc.sql");
 const envExamplePath = resolve(root, ".env.example");
 const stage2DocPath = resolve(root, "docs", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
@@ -28,6 +30,8 @@ const packageJson = readIfExists(packagePath);
 const schemaSql = readIfExists(schemaPath);
 const rlsSql = readIfExists(rlsPath);
 const hardeningSql = readIfExists(hardeningPath);
+const rlsGrantSql = readIfExists(rlsGrantPath);
+const checkingRpcSql = readIfExists(checkingRpcPath);
 const envExample = readIfExists(envExamplePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
@@ -72,6 +76,7 @@ const checks = [
       app.includes("supabaseRequestInsertFromLocal") &&
       app.includes("supabaseMessageInsertFromLocal") &&
       app.includes("updateSupabaseRequestFromLocal") &&
+      app.includes('supabase.rpc("complete_request_check"') &&
       app.includes("requests (Supabase live)") &&
       app.includes("attachments (Supabase live metadata)")
   },
@@ -330,6 +335,19 @@ const checks = [
     pass: hardeningSql.includes("alter extension citext set schema extensions") &&
       hardeningSql.includes("set search_path = public") &&
       hardeningSql.includes("revoke execute on function public.is_admin()")
+  },
+  {
+    name: "stage 2A rls helper grants allow authenticated policies",
+    pass: rlsGrantSql.includes("grant execute on function public.current_profile_role() to authenticated") &&
+      rlsGrantSql.includes("grant execute on function public.is_admin() to authenticated") &&
+      rlsGrantSql.includes("grant execute on function public.is_staff_or_admin() to authenticated")
+  },
+  {
+    name: "stage 2A checking rpc persists system messages",
+    pass: checkingRpcSql.includes("create or replace function public.complete_request_check") &&
+      checkingRpcSql.includes("security definer") &&
+      checkingRpcSql.includes("request_messages") &&
+      checkingRpcSql.includes("grant execute on function public.complete_request_check")
   },
   {
     name: "stage 2A edge function contracts exist",
