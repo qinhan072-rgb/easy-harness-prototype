@@ -1363,17 +1363,6 @@ function hasIrrelevantSignal(text) {
 function runLocalChecking(request) {
   const text = getFirstCustomerText(request);
   const files = request.files || [];
-  const missing = [];
-
-  if (!/\b\d+\s*(pcs|pieces|piece|sets|units|qty)\b|quantity|数量/i.test(text)) {
-    missing.push("target quantity");
-  }
-  if (!/\b\d+(\.\d+)?\s*(m|meter|meters|cm|mm|inch|inches)\b|length|长度/i.test(text)) {
-    missing.push("approximate length");
-  }
-  if (!/\b\d+(\.\d+)?\s*(v|volt|volts|a|amp|amps)\b|voltage|current|电压|电流/i.test(text)) {
-    missing.push("electrical rating");
-  }
 
   if (hasIrrelevantSignal(text) && !hasHarnessSignal(text)) {
     return {
@@ -1398,10 +1387,8 @@ function runLocalChecking(request) {
   return {
     status: "accepted",
     adapter: platformAdapters.checking.id,
-    reason: missing.length
-      ? `The request can enter review. Easy Harness may still confirm ${missing.join(", ")} in the thread.`
-      : "The request has enough information to enter review.",
-    missing,
+    reason: "The request has enough information to enter review.",
+    missing: [],
     checkedAt: "Now"
   };
 }
@@ -2545,6 +2532,7 @@ function App() {
   function signIn(userId, session = null, userOverride = null) {
     const selected = userOverride || users.find((user) => user.id === userId);
     if (!selected || selected.status === "suspended") return;
+    const isSwitchingUser = currentUserId !== userId;
     setAuthSession(session || createLocalAuthSession(selected));
     setCurrentUserId(userId);
     setUsers((current) =>
@@ -2553,8 +2541,10 @@ function App() {
       )
     );
     recordAudit("signed_in", "user", selected.id, `${roleCopy[selected.role]} workspace opened.`, selected);
-    setUserView("requests");
-    setStaffView("queue");
+    if (isSwitchingUser) {
+      setUserView("requests");
+      setStaffView("queue");
+    }
   }
 
   async function signInByEmail(email) {
