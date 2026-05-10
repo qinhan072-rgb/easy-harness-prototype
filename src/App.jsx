@@ -63,7 +63,7 @@ const statusRank = {
   paid: 5
 };
 
-const workflowSteps = ["Check", "Draft", "Review", "Confirm", "Pay"];
+const workflowSteps = ["Check", "Draft", "Review", "Confirm"];
 
 const intakeOutcomeCopy = { needs_info: "More details needed", not_supported: "Unable to review" };
 
@@ -714,7 +714,12 @@ function displayTime(value) {
   if (!value) return "Now";
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
 }
 
 function isEmailLike(value) {
@@ -2118,6 +2123,23 @@ function App() {
       )
       .slice(0, 8);
   }, [currentUser, notifications]);
+
+
+  useEffect(() => {
+    if (!supabase || !currentUser || !activeRequest?.supabaseId) return undefined;
+    if (!["checking", "needs_info", "in_review", "not_supported"].includes(activeRequest.status)) return undefined;
+
+    let disposed = false;
+    const refresh = async () => {
+      if (disposed) return;
+      await loadSupabaseRequestData(currentUser);
+    };
+    const timer = window.setInterval(refresh, 8000);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [activeRequest?.id, activeRequest?.status, activeRequest?.supabaseId, currentUser?.id]);
 
   const backendTableRows = useMemo(() => ([
     { localKey: "easy-harness.authSession", futureTable: "auth_sessions", owner: "Identity service", count: authSession ? 1 : 0 },
@@ -4752,10 +4774,6 @@ function StartScreen({
           <Upload size={16} />
           Upload files
         </button>
-        <button className="soft-chip" onClick={fillSampleRequest}>
-          <Sparkles size={16} />
-          Use sample request
-        </button>
         <span className="file-count">
           {files.length ? `${files.length} file${files.length > 1 ? "s" : ""} attached` : "No files attached"}
         </span>
@@ -5283,8 +5301,51 @@ function MessageCard({ message, perspective, request }) {
   );
 }
 
+function formatTextSections(text = "") {
+  const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const sections = [];
+  let pendingList = [];
+  const flushList = () => {
+    if (pendingList.length) {
+      sections.push({ type: "list", items: pendingList });
+      pendingList = [];
+    }
+  };
+
+  lines.forEach((line) => {
+    const numbered = line.match(/^(\d+)\.\s+(.+)$/);
+    if (numbered) {
+      pendingList.push(numbered[2]);
+      return;
+    }
+    flushList();
+    sections.push({ type: "paragraph", text: line });
+  });
+  flushList();
+  return sections;
+}
+
+function FormattedTextBlock({ text }) {
+  const sections = formatTextSections(text);
+  if (!sections.length) return null;
+  return (
+    <div className="formatted-text-block">
+      {sections.map((section, index) => {
+        if (section.type === "list") {
+          return (
+            <ol key={`list-${index}`}>
+              {section.items.map((item, itemIndex) => <li key={`${index}-${itemIndex}`}>{item}</li>)}
+            </ol>
+          );
+        }
+        return <p key={`p-${index}`}>{section.text}</p>;
+      })}
+    </div>
+  );
+}
+
 function ContentBlock({ block, request }) {
-  if (block.type === "text") return <p>{block.text}</p>;
+  if (block.type === "text") return <FormattedTextBlock text={block.text} />;
 
   if (block.type === "attachments") {
     return (
