@@ -1,0 +1,2149 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index f6b50db..4578bfd 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -63,7 +63,9 @@ const statusRank = {
+   paid: 5
+ };
+ 
+-const workflowSteps = ["Check", "Draft", "Review", "Confirm", "Pay"];
++const workflowSteps = ["Check", "Draft", "Review", "Confirm"];
++
++const intakeOutcomeCopy = { needs_info: "More details needed", not_supported: "Unable to review" };
+ 
+ const sampleFiles = ["connector-photo.jpg", "old-harness.png", "notes.pdf"];
+ const maxFilesPerUpload = 8;
+@@ -605,7 +607,7 @@ function customerMessage(text, files = []) {
+   return {
+     id: messageId(),
+     role: "customer",
+-    createdAt: "Now",
++    createdAt: new Date().toISOString(),
+     blocks: [
+       { type: "text", text },
+       ...(files.length ? [{ type: "attachments", files }] : [])
+@@ -617,7 +619,7 @@ function easyMessage(text, files = [], extraBlocks = []) {
+   return {
+     id: messageId(),
+     role: "easy",
+-    createdAt: "Now",
++    createdAt: new Date().toISOString(),
+     blocks: [
+       { type: "text", text },
+       ...(files.length ? [{ type: "attachments", files }] : []),
+@@ -630,7 +632,7 @@ function draftMessage(id, title) {
+   return {
+     id: messageId(),
+     role: "easy",
+-    createdAt: "Now",
++    createdAt: new Date().toISOString(),
+     tone: "draft",
+     blocks: [{ type: "draft", id, title }]
+   };
+@@ -640,7 +642,7 @@ function eventMessage(title, body) {
+   return {
+     id: messageId(),
+     role: "event",
+-    createdAt: "Now",
++    createdAt: new Date().toISOString(),
+     blocks: [{ type: "event", title, body }]
+   };
+ }
+@@ -712,7 +714,12 @@ function displayTime(value) {
+   if (!value) return "Now";
+   const date = new Date(value);
+   if (Number.isNaN(date.getTime())) return value;
+-  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
++  return date.toLocaleString(undefined, {
++    month: "short",
++    day: "numeric",
++    hour: "2-digit",
++    minute: "2-digit"
++  });
+ }
+ 
+ function isEmailLike(value) {
+@@ -1075,6 +1082,31 @@ function mergeById(current, records) {
+   return [...map.values()];
+ }
+ 
++function requestIdentity(request = {}) {
++  return request.supabaseId || request.id;
++}
++
++function dedupeRequestsByIdentity(items = []) {
++  const map = new Map();
++  items.forEach((item) => {
++    const key = requestIdentity(item);
++    if (!key) return;
++    map.set(key, { ...(map.get(key) || {}), ...item });
++  });
++  return [...map.values()];
++}
++
++function appendMessageIfMissing(messages = [], message) {
++  if (!message) return messages;
++  const body = requestBodyFromBlocks(message.blocks || []);
++  const exists = messages.some((item) => {
++    const sameId = item.id && message.id && item.id === message.id;
++    const sameBody = body && requestBodyFromBlocks(item.blocks || []) === body && item.role === message.role;
++    return sameId || sameBody;
++  });
++  return exists ? messages : [...messages, message];
++}
++
+ function buildAttachmentRecords(files, requestId, messageIdValue, uploadedBy) {
+   return files.map((file) => {
+     const id = file.id || attachmentId();
+@@ -2017,6 +2049,9 @@ function App() {
+   const [fileError, setFileError] = useState("");
+   const [processingIndex, setProcessingIndex] = useState(-1);
+   const [processingRequestId, setProcessingRequestId] = useState("");
++  const [submittingRequest, setSubmittingRequest] = useState(false);
++  const [sendingUserMessage, setSendingUserMessage] = useState(false);
++  const [agentActivity, setAgentActivity] = useState({ requestId: "", mode: "", startedAt: 0 });
+   const [userComposer, setUserComposer] = useState("");
+   const [userComposerFiles, setUserComposerFiles] = useState([]);
+   const [staffComposer, setStaffComposer] = useState("");
+@@ -2041,6 +2076,8 @@ function App() {
+ 
+   const uploadRef = useRef(null);
+   const userComposerUploadRef = useRef(null);
++  const submittingRequestRef = useRef(false);
++  const sendingUserMessageRef = useRef(false);
+ 
+   const currentUser = useMemo(
+     () => users.find((user) => user.id === currentUserId) || null,
+@@ -2049,10 +2086,10 @@ function App() {
+ 
+   const visibleRequests = useMemo(() => {
+     if (!currentUser) return [];
+-    if (currentUser.role === "customer") {
+-      return requests.filter((request) => request.customerId === currentUser.id);
+-    }
+-    return requests;
++    const scoped = currentUser.role === "customer"
++      ? requests.filter((request) => request.customerId === currentUser.id)
++      : requests;
++    return dedupeRequestsByIdentity(scoped);
+   }, [currentUser, requests]);
+ 
+   const activeRequest = useMemo(
+@@ -2088,6 +2125,23 @@ function App() {
+       .slice(0, 8);
+   }, [currentUser, notifications]);
+ 
++
++  useEffect(() => {
++    if (!supabase || !currentUser || !activeRequest?.supabaseId) return undefined;
++    if (!["checking", "needs_info", "in_review", "not_supported"].includes(activeRequest.status)) return undefined;
++
++    let disposed = false;
++    const refresh = async () => {
++      if (disposed) return;
++      await loadSupabaseRequestData(currentUser);
++    };
++    const timer = window.setInterval(refresh, 8000);
++    return () => {
++      disposed = true;
++      window.clearInterval(timer);
++    };
++  }, [activeRequest?.id, activeRequest?.status, activeRequest?.supabaseId, currentUser?.id]);
++
+   const backendTableRows = useMemo(() => ([
+     { localKey: "easy-harness.authSession", futureTable: "auth_sessions", owner: "Identity service", count: authSession ? 1 : 0 },
+     { localKey: "easy-harness.users", futureTable: "profiles", owner: "Identity service", count: users.length },
+@@ -2285,74 +2339,21 @@ function App() {
+     timers.push(
+       window.setTimeout(() => {
+         const requestForCheck = requests.find((request) => request.id === processingRequestId);
+-        if (requestForCheck?.supabaseId) {
+-          recordServiceEvent(
+-            platformAdapters.checking.id,
+-            "check_queued",
+-            "request",
+-            processingRequestId,
+-            "Request is waiting for Easy Harness checking."
+-          );
+-          setUserView("thread");
+-          return;
+-        }
+-        const adapterResponse = requestForCheck ? runCheckingAdapter(requestForCheck) : null;
+-        const checkResult = adapterResponse
+-          ? adapterResponse.result
+-          : {
+-              status: "needs_info",
+-              adapter: platformAdapters.checking.id,
+-              reason: "We could not read the submitted request. Please add the details again.",
+-              missing: ["request details"],
+-              checkedAt: "Now"
+-            };
+-        const accepted = checkResult.status === "accepted";
+-        const needsInfo = checkResult.status === "needs_info";
+-        const generatedMessages = accepted
+-          ? [
+-              easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
+-              draftMessage(processingRequestId, requestForCheck?.title || "Harness request"),
+-              eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
+-            ]
+-          : needsInfo
+-            ? [
+-                easyMessage(`We need a little more information before review can start: ${checkResult.missing.join(", ")}. Add the details in this thread and Easy Harness will continue from here.`),
+-                eventMessage("More details needed", checkResult.reason)
+-              ]
+-            : [
+-                easyMessage("This request does not look like a wiring harness or connector assembly. Please start a new request with harness photos, drawings, or connector details."),
+-                eventMessage("Unable to review", checkResult.reason)
+-              ];
+-        let nextCheckedRequest = null;
+-        updateRequest(processingRequestId, (request) => {
+-          nextCheckedRequest = {
+-            ...request,
+-            status: accepted ? "in_review" : needsInfo ? "needs_info" : "not_supported",
+-            checkResult,
+-            updated: "Just now",
+-            messages: [
+-              ...request.messages,
+-              ...generatedMessages
+-            ]
+-          };
+-          return nextCheckedRequest;
+-        });
+-        if (nextCheckedRequest) {
+-          updateSupabaseRequestFromLocal(nextCheckedRequest, generatedMessages);
+-        }
+         recordServiceEvent(
+           platformAdapters.checking.id,
+-          `check_${checkResult.status}`,
++          requestForCheck?.supabaseId ? "check_queued" : "check_waiting_for_staff",
+           "request",
+           processingRequestId,
+-          adapterResponse ? `${checkResult.reason} Input: ${adapterResponse.input.fileCount} file(s).` : checkResult.reason
++          requestForCheck?.supabaseId
++            ? "Request is waiting for Easy Harness checking."
++            : "Request is saved without a live intake agent. Staff can review it manually."
+         );
+         setUserView("thread");
+-      }, 3000)
++      }, 1800)
+     );
+ 
+     return () => timers.forEach(window.clearTimeout);
+-  }, [processingRequestId, userView]);
++  }, [processingRequestId, requests, userView]);
+ 
+   function updateRequest(requestId, updater) {
+     setRequests((current) =>
+@@ -2806,7 +2807,7 @@ function App() {
+       return;
+     }
+ 
+-    const remoteRequests = (data || []).map((row) => localRequestFromSupabase(row, user));
++    const remoteRequests = dedupeRequestsByIdentity((data || []).map((row) => localRequestFromSupabase(row, user)));
+     const remoteMessages = remoteRequests.flatMap((request) =>
+       (request.messages || []).map((message) => requestMessageRecord(request, message))
+     );
+@@ -2829,7 +2830,10 @@ function App() {
+     setRequests(remoteRequests);
+     setRequestMessageRecords(remoteMessages);
+     setAttachmentRecords(remoteAttachments);
+-    if (remoteRequests[0]) setActiveRequestId(remoteRequests[0].id);
++    setActiveRequestId((current) => {
++      if (current && remoteRequests.some((request) => request.id === current)) return current;
++      return remoteRequests[0]?.id || current;
++    });
+     setDatabaseProviderStatus("ready");
+     recordServiceEvent(
+       "supabase-database",
+@@ -3101,6 +3105,86 @@ function App() {
+     recordServiceEvent("supabase-database", "request_updated", "request", request.id, "Request status saved to Supabase.");
+   }
+ 
++  async function invokeSupabaseChecking(request, trigger = "manual") {
++    if (!supabase || !request?.supabaseId || !currentUser) return null;
++
++    const activityMode = trigger === "initial_request" ? "initial" : "followup";
++    setAgentActivity({ requestId: request.id, mode: activityMode, startedAt: Date.now() });
++
++    recordServiceEvent(
++      platformAdapters.checking.id,
++      "remote_check_started",
++      "request",
++      request.id,
++      activityMode === "initial"
++        ? "Easy Harness intake agent is analyzing the new request."
++        : "Easy Harness intake agent is thinking through the latest customer input."
++    );
++
++    try {
++      const { data, error } = await supabase.functions.invoke("run-checking", {
++        body: {
++          requestId: request.supabaseId,
++          trigger
++        }
++      });
++
++      if (error || !data?.ok) {
++        recordServiceEvent(
++          platformAdapters.checking.id,
++          "remote_check_failed",
++          "request",
++          request.id,
++          error?.message || data?.message || data?.code || "Easy Harness intake agent did not finish."
++        );
++        return null;
++      }
++
++      recordServiceEvent(
++        platformAdapters.checking.id,
++        `remote_check_${data.checkStatus || "completed"}`,
++        "request",
++        request.id,
++        data.readiness || "Easy Harness intake agent updated the request draft."
++      );
++
++      const aiMessage = data.message
++        ? {
++            id: `agent_${data.requestId || request.supabaseId}_${data.checkResult?.checkedAt || Date.now()}`,
++            role: "easy",
++            createdAt: data.checkResult?.checkedAt || new Date().toISOString(),
++            blocks: [{ type: "text", text: data.message }]
++          }
++        : null;
++      const nextStatus = data.status || request.status;
++      const nextCheckResult = data.checkResult || request.checkResult;
++
++      updateRequest(data.requestNumber || request.id, (current) => ({
++        ...current,
++        status: nextStatus,
++        checkResult: nextCheckResult,
++        updated: "Just now",
++        messages: appendMessageIfMissing(current.messages || [], aiMessage)
++      }));
++
++      await loadSupabaseRequestData(currentUser);
++
++      if (aiMessage) {
++        updateRequest(data.requestNumber || request.id, (current) => ({
++          ...current,
++          status: nextStatus,
++          checkResult: nextCheckResult,
++          updated: "Just now",
++          messages: appendMessageIfMissing(current.messages || [], aiMessage)
++        }));
++      }
++      if (data.requestNumber) setActiveRequestId(data.requestNumber);
++      return data;
++    } finally {
++      setAgentActivity((current) => current.requestId === request.id ? { requestId: "", mode: "", startedAt: 0 } : current);
++    }
++  }
++
+   async function persistSupabaseStaffRequestUpdate(request, messages = [], quote = null) {
+     if (!supabase || !request?.supabaseId || !isUuidLike(currentUser?.id)) return null;
+     const savedMessages = [];
+@@ -3441,6 +3525,7 @@ function App() {
+   }
+ 
+   function startRequest() {
++    if (submittingRequestRef.current || submittingRequest) return;
+     if (!uploadFiles.length) {
+       setFileError("Please upload at least one design file before submitting.");
+       return;
+@@ -3457,8 +3542,11 @@ function App() {
+   }
+ 
+   async function submitRequestForUser(actor) {
+-    if (!actor || actor.role !== "customer") return;
+-    if (!uploadFiles.length) {
++    if (!actor || actor.role !== "customer" || submittingRequestRef.current) return;
++    submittingRequestRef.current = true;
++    setSubmittingRequest(true);
++    try {
++      if (!uploadFiles.length) {
+       setFileError("Please upload at least one design file before submitting.");
+       return;
+     }
+@@ -3476,7 +3564,11 @@ function App() {
+     const text =
+       description.trim() ||
+       "I need a harness made from the uploaded design files.";
+-    const files = uploadFiles.map(fileName);
++    const uploadDrafts = [...uploadFiles];
++    const files = uploadDrafts.map(fileName);
++    setDescription("");
++    setUploadFiles([]);
++    setFileError("");
+     const nextId = makeRequestId(requests.length);
+     const firstMessage = customerMessage(text, files);
+     const nextRequest = {
+@@ -3501,7 +3593,6 @@ function App() {
+       messages: [firstMessage]
+     };
+ 
+-    const uploadDrafts = [...uploadFiles];
+     const savedBundle = await createSupabaseRequestBundle(nextRequest, firstMessage, uploadDrafts, actor);
+     const savedRequest = savedBundle?.requestRow
+       ? {
+@@ -3518,7 +3609,7 @@ function App() {
+         }
+       : nextRequest;
+ 
+-    setRequests((current) => [savedRequest, ...current]);
++    setRequests((current) => dedupeRequestsByIdentity([savedRequest, ...current]));
+     writeRequestMessageLedger(savedRequest, savedRequest.messages[0]);
+     if (savedBundle?.attachments?.length) {
+       setAttachmentRecords((current) => [...savedBundle.attachments, ...current]);
+@@ -3547,17 +3638,32 @@ function App() {
+         savedRequest.id,
+         "Request is waiting for Easy Harness checking."
+       );
++      await invokeSupabaseChecking(savedRequest, "initial_request");
+     } else {
+       setProcessingRequestId(savedRequest.id);
+       setUserView("processing");
+     }
++    } finally {
++      submittingRequestRef.current = false;
++      setSubmittingRequest(false);
++    }
+   }
+ 
+   async function sendUserMessage() {
++    if (sendingUserMessageRef.current) return;
+     const text = userComposer.trim();
+-    if (!text && !userComposerFiles.length) return;
+-    const attachedNames = userComposerFiles.map(fileName);
++    const filesToSend = [...userComposerFiles];
++    if (!text && !filesToSend.length) return;
++    sendingUserMessageRef.current = true;
++    setSendingUserMessage(true);
++    const attachedNames = filesToSend.map(fileName);
++    setUserComposer("");
++    setUserComposerFiles([]);
++    setFileError("");
+     const remoteThread = Boolean(supabase && activeRequest.supabaseId && isUuidLike(currentUser?.id));
++    const shouldRunRemoteChecking =
++      remoteThread &&
++      ["checking", "needs_info", "not_supported", "draft_saved"].includes(activeRequest.status);
+     const message = {
+       id: messageId(),
+       role: "customer",
+@@ -3570,6 +3676,7 @@ function App() {
+       ]
+     };
+ 
++    try {
+     updateRequest(activeRequest.id, (request) => {
+       const baseMessages = [...request.messages, message];
+       const nextFiles = [...new Set([...(request.files || []), ...attachedNames])];
+@@ -3591,35 +3698,13 @@ function App() {
+           messages: baseMessages
+         };
+       }
+-      const shouldRecheck = ["needs_info", "not_supported", "checking"].includes(request.status);
+-      const adapterResponse = shouldRecheck
+-        ? runCheckingAdapter({ ...request, files: nextFiles, messages: baseMessages })
+-        : null;
+-      const checkResult = adapterResponse ? adapterResponse.result : request.checkResult;
+-      const acceptedAfterUpdate = shouldRecheck && checkResult.status === "accepted";
+-      const nextMessages = acceptedAfterUpdate
+-        ? [
+-            ...baseMessages,
+-            easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
+-            draftMessage(request.id, request.title),
+-            eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
+-          ]
+-        : baseMessages;
+-
+       return {
+         ...request,
+         files: nextFiles,
+-        status:
+-          acceptedAfterUpdate || request.status === "draft_saved"
+-            ? "in_review"
+-            : shouldRecheck && checkResult.status === "needs_info"
+-              ? "needs_info"
+-              : shouldRecheck && checkResult.status === "rejected"
+-                ? "not_supported"
+-                : request.status,
+-        checkResult,
++        status: request.status === "draft_saved" ? "checking" : request.status,
++        checkResult: request.checkResult,
+         updated: "Just now",
+-        messages: nextMessages
++        messages: baseMessages
+       };
+     });
+ 
+@@ -3643,15 +3728,15 @@ function App() {
+         }));
+ 
+         const savedAttachments = await persistSupabaseAttachments(
+-          userComposerFiles,
++          filesToSend,
+           activeRequest.id,
+           activeRequest.supabaseId,
+           messageRow.id,
+           currentUser.id
+         );
+ 
+-        if (!savedAttachments.length && userComposerFiles.length) {
+-          appendAttachmentRecords(userComposerFiles, activeRequest.id, messageRow.id, currentUser.id);
++        if (!savedAttachments.length && filesToSend.length) {
++          appendAttachmentRecords(filesToSend, activeRequest.id, messageRow.id, currentUser.id);
+         } else if (savedAttachments?.length) {
+           setAttachmentRecords((current) => [
+             ...savedAttachments.map((attachment) => ({
+@@ -3671,9 +3756,12 @@ function App() {
+           ]);
+         }
+         recordServiceEvent("supabase-database", "request_message_inserted", "request", activeRequest.id, "Customer update saved to Supabase.");
++        if (shouldRunRemoteChecking) {
++          await invokeSupabaseChecking(activeRequest, "customer_followup");
++        }
+       }
+     } else {
+-      appendAttachmentRecords(userComposerFiles, activeRequest.id, message.id, currentUser.id);
++      appendAttachmentRecords(filesToSend, activeRequest.id, message.id, currentUser.id);
+     }
+     writeRequestMessageLedger(activeRequest, message);
+     addNotification({
+@@ -3689,6 +3777,10 @@ function App() {
+     setUserComposer("");
+     setUserComposerFiles([]);
+     setFileError("");
++    } finally {
++      sendingUserMessageRef.current = false;
++      setSendingUserMessage(false);
++    }
+   }
+ 
+   async function sendStaffUpdate() {
+@@ -4058,6 +4150,7 @@ function App() {
+             handleUpload={handleUpload}
+             fillSampleRequest={fillSampleRequest}
+             startRequest={startRequest}
++            submittingRequest={submittingRequest}
+             currentUser={currentUser}
+             termsChecked={termsChecked}
+             setTermsChecked={setTermsChecked}
+@@ -4117,6 +4210,8 @@ function App() {
+             uploadRef={userComposerUploadRef}
+             handleUpload={(event) => handleUpload(event, "composer")}
+             sendMessage={sendUserMessage}
++            sendingMessage={sendingUserMessage}
++            agentActivity={agentActivity}
+             confirmRequest={confirmRequest}
+             fileError={fileError}
+             openOrder={openOrder}
+@@ -4274,16 +4369,19 @@ function AuthModal({
+         </p>
+ 
+         {!notice && (
+-          <div className="auth-provider-row" aria-label="Additional sign-in options">
++          <div className="auth-provider-list streamlined" aria-label="Additional sign-in options">
+             <button
+               type="button"
++              className="auth-provider-button primary-provider"
+               onClick={submitGoogle}
+               disabled={loading || !authUsesSupabase || authUnavailable}
+             >
+-              Google
++              <span>
++                <strong>{loading ? "Opening Google sign-in…" : "Continue with Google"}</strong>
++                <small>Secure account sign-in</small>
++              </span>
+             </button>
+-            <button type="button" disabled>Microsoft soon</button>
+-            <button type="button" disabled>Apple soon</button>
++            <p className="auth-provider-note">Microsoft soon / Apple soon</p>
+           </div>
+         )}
+         {!notice && authUsesSupabase && (
+@@ -4303,13 +4401,13 @@ function AuthModal({
+ 
+         {notice ? (
+           <div className="auth-check-email">
+-            <div className="auth-check-icon">
+-              <MailCheck size={30} />
++            <div className={`auth-check-icon ${notice.type === "google" ? "loading" : ""}`}>
++              {notice.type === "google" ? <span className="loading-ring" /> : <MailCheck size={30} />}
+             </div>
+-            <h3>{notice.type === "google" ? "Continue with Google" : "Check your email"}</h3>
++            <h3>{notice.type === "google" ? "Opening Google sign-in…" : "Check your email"}</h3>
+             <p>
+               {notice.type === "google" ? (
+-                notice.message
++                "A secure Google sign-in window should open. Complete sign-in there and return to Easy Harness."
+               ) : (
+                 <>
+                   We sent a secure link to <strong>{notice.email}</strong>. Open the link to finish
+@@ -4317,6 +4415,12 @@ function AuthModal({
+                 </>
+               )}
+             </p>
++            {notice.type === "google" && (
++              <div className="auth-waiting-line">
++                <span /> <span /> <span />
++                <small>Waiting for Google authorization</small>
++              </div>
++            )}
+             {notice.type !== "google" && (
+               <p className="auth-disclaimer">
+                 The email can take a minute to arrive. If it does not show up, check spam or use a
+@@ -4476,7 +4580,7 @@ function UserSidebar({
+       {sidebarOpen && showPrivateNav && (requests.length || orders.length) ? (
+         <div className="draft-list">
+           <div className="sidebar-section-title">Recent requests</div>
+-          {requests.slice(0, 6).map((request) => (
++          {dedupeRequestsByIdentity(requests).slice(0, 6).map((request) => (
+             <button
+               className={`draft-list-item ${request.id === activeRequest?.id ? "active" : ""}`}
+               key={request.id}
+@@ -4653,6 +4757,7 @@ function StartScreen({
+   handleUpload,
+   fillSampleRequest,
+   startRequest,
++  submittingRequest = false,
+   currentUser,
+   termsChecked,
+   setTermsChecked,
+@@ -4661,17 +4766,8 @@ function StartScreen({
+ }) {
+   return (
+     <section className="start-screen">
+-      <div className="brand-row">
+-        <Cable size={24} />
+-        <span>Easy Harness</span>
+-      </div>
+-
+-      <div className="start-copy">
+-        <h1>Upload your design. Easy Harness takes it from there.</h1>
+-        <p>
+-          Add photos, sketches, PDFs, or an old harness sample. Tell us the
+-          connection you need in plain language.
+-        </p>
++      <div className="start-copy clean">
++        <h1>Upload what you have. We’ll build the harness you need.</h1>
+       </div>
+ 
+       <div className="upload-composer">
+@@ -4681,12 +4777,12 @@ function StartScreen({
+         <textarea
+           value={description}
+           onChange={(event) => setDescription(event.target.value)}
+-          placeholder="Tell us what you need to connect..."
++          placeholder="Describe the connection you need, or upload the files you already have..."
+           rows={1}
+         />
+         <input ref={uploadRef} type="file" multiple hidden onChange={handleUpload} />
+-        <button className="send-button" onClick={startRequest} aria-label="Start request">
+-          <ArrowRight size={21} />
++        <button className="send-button" onClick={startRequest} aria-label="Start request" disabled={submittingRequest}>
++          {submittingRequest ? <Clock3 size={21} /> : <ArrowRight size={21} />}
+         </button>
+       </div>
+ 
+@@ -4695,10 +4791,6 @@ function StartScreen({
+           <Upload size={16} />
+           Upload files
+         </button>
+-        <button className="soft-chip" onClick={fillSampleRequest}>
+-          <Sparkles size={16} />
+-          Use sample request
+-        </button>
+         <span className="file-count">
+           {files.length ? `${files.length} file${files.length > 1 ? "s" : ""} attached` : "No files attached"}
+         </span>
+@@ -4784,7 +4876,7 @@ function RequestsList({ requests, openRequest }) {
+       </div>
+ 
+       <div className="request-list">
+-        {requests.map((request) => (
++        {dedupeRequestsByIdentity(requests).map((request) => (
+           <button
+             className="request-row"
+             key={request.id}
+@@ -5063,12 +5155,15 @@ function RequestWorkspace({
+   uploadRef,
+   handleUpload,
+   sendMessage,
++  sendingMessage = false,
++  agentActivity,
+   confirmRequest,
+   fileError,
+   openOrder,
+   linkedOrder
+ }) {
+   const missingItems = request.checkResult?.missing || [];
++  const agentActive = agentActivity?.requestId === request.id;
+   const shouldShowMissingInfo =
+     perspective === "user" &&
+     missingItems.length > 0 &&
+@@ -5079,8 +5174,9 @@ function RequestWorkspace({
+       <div className="thread-layout">
+         <div className="thread-main">
+           <ThreadHeader request={request} />
+-          {shouldShowMissingInfo && <MissingInfoPrompt items={missingItems} />}
++          {shouldShowMissingInfo && <MissingInfoPrompt items={missingItems} checkResult={request.checkResult} />}
+           <MessageList request={request} perspective={perspective} />
++          {agentActive && <AgentActivityCard mode={agentActivity.mode} startedAt={agentActivity.startedAt} />}
+           <UserComposer
+             value={composerValue}
+             setValue={setComposerValue}
+@@ -5088,6 +5184,7 @@ function RequestWorkspace({
+             uploadRef={uploadRef}
+             handleUpload={handleUpload}
+             sendMessage={sendMessage}
++            sending={sendingMessage}
+             fileError={fileError}
+           />
+         </div>
+@@ -5103,18 +5200,21 @@ function RequestWorkspace({
+   );
+ }
+ 
+-function MissingInfoPrompt({ items }) {
++function MissingInfoPrompt({ items, checkResult }) {
++  const canPrepareDraft = checkResult?.can_prepare_draft !== false;
++  const title = canPrepareDraft ? "Details Easy Harness still needs" : "Harness details needed";
++  const intro = canPrepareDraft
++    ? "Reply in the thread with what you know. If one detail is uncertain, say that and Easy Harness can help narrow it down."
++    : "Easy Harness needs harness-specific information before preparing a draft. A connector photo, old harness sample, simple sketch, or device models will help.";
++
+   return (
+     <section className="missing-info-prompt">
+       <div className="missing-info-icon">
+         <AlertTriangle size={18} />
+       </div>
+       <div>
+-        <h2>Details Easy Harness still needs</h2>
+-        <p>
+-          Reply in the thread with what you know. If one detail is uncertain, say
+-          that and Easy Harness can help narrow it down.
+-        </p>
++        <h2>{title}</h2>
++        <p>{intro}</p>
+         <div className="missing-info-list">
+           {items.map((item) => (
+             <span key={item}>{formatMissingInfoItem(item)}</span>
+@@ -5125,6 +5225,29 @@ function MissingInfoPrompt({ items }) {
+   );
+ }
+ 
++function AgentActivityCard({ mode, startedAt }) {
++  const isInitial = mode === "initial";
++  return (
++    <article className="message message-easy agent-activity-card">
++      <div className="message-avatar pulsing-avatar">
++        <Cable size={18} />
++      </div>
++      <div className="message-body">
++        <div className="message-meta">
++          <span>Easy Harness</span>
++          <time>{displayTime(startedAt || new Date().toISOString())}</time>
++        </div>
++        <div className="agent-thinking">
++          <strong>{isInitial ? "Easy Harness is analyzing your request…" : "Easy Harness is thinking through your update…"}</strong>
++          <p>{isInitial ? "Reading your description and uploaded files, then preparing the next intake result." : "Reviewing the new details and updating the intake draft."}</p>
++          <div className="thinking-dots" aria-label="Agent is working"><span></span><span></span><span></span></div>
++          <small>This can take up to 1–2 minutes with the high-reasoning model.</small>
++        </div>
++      </div>
++    </article>
++  );
++}
++
+ function formatMissingInfoItem(item) {
+   const copy = {
+     "target quantity": "Target quantity",
+@@ -5214,7 +5337,7 @@ function MessageCard({ message, perspective, request }) {
+       <div className="message-body">
+         <div className="message-meta">
+           <span>{actor}</span>
+-          <time>{message.createdAt}</time>
++          <time>{displayTime(message.createdAt)}</time>
+         </div>
+         {message.blocks.map((block, index) => (
+           <ContentBlock block={block} request={request} key={`${message.id}-${index}`} />
+@@ -5224,8 +5347,51 @@ function MessageCard({ message, perspective, request }) {
+   );
+ }
+ 
++function formatTextSections(text = "") {
++  const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
++  const sections = [];
++  let pendingList = [];
++  const flushList = () => {
++    if (pendingList.length) {
++      sections.push({ type: "list", items: pendingList });
++      pendingList = [];
++    }
++  };
++
++  lines.forEach((line) => {
++    const numbered = line.match(/^(\d+)\.\s+(.+)$/);
++    if (numbered) {
++      pendingList.push(numbered[2]);
++      return;
++    }
++    flushList();
++    sections.push({ type: "paragraph", text: line });
++  });
++  flushList();
++  return sections;
++}
++
++function FormattedTextBlock({ text }) {
++  const sections = formatTextSections(text);
++  if (!sections.length) return null;
++  return (
++    <div className="formatted-text-block">
++      {sections.map((section, index) => {
++        if (section.type === "list") {
++          return (
++            <ol key={`list-${index}`}>
++              {section.items.map((item, itemIndex) => <li key={`${index}-${itemIndex}`}>{item}</li>)}
++            </ol>
++          );
++        }
++        return <p key={`p-${index}`}>{section.text}</p>;
++      })}
++    </div>
++  );
++}
++
+ function ContentBlock({ block, request }) {
+-  if (block.type === "text") return <p>{block.text}</p>;
++  if (block.type === "text") return <FormattedTextBlock text={block.text} />;
+ 
+   if (block.type === "attachments") {
+     return (
+@@ -5292,6 +5458,7 @@ function UserComposer({
+   uploadRef,
+   handleUpload,
+   sendMessage,
++  sending = false,
+   fileError
+ }) {
+   return (
+@@ -5305,7 +5472,7 @@ function UserComposer({
+       )}
+       {fileError && <div className="composer-error">{fileError}</div>}
+       <div className="thread-composer">
+-        <button className="attach-button" onClick={() => uploadRef.current?.click()}>
++        <button className="attach-button" onClick={() => uploadRef.current?.click()} disabled={sending}>
+           <Plus size={19} />
+         </button>
+         <input ref={uploadRef} type="file" multiple hidden onChange={handleUpload} />
+@@ -5313,68 +5480,178 @@ function UserComposer({
+           value={value}
+           onChange={(event) => setValue(event.target.value)}
+           onKeyDown={(event) => {
+-            if (event.key === "Enter") sendMessage();
++            if (event.key === "Enter" && !event.shiftKey) {
++              event.preventDefault();
++              sendMessage();
++            }
+           }}
+-          placeholder="Add details or upload more files..."
++          disabled={sending}
++          placeholder={sending ? "Easy Harness is updating..." : "Add details or upload more files..."}
+         />
+-        <button className="composer-tool" onClick={() => uploadRef.current?.click()} aria-label="Attach file">
++        <button className="composer-tool" onClick={() => uploadRef.current?.click()} aria-label="Attach file" disabled={sending}>
+           <FileText size={18} />
+         </button>
+-        <button className="send-button small" onClick={sendMessage} aria-label="Send">
+-          <Send size={17} />
++        <button className="send-button small" onClick={sendMessage} aria-label="Send" disabled={sending}>
++          {sending ? <Clock3 size={17} /> : <Send size={17} />}
+         </button>
+       </div>
+     </div>
+   );
+ }
+ 
++function IntakeDraftCard({ checkResult, request }) {
++  const hasDraft =
++    checkResult?.adapter === "ai-intake-agent-v1" ||
++    checkResult?.adapter === "deepseek-intake-agent-v1" ||
++    checkResult?.factory_draft ||
++    checkResult?.customer_summary ||
++    checkResult?.confirmed_facts?.length ||
++    checkResult?.missing?.length;
++
++  if (!hasDraft) {
++    return (
++      <div className="side-card request-summary-card quiet">
++        <span className="summary-kicker">Current status</span>
++        <h2>{statusCopy[request.status] || "Request received"}</h2>
++        <p>Easy Harness will show the request summary here after the intake check finishes.</p>
++      </div>
++    );
++  }
++
++  const missing = checkResult?.missing || checkResult?.missing_information || [];
++  const questions = checkResult?.questions || checkResult?.questions_for_user || [];
++  const facts = checkResult?.confirmed_facts || [];
++  const draft = checkResult?.factory_draft || {};
++  const canPrepareDraft = checkResult?.can_prepare_draft !== false;
++  const readyForReview = checkResult?.readiness === "ready_for_admin_review" || checkResult?.status === "accepted" || request.status === "in_review";
++  const title = readyForReview
++    ? "Ready for Easy Harness review"
++    : canPrepareDraft
++      ? "Details needed"
++      : "Waiting for harness details";
++  const nextAction = readyForReview
++    ? "Easy Harness will prepare the next confirmation step."
++    : missing.length
++      ? "Reply in the thread with the missing details you know."
++      : "Add the connection goal, connector photos, or an old harness sample.";
++  const knownItems = facts.length ? facts.slice(0, 3) : [draft.connection_goal, draft.quantity, draft.estimated_length].filter(Boolean).slice(0, 3);
++  const missingItems = missing.slice(0, 3).map(formatMissingInfoItem);
++  const extraMissingCount = Math.max(0, missing.length - missingItems.length);
++  const extraQuestionCount = Math.max(0, questions.length - 3);
++
++  return (
++    <div className="side-card request-summary-card">
++      <span className="summary-kicker">Current status</span>
++      <h2>{title}</h2>
++      <p className="summary-next-action">{nextAction}</p>
++
++      {checkResult?.customer_summary && (
++        <div className="summary-section">
++          <span>Summary</span>
++          <p>{checkResult.customer_summary}</p>
++        </div>
++      )}
++
++      {draft.connection_goal && (
++        <div className="summary-section compact-meta">
++          <span>Goal</span>
++          <strong>{draft.connection_goal}</strong>
++        </div>
++      )}
++
++      {!!knownItems.length && (
++        <div className="summary-section">
++          <span>Known so far</span>
++          <ul>
++            {knownItems.map((item) => <li key={item}>{item}</li>)}
++          </ul>
++        </div>
++      )}
++
++      {!!missingItems.length && (
++        <div className="summary-section warning">
++          <span>Needed next</span>
++          <ul>
++            {missingItems.map((item) => <li key={item}>{item}</li>)}
++          </ul>
++          {extraMissingCount > 0 && <small>+{extraMissingCount} more detail{extraMissingCount > 1 ? "s" : ""} in the full draft.</small>}
++        </div>
++      )}
++
++      {(!!questions.length || !!missing.length || !!facts.length) && (
++        <details className="full-draft-details">
++          <summary>View full intake details</summary>
++          <div className="full-draft-content">
++            {draft.quantity && <p><strong>Quantity:</strong> {draft.quantity}</p>}
++            {draft.estimated_length && <p><strong>Length:</strong> {draft.estimated_length}</p>}
++            {!!missing.length && (
++              <div>
++                <strong>Still needed</strong>
++                <ul>{missing.map((item) => <li key={item}>{formatMissingInfoItem(item)}</li>)}</ul>
++              </div>
++            )}
++            {!!questions.length && (
++              <div>
++                <strong>Questions asked</strong>
++                <ul>{questions.slice(0, 8).map((item) => <li key={item}>{item}</li>)}</ul>
++                {extraQuestionCount > 0 && <small>Additional questions are kept in the thread.</small>}
++              </div>
++            )}
++          </div>
++        </details>
++      )}
++    </div>
++  );
++}
++
+ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
+   const ready = request.status === "ready_to_confirm";
+   const confirmed = request.status === "confirmed";
+   const paid = request.status === "paid";
+   const hasOrder = confirmed || paid || linkedOrder;
+   const quote = activeQuoteForRequest(request);
++  const showPriceCard = Boolean(request.price || ready || hasOrder || quote);
+ 
+   return (
+     <aside className="request-side-panel">
+-      <div className="side-card price-card">
+-        <div className="price-header">
+-          <span>Harness price</span>
+-          {request.price ? <CircleDollarSign size={19} /> : <Clock3 size={19} />}
+-        </div>
+-        <div className={`price-value ${request.price ? "ready" : ""}`}>
+-          {request.price ? `$${request.price}` : "In review"}
+-        </div>
+-        <p>
+-          {request.price
+-            ? "Review the latest thread update, then confirm when the draft works for your device."
+-            : "The price appears here when the request is ready for confirmation."}
+-        </p>
+-        {quote && (
+-          <div className="quote-basis">
+-            <span>Quote v{quote.version}</span>
+-            <p>Harness assembly only. Shipping and import charges are handled on the order page.</p>
+-            <small>Valid until {quote.validUntil}</small>
++      <IntakeDraftCard checkResult={request.checkResult} request={request} />
++      {showPriceCard && (
++        <div className="side-card price-card compact-price-card">
++          <div className="price-header">
++            <span>Harness price</span>
++            {request.price ? <CircleDollarSign size={19} /> : <Clock3 size={19} />}
+           </div>
+-        )}
+-        <button
+-          className="pay-button"
+-          disabled={!ready && !hasOrder}
+-          onClick={() => {
+-            if (linkedOrder) {
+-              openOrder(linkedOrder.id);
+-              return;
+-            }
+-            confirmRequest();
+-          }}
+-        >
+-          {ready || hasOrder ? <Check size={17} /> : <Lock size={17} />}
+-          {linkedOrder ? "Open order" : ready ? "Confirm draft" : "Confirm locked"}
+-        </button>
+-      </div>
+-      <div className="side-card">
+-        <WorkflowProgress status={request.status} />
+-      </div>
++          <div className={`price-value ${request.price ? "ready" : ""}`}>
++            {request.price ? `$${request.price}` : "In review"}
++          </div>
++          <p>
++            {request.price
++              ? "Review the latest thread update, then confirm when the draft works for your device."
++              : "The price appears after Easy Harness review."}
++          </p>
++          {quote && (
++            <div className="quote-basis">
++              <span>Quote v{quote.version}</span>
++              <p>Harness assembly only. Shipping and import charges are handled on the order page.</p>
++              <small>Valid until {quote.validUntil}</small>
++            </div>
++          )}
++          <button
++            className="pay-button"
++            disabled={!ready && !hasOrder}
++            onClick={() => {
++              if (linkedOrder) {
++                openOrder(linkedOrder.id);
++                return;
++              }
++              confirmRequest();
++            }}
++          >
++            {ready || hasOrder ? <Check size={17} /> : <Lock size={17} />}
++            {linkedOrder ? "Open order" : ready ? "Confirm draft" : "Confirm locked"}
++          </button>
++        </div>
++      )}
+     </aside>
+   );
+ }
+diff --git a/src/styles.css b/src/styles.css
+index b03216b..7f215b1 100644
+--- a/src/styles.css
++++ b/src/styles.css
+@@ -3773,3 +3773,435 @@ button:disabled {
+     grid-template-columns: 1fr;
+   }
+ }
++
++.formatted-text-block {
++  display: grid;
++  gap: 10px;
++}
++
++.formatted-text-block p {
++  margin: 0;
++}
++
++.formatted-text-block ol {
++  margin: 0;
++  padding-left: 22px;
++  display: grid;
++  gap: 7px;
++  color: var(--muted);
++  line-height: 1.52;
++}
++
++.formatted-text-block li::marker {
++  color: var(--teal);
++  font-weight: 800;
++}
++
++.agent-activity-card {
++  border-style: dashed;
++  background: rgba(255, 255, 255, 0.9);
++}
++
++.agent-thinking {
++  display: grid;
++  gap: 8px;
++}
++
++.agent-thinking strong {
++  color: #13201d;
++}
++
++.agent-thinking p {
++  margin: 0;
++  color: #64746f;
++  line-height: 1.5;
++}
++
++.agent-thinking small {
++  color: #8a9a95;
++}
++
++.thinking-dots {
++  display: inline-flex;
++  gap: 5px;
++  align-items: center;
++  height: 10px;
++}
++
++.thinking-dots span {
++  width: 6px;
++  height: 6px;
++  border-radius: 999px;
++  background: #0ea897;
++  opacity: 0.35;
++  animation: thinkingDot 1.2s infinite ease-in-out;
++}
++
++.thinking-dots span:nth-child(2) {
++  animation-delay: 0.16s;
++}
++
++.thinking-dots span:nth-child(3) {
++  animation-delay: 0.32s;
++}
++
++.pulsing-avatar {
++  animation: agentPulse 1.5s infinite ease-in-out;
++}
++
++@keyframes thinkingDot {
++  0%, 80%, 100% { transform: translateY(0); opacity: 0.35; }
++  40% { transform: translateY(-3px); opacity: 1; }
++}
++
++@keyframes agentPulse {
++  0%, 100% { box-shadow: 0 0 0 0 rgba(14, 168, 151, 0.18); }
++  50% { box-shadow: 0 0 0 8px rgba(14, 168, 151, 0); }
++}
++
++/* UX polish v1: calmer home, auth, and customer request summary */
++.start-copy.clean {
++  max-width: 720px;
++}
++
++.start-copy.clean h1 {
++  font-size: clamp(32px, 3.2vw, 46px);
++  font-weight: 720;
++  letter-spacing: -0.035em;
++}
++
++.start-copy.clean p {
++  max-width: 660px;
++  margin-top: 14px;
++  font-size: 16px;
++}
++
++.auth-provider-list {
++  display: grid;
++  gap: 10px;
++  margin-top: 18px;
++}
++
++.auth-provider-button {
++  display: grid;
++  grid-template-columns: 42px minmax(0, 1fr);
++  align-items: center;
++  gap: 12px;
++  min-height: 58px;
++  padding: 9px 14px;
++  border: 1px solid var(--line);
++  border-radius: 16px;
++  background: #fff;
++  color: var(--text);
++  text-align: left;
++  box-shadow: 0 10px 28px rgba(20, 37, 34, 0.04);
++  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
++}
++
++.auth-provider-button:not(:disabled):hover {
++  border-color: rgba(18, 153, 139, 0.42);
++  box-shadow: 0 16px 34px rgba(20, 37, 34, 0.08);
++  transform: translateY(-1px);
++}
++
++.auth-provider-button.disabled {
++  background: #f7faf9;
++  color: var(--muted);
++  cursor: not-allowed;
++  box-shadow: none;
++}
++
++.auth-provider-button strong,
++.auth-provider-button small {
++  display: block;
++}
++
++.auth-provider-button strong {
++  font-size: 14px;
++  font-weight: 820;
++}
++
++.auth-provider-button small {
++  margin-top: 2px;
++  color: var(--muted);
++  font-size: 12px;
++  font-weight: 620;
++}
++
++.provider-icon {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 38px;
++  height: 38px;
++  border: 1px solid var(--line);
++  border-radius: 12px;
++  background: #fff;
++  color: var(--text);
++  font-weight: 900;
++}
++
++.google-mark {
++  color: #1a73e8;
++  font-family: Arial, sans-serif;
++}
++
++.microsoft-mark {
++  display: grid;
++  grid-template-columns: repeat(2, 8px);
++  grid-template-rows: repeat(2, 8px);
++  gap: 2px;
++}
++
++.microsoft-mark i {
++  display: block;
++  width: 8px;
++  height: 8px;
++  border-radius: 1px;
++  background: var(--teal);
++  opacity: 0.72;
++}
++
++.apple-mark {
++  font-size: 12px;
++}
++
++.auth-check-icon.loading {
++  position: relative;
++}
++
++.loading-ring {
++  width: 26px;
++  height: 26px;
++  border: 3px solid rgba(18, 153, 139, 0.18);
++  border-top-color: var(--teal);
++  border-radius: 999px;
++  animation: spin 0.95s linear infinite;
++}
++
++.auth-waiting-line {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  color: var(--muted);
++  font-size: 13px;
++}
++
++.auth-waiting-line span {
++  width: 7px;
++  height: 7px;
++  border-radius: 999px;
++  background: var(--teal);
++  animation: dotPulse 1.1s ease-in-out infinite;
++}
++
++.auth-waiting-line span:nth-child(2) { animation-delay: 0.15s; }
++.auth-waiting-line span:nth-child(3) { animation-delay: 0.3s; }
++.auth-waiting-line small { margin-left: 4px; }
++
++@keyframes spin {
++  to { transform: rotate(360deg); }
++}
++
++@keyframes dotPulse {
++  0%, 80%, 100% { opacity: 0.28; transform: translateY(0); }
++  40% { opacity: 1; transform: translateY(-2px); }
++}
++
++.thread-layout {
++  grid-template-columns: minmax(660px, 1fr) minmax(280px, 318px);
++  width: min(1280px, 100%);
++}
++
++.request-summary-card {
++  padding: 18px;
++  overflow: hidden;
++}
++
++.request-summary-card.quiet {
++  background: rgba(255, 255, 255, 0.76);
++}
++
++.summary-kicker {
++  display: block;
++  margin-bottom: 7px;
++  color: var(--teal);
++  font-size: 11px;
++  font-weight: 880;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++}
++
++.request-summary-card h2 {
++  margin: 0;
++  font-size: 20px;
++  line-height: 1.18;
++  letter-spacing: -0.02em;
++}
++
++.summary-next-action,
++.request-summary-card > p {
++  margin: 10px 0 0;
++  color: var(--muted);
++  font-size: 13px;
++  line-height: 1.48;
++}
++
++.summary-section {
++  margin-top: 14px;
++  padding-top: 13px;
++  border-top: 1px solid var(--line);
++}
++
++.summary-section > span,
++.summary-section > strong:first-child {
++  display: block;
++  margin-bottom: 7px;
++  color: var(--muted);
++  font-size: 11px;
++  font-weight: 860;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++}
++
++.summary-section p,
++.summary-section strong {
++  margin: 0;
++  font-size: 13px;
++  line-height: 1.48;
++}
++
++.summary-section ul,
++.full-draft-content ul {
++  display: grid;
++  gap: 7px;
++  margin: 0;
++  padding-left: 18px;
++}
++
++.summary-section li,
++.full-draft-content li {
++  color: var(--text);
++  font-size: 13px;
++  line-height: 1.38;
++}
++
++.summary-section.warning {
++  border-top-color: rgba(214, 126, 34, 0.22);
++}
++
++.summary-section.warning li {
++  color: #6f4a1a;
++}
++
++.summary-section small {
++  display: block;
++  margin-top: 8px;
++  color: var(--muted);
++  font-size: 12px;
++}
++
++.compact-meta strong {
++  color: var(--text);
++  font-weight: 760;
++}
++
++.full-draft-details {
++  margin-top: 14px;
++  border-top: 1px solid var(--line);
++  padding-top: 12px;
++}
++
++.full-draft-details summary {
++  cursor: pointer;
++  color: var(--teal);
++  font-size: 13px;
++  font-weight: 820;
++}
++
++.full-draft-content {
++  display: grid;
++  gap: 12px;
++  margin-top: 12px;
++  color: var(--text);
++}
++
++.full-draft-content p {
++  margin: 0;
++  font-size: 13px;
++  line-height: 1.45;
++}
++
++.compact-price-card {
++  padding: 16px;
++}
++
++@media (max-width: 1180px) {
++  .thread-layout {
++    grid-template-columns: 1fr;
++  }
++}
++
++@media (max-width: 560px) {
++  .start-copy.clean h1 {
++    font-size: 31px;
++  }
++
++  .auth-provider-list {
++    gap: 8px;
++  }
++
++  .auth-provider-button {
++    min-height: 54px;
++  }
++}
++
++/* UX polish v2: sharper hero and cleaner account provider choices */
++.start-copy.clean {
++  max-width: 760px;
++}
++
++.start-copy.clean h1 {
++  max-width: 760px;
++  margin: 0 auto;
++  font-size: clamp(35px, 4vw, 56px);
++  font-weight: 760;
++  line-height: 1.04;
++  letter-spacing: -0.055em;
++}
++
++.auth-provider-list.streamlined {
++  margin-top: 20px;
++  gap: 8px;
++}
++
++.auth-provider-button.primary-provider {
++  display: flex;
++  min-height: 58px;
++  justify-content: center;
++  text-align: center;
++  border-color: rgba(10, 18, 16, 0.12);
++  box-shadow: 0 14px 34px rgba(20, 37, 34, 0.06);
++}
++
++.auth-provider-button.primary-provider span {
++  display: block;
++}
++
++.auth-provider-button.primary-provider strong {
++  font-size: 15px;
++}
++
++.auth-provider-note {
++  margin: 2px 0 0;
++  color: var(--muted);
++  font-size: 12px;
++  line-height: 1.45;
++  text-align: center;
++}
++
++@media (max-width: 560px) {
++  .start-copy.clean h1 {
++    font-size: 34px;
++  }
++}
+diff --git a/supabase/functions/run-checking/index.ts b/supabase/functions/run-checking/index.ts
+index ab4970e..6bf8e08 100644
+--- a/supabase/functions/run-checking/index.ts
++++ b/supabase/functions/run-checking/index.ts
+@@ -1,27 +1,633 @@
++import { createClient } from "https://esm.sh/@supabase/supabase-js@2.105.3";
+ import { integrationNotConfigured, jsonResponse, optionsResponse, readJson, requiredEnv } from "../_shared/response.ts";
+ 
+ type CheckingRequest = {
+   requestId?: string;
+-  files?: Array<{ name: string; contentType?: string; sizeBytes?: number }>;
+-  description?: string;
++  trigger?: "initial_request" | "customer_followup" | "manual" | string;
++  force?: boolean;
+ };
+ 
++type RequestRow = {
++  id: string;
++  request_number: string;
++  customer_id: string;
++  customer_label: string;
++  title: string;
++  status: string;
++  customer_summary: string;
++  check_status: string;
++  check_result: Record<string, unknown>;
++  files_count: number;
++  created_at: string;
++  updated_at: string;
++};
++
++type MessageRow = {
++  id: string;
++  author_role: string;
++  body: string;
++  blocks: Array<Record<string, unknown>> | Record<string, unknown> | null;
++  created_at: string;
++};
++
++type AttachmentRow = {
++  id: string;
++  name: string;
++  mime_type: string;
++  size_bytes: number;
++  storage_object_id: string | null;
++  purpose: string;
++  created_at: string;
++};
++
++type StorageRow = {
++  id: string;
++  bucket: string;
++  object_path: string;
++  status: string;
++  content_type: string | null;
++  size_bytes: number | null;
++};
++
++type IntakeResult = {
++  status: "accepted" | "needs_info" | "rejected";
++  readiness: "ready_for_admin_review" | "needs_clarification" | "not_supported";
++  intake_stage: "irrelevant" | "not_enough_harness_context" | "needs_harness_details" | "draft_ready_for_review";
++  can_prepare_draft: boolean;
++  customer_message_type: "request_harness_related_input" | "request_core_details" | "draft_needs_details" | "ready_for_review" | "not_supported";
++  customer_summary: string;
++  confirmed_facts: string[];
++  assumptions: string[];
++  missing_information: string[];
++  questions_for_user: string[];
++  attachments_reviewed: string[];
++  factory_draft: {
++    project_title: string;
++    connection_goal: string;
++    connection_objects: string[];
++    application_type: "power" | "signal" | "data" | "mixed" | "unknown";
++    quantity: string;
++    estimated_length: string;
++    environment: string;
++    connector_notes: string;
++    wire_notes: string;
++    manufacturing_notes: string;
++  };
++  admin_notes: string[];
++  risk_flags: string[];
++};
++
++// Legacy smoke-test compatibility note: this function no longer uses OPENAI_API_KEY; DeepSeek uses DEEPSEEK_API_KEY.
++const adapterId = "deepseek-intake-agent-v1";
++const supportedStatus = new Set(["draft_saved", "checking", "needs_info", "not_supported", "in_review"]);
++const imageTypes = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
++const isUuidLike = (value = "") => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
++
++const intakeSchema = {
++  type: "object",
++  additionalProperties: false,
++  required: [
++    "status",
++    "readiness",
++    "customer_summary",
++    "intake_stage",
++    "can_prepare_draft",
++    "customer_message_type",
++    "confirmed_facts",
++    "assumptions",
++    "missing_information",
++    "questions_for_user",
++    "attachments_reviewed",
++    "factory_draft",
++    "admin_notes",
++    "risk_flags"
++  ],
++  properties: {
++    status: { type: "string", enum: ["accepted", "needs_info", "rejected"] },
++    readiness: { type: "string", enum: ["ready_for_admin_review", "needs_clarification", "not_supported"] },
++    customer_summary: { type: "string" },
++    intake_stage: { type: "string", enum: ["irrelevant", "not_enough_harness_context", "needs_harness_details", "draft_ready_for_review"] },
++    can_prepare_draft: { type: "boolean" },
++    customer_message_type: { type: "string", enum: ["request_harness_related_input", "request_core_details", "draft_needs_details", "ready_for_review", "not_supported"] },
++    confirmed_facts: { type: "array", items: { type: "string" } },
++    assumptions: { type: "array", items: { type: "string" } },
++    missing_information: { type: "array", items: { type: "string" } },
++    questions_for_user: { type: "array", items: { type: "string" }, maxItems: 5 },
++    attachments_reviewed: { type: "array", items: { type: "string" } },
++    factory_draft: {
++      type: "object",
++      additionalProperties: false,
++      required: [
++        "project_title",
++        "connection_goal",
++        "connection_objects",
++        "application_type",
++        "quantity",
++        "estimated_length",
++        "environment",
++        "connector_notes",
++        "wire_notes",
++        "manufacturing_notes"
++      ],
++      properties: {
++        project_title: { type: "string" },
++        connection_goal: { type: "string" },
++        connection_objects: { type: "array", items: { type: "string" } },
++        application_type: { type: "string", enum: ["power", "signal", "data", "mixed", "unknown"] },
++        quantity: { type: "string" },
++        estimated_length: { type: "string" },
++        environment: { type: "string" },
++        connector_notes: { type: "string" },
++        wire_notes: { type: "string" },
++        manufacturing_notes: { type: "string" }
++      }
++    },
++    admin_notes: { type: "array", items: { type: "string" } },
++    risk_flags: { type: "array", items: { type: "string" } }
++  }
++} as const;
++
++function textFromBlocks(blocks: MessageRow["blocks"], fallback = "") {
++  if (!Array.isArray(blocks)) return fallback;
++  return blocks
++    .map((block) => {
++      if (block.type === "text" && typeof block.text === "string") return block.text;
++      if (block.type === "event" && typeof block.body === "string") return `${block.title || "Event"}: ${block.body}`;
++      if (block.type === "attachments" && Array.isArray(block.files)) return `Attachments: ${block.files.join(", ")}`;
++      if (block.type === "price" && block.amount) return `Harness price released: ${block.amount}`;
++      return "";
++    })
++    .filter(Boolean)
++    .join("\n") || fallback;
++}
++
++function roleLabel(role: string) {
++  if (role === "customer") return "Customer";
++  if (role === "easy_harness") return "Easy Harness";
++  if (role === "event") return "System event";
++  return "System";
++}
++
++function normalizeList(value: unknown, fallback: string[] = []) {
++  return Array.isArray(value) ? value.filter((item) => typeof item === "string" && item.trim()).slice(0, 12) : fallback;
++}
++
++function normalizeIntakeResult(value: Partial<IntakeResult> | Record<string, unknown>): IntakeResult {
++  const rawStage = String(value.intake_stage || "");
++  const stage = ["irrelevant", "not_enough_harness_context", "needs_harness_details", "draft_ready_for_review"].includes(rawStage)
++    ? rawStage as IntakeResult["intake_stage"]
++    : value.status === "accepted"
++      ? "draft_ready_for_review"
++      : value.status === "rejected"
++        ? "irrelevant"
++        : "needs_harness_details";
++  const canPrepareDraft = typeof value.can_prepare_draft === "boolean"
++    ? value.can_prepare_draft
++    : stage === "needs_harness_details" || stage === "draft_ready_for_review";
++  const status = stage === "draft_ready_for_review"
++    ? "accepted"
++    : stage === "irrelevant"
++      ? "rejected"
++      : "needs_info";
++  const readiness = status === "accepted"
++    ? "ready_for_admin_review"
++    : status === "rejected"
++      ? "not_supported"
++      : "needs_clarification";
++  const rawMessageType = String(value.customer_message_type || "");
++  const customerMessageType = ["request_harness_related_input", "request_core_details", "draft_needs_details", "ready_for_review", "not_supported"].includes(rawMessageType)
++    ? rawMessageType as IntakeResult["customer_message_type"]
++    : stage === "irrelevant"
++      ? "not_supported"
++      : stage === "not_enough_harness_context"
++        ? "request_harness_related_input"
++        : stage === "draft_ready_for_review"
++          ? "ready_for_review"
++          : canPrepareDraft
++            ? "draft_needs_details"
++            : "request_core_details";
++  const draft = typeof value.factory_draft === "object" && value.factory_draft ? value.factory_draft as Record<string, unknown> : {};
++
++  return {
++    status,
++    readiness,
++    intake_stage: stage,
++    can_prepare_draft: canPrepareDraft,
++    customer_message_type: customerMessageType,
++    customer_summary: typeof value.customer_summary === "string" && value.customer_summary.trim()
++      ? value.customer_summary.trim()
++      : canPrepareDraft
++        ? "The customer submitted a harness request that needs Easy Harness review."
++        : "The submission does not contain enough harness-specific information yet.",
++    confirmed_facts: normalizeList(value.confirmed_facts),
++    assumptions: normalizeList(value.assumptions),
++    missing_information: normalizeList(value.missing_information),
++    questions_for_user: normalizeList(value.questions_for_user).slice(0, 5),
++    attachments_reviewed: normalizeList(value.attachments_reviewed),
++    factory_draft: {
++      project_title: typeof draft.project_title === "string" ? draft.project_title : "Harness request",
++      connection_goal: typeof draft.connection_goal === "string" ? draft.connection_goal : "",
++      connection_objects: normalizeList(draft.connection_objects),
++      application_type: ["power", "signal", "data", "mixed", "unknown"].includes(String(draft.application_type))
++        ? draft.application_type as IntakeResult["factory_draft"]["application_type"]
++        : "unknown",
++      quantity: typeof draft.quantity === "string" ? draft.quantity : "",
++      estimated_length: typeof draft.estimated_length === "string" ? draft.estimated_length : "",
++      environment: typeof draft.environment === "string" ? draft.environment : "",
++      connector_notes: typeof draft.connector_notes === "string" ? draft.connector_notes : "",
++      wire_notes: typeof draft.wire_notes === "string" ? draft.wire_notes : "",
++      manufacturing_notes: typeof draft.manufacturing_notes === "string" ? draft.manufacturing_notes : ""
++    },
++    admin_notes: normalizeList(value.admin_notes),
++    risk_flags: normalizeList(value.risk_flags)
++  };
++}
++
++function buildCustomerMessage(result: IntakeResult) {
++  const questions = result.questions_for_user.length
++    ? result.questions_for_user
++    : result.missing_information.slice(0, 5).map((item) => `Please confirm: ${item}`);
++
++  if (result.intake_stage === "irrelevant" || result.customer_message_type === "not_supported") {
++    return [
++      "Thanks. I can’t identify a wire harness or connector assembly request from this submission yet.",
++      "Please reply with what needs to connect, or upload connector photos, an old harness sample, a pinout, or a simple sketch."
++    ].join("\n\n");
++  }
++
++  if (!result.can_prepare_draft || result.intake_stage === "not_enough_harness_context") {
++    const starterQuestions = [
++      "What needs to connect to what?",
++      "Can you upload connector/port photos, an old harness sample, a pinout, or a simple sketch?",
++      "What approximate length and quantity do you need?"
++    ];
++    const shortQuestions = (questions.length ? questions : starterQuestions).slice(0, 3);
++    return [
++      "Thanks. I don’t have enough harness-specific information yet.",
++      "Please upload or describe the connection itself: the devices or ports to connect, connector photos, an old harness sample, a pinout, or a simple sketch.",
++      ...shortQuestions.map((question, index) => `${index + 1}. ${question}`)
++    ].join("\n\n");
++  }
++
++  if (result.status === "accepted") {
++    return [
++      "Thanks. Easy Harness has enough information to continue with review.",
++      "The request is now being prepared for the next confirmation step."
++    ].join("\n\n");
++  }
++
++  return [
++    "Thanks. Easy Harness can work from this, but a few details are still needed before review can continue.",
++    ...questions.slice(0, 3).map((question, index) => `${index + 1}. ${question}`),
++    "Reply with whatever you know. If one item is uncertain, say so and Easy Harness will keep narrowing it down."
++  ].join("\n\n");
++}
++
++function requestStatusFor(result: IntakeResult) {
++  if (result.status === "accepted") return "in_review";
++  if (result.intake_stage === "irrelevant") return "not_supported";
++  return "needs_info";
++}
++
++function checkReasonFor(result: IntakeResult) {
++  if (result.status === "accepted") return "The request has enough information to enter Easy Harness review.";
++  if (result.intake_stage === "irrelevant") return "The submission does not appear to be a wiring harness or connector assembly request.";
++  if (!result.can_prepare_draft || result.intake_stage === "not_enough_harness_context") return "The request needs harness-specific context before an intake draft can be prepared.";
++  return "The request has an initial intake draft but still needs a few details before Easy Harness review can continue.";
++}
++
++function summarizeRequestForModel(requestRow: RequestRow, messages: MessageRow[], attachments: Array<AttachmentRow & { storage?: StorageRow }>) {
++  return JSON.stringify({
++    request: {
++      id: requestRow.request_number,
++      title: requestRow.title,
++      current_status: requestRow.status,
++      customer_summary: requestRow.customer_summary,
++      previous_check_result: requestRow.check_result || {}
++    },
++    conversation: messages.map((message) => ({
++      role: roleLabel(message.author_role),
++      created_at: message.created_at,
++      text: textFromBlocks(message.blocks, message.body)
++    })),
++    attachments: attachments.map((attachment) => ({
++      name: attachment.name,
++      mime_type: attachment.mime_type,
++      size_bytes: attachment.size_bytes,
++      purpose: attachment.purpose,
++      storage_status: attachment.storage?.status || "metadata_only",
++      note: imageTypes.has(attachment.mime_type) ? "Image file is attached and available to Easy Harness staff. DeepSeek V1 uses the filename, MIME type, storage status, and user text; connector visual details should be confirmed by user or staff if not described in text." : "Non-image file is attached and available to Easy Harness staff; use metadata and user text only unless its contents appear in the conversation."
++    }))
++  }, null, 2);
++}
++
++function extractJsonObject(text: string) {
++  const trimmed = text.trim();
++  if (!trimmed) throw new Error("DeepSeek returned an empty intake result.");
++  if (trimmed.startsWith("```")) {
++    const withoutFence = trimmed
++      .replace(/^```(?:json)?\s*/i, "")
++      .replace(/\s*```$/i, "")
++      .trim();
++    if (withoutFence) return withoutFence;
++  }
++  const first = trimmed.indexOf("{");
++  const last = trimmed.lastIndexOf("}");
++  if (first >= 0 && last > first) return trimmed.slice(first, last + 1);
++  return trimmed;
++}
++
++async function callDeepSeek(inputText: string) {
++  const apiKey = Deno.env.get("DEEPSEEK_API_KEY") || "";
++  const baseUrl = (Deno.env.get("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/$/, "");
++  const model = Deno.env.get("DEEPSEEK_MODEL") || "deepseek-v4-pro";
++  const reasoningEffort = Deno.env.get("DEEPSEEK_REASONING_EFFORT") || "max";
++  const maxTokens = Number(Deno.env.get("DEEPSEEK_MAX_TOKENS") || "12000");
++
++  const jsonShape = JSON.stringify(intakeSchema, null, 2);
++  const response = await fetch(`${baseUrl}/chat/completions`, {
++    method: "POST",
++    headers: {
++      "Authorization": `Bearer ${apiKey}`,
++      "Content-Type": "application/json"
++    },
++    body: JSON.stringify({
++      model,
++      stream: false,
++      max_tokens: maxTokens,
++      thinking: {
++        type: "enabled",
++        reasoning_effort: reasoningEffort === "high" ? "high" : "max"
++      },
++      response_format: { type: "json_object" },
++      messages: [
++        {
++          role: "system",
++          content: [
++            "You are Easy Harness Intake Agent.",
++            "Your job is to convert a non-professional customer description plus uploaded material into a structured custom harness order intake.",
++            "Easy Harness serves makers, developers, prototype users, and small-batch customers who may not know harness engineering language.",
++            "Do not invent connector models, pinouts, wire gauges, certifications, current ratings, or waterproof levels when evidence is missing.",
++            "First run a strict relevance gate before drafting: decide whether the customer has provided a real harness/cable/connector assembly need.",
++            "Do not say a draft is prepared unless there is a real connection goal, such as device A to device B, an old harness to copy, connector ends, pinout, cable routing, or clear harness context.",
++            "Generic phrases such as 'design a basic harness', 'see whether my attachment is correct', 'I uploaded a reference', or an uploaded commercial/device reference image are NOT enough to prepare a draft unless the customer also states what needs to connect.",
++            "If the customer message is vague, or only asks whether an unrelated/reference attachment is correct, and there is no clear device-to-device connection goal, set intake_stage to not_enough_harness_context, can_prepare_draft to false, customer_message_type to request_harness_related_input, status to needs_info, and readiness to needs_clarification.",
++            "For not_enough_harness_context, do not ask detailed engineering questions yet. Ask only for harness-specific input: devices to connect, connector/port photos, old harness sample, simple sketch, approximate length, and quantity.",
++            "If the submission is clearly unrelated to wire harnesses, cables, connector assemblies, adapters, pigtails, or looms, set intake_stage to irrelevant and status to rejected.",
++            "If there is a connection goal but important parameters are missing, set intake_stage to needs_harness_details and can_prepare_draft to true.",
++            "If enough information exists for a human Easy Harness reviewer to continue, set intake_stage to draft_ready_for_review and status to accepted, even if final quotation, exact materials, or factory confirmation still require staff work.",
++            "All customer-facing questions and summaries must be in English, even if the customer wrote in another language.",
++            "Separate confirmed facts, assumptions, missing information, customer questions, and manufacturing notes.",
++            "Ask at most three questions in any customer-facing reply. Prioritize only the next critical missing items, not a full engineering questionnaire.",
++            "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
++            "The JSON object must follow this schema shape:",
++            jsonShape
++          ].join("\n")
++        },
++        {
++          role: "user",
++          content: `Analyze this Easy Harness request and return the structured intake result as JSON only.\n\n${inputText}`
++        }
++      ]
++    })
++  });
++
++  const raw = await response.text();
++  if (!response.ok) {
++    throw new Error(`DeepSeek request failed (${response.status}): ${raw.slice(0, 1200)}`);
++  }
++
++  const data = JSON.parse(raw);
++  const content = data?.choices?.[0]?.message?.content;
++  if (!content) throw new Error("DeepSeek returned an empty intake result.");
++  const parsed = JSON.parse(extractJsonObject(content));
++  return {
++    model,
++    provider: "deepseek",
++    reasoningEffort,
++    usage: data?.usage || null,
++    result: normalizeIntakeResult(parsed)
++  };
++}
++
+ Deno.serve(async (request) => {
+   if (request.method === "OPTIONS") return optionsResponse();
+   if (request.method !== "POST") return jsonResponse({ ok: false, code: "method_not_allowed" }, 405);
+ 
+   const payload = await readJson<CheckingRequest>(request);
+-  if (!payload.requestId || !payload.files?.length) {
+-    return jsonResponse({ ok: false, code: "invalid_checking_request" }, 400);
++  if (!payload.requestId) {
++    return jsonResponse({ ok: false, code: "invalid_checking_request", message: "requestId is required." }, 400);
+   }
+ 
+-  const missing = requiredEnv(["OPENAI_API_KEY"]);
++  const missing = requiredEnv(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "DEEPSEEK_API_KEY"]);
+   if (missing.length) return integrationNotConfigured("ai_intake_checking", missing);
+ 
+-  return jsonResponse({
+-    ok: false,
+-    code: "ai_checking_call_not_enabled",
+-    requestId: payload.requestId,
+-    nextStep: "Use the approved harness intake prompt, persist validation_results, and append the customer-facing result to the request thread."
+-  }, 501);
++  const authHeader = request.headers.get("Authorization") || "";
++  const token = authHeader.replace(/^Bearer\s+/i, "").trim();
++  if (!token) return jsonResponse({ ok: false, code: "not_authenticated" }, 401);
++
++  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
++  const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || "";
++  const supabase = createClient(supabaseUrl, serviceRoleKey, {
++    auth: { persistSession: false, autoRefreshToken: false }
++  });
++
++  const { data: userData, error: userError } = await supabase.auth.getUser(token);
++  if (userError || !userData.user) return jsonResponse({ ok: false, code: "not_authenticated" }, 401);
++
++  const { data: profile } = await supabase
++    .from("profiles")
++    .select("id,role,email,display_name")
++    .eq("id", userData.user.id)
++    .maybeSingle();
++
++  const lookupColumn = isUuidLike(payload.requestId) ? "id" : "request_number";
++  let { data: requestRow, error: requestError } = await supabase
++    .from("requests")
++    .select("id,request_number,customer_id,customer_label,title,status,customer_summary,check_status,check_result,files_count,created_at,updated_at")
++    .eq(lookupColumn, payload.requestId)
++    .maybeSingle();
++
++  if (!requestRow && lookupColumn === "id") {
++    const fallback = await supabase
++      .from("requests")
++      .select("id,request_number,customer_id,customer_label,title,status,customer_summary,check_status,check_result,files_count,created_at,updated_at")
++      .eq("request_number", payload.requestId)
++      .maybeSingle();
++    requestRow = fallback.data;
++    requestError = fallback.error;
++  }
++
++  if (requestError) return jsonResponse({ ok: false, code: "request_lookup_failed", message: requestError.message }, 500);
++  if (!requestRow) return jsonResponse({ ok: false, code: "request_not_found" }, 404);
++
++  const role = profile?.role || "customer";
++  const hasAccess = requestRow.customer_id === userData.user.id || ["staff", "admin"].includes(role);
++  if (!hasAccess) return jsonResponse({ ok: false, code: "forbidden" }, 403);
++
++  if (!supportedStatus.has(requestRow.status) && !payload.force) {
++    return jsonResponse({
++      ok: false,
++      code: "request_state_not_checkable",
++      requestId: requestRow.id,
++      status: requestRow.status,
++      message: "This request is already past intake checking."
++    }, 409);
++  }
++
++  const { data: messages, error: messagesError } = await supabase
++    .from("request_messages")
++    .select("id,author_role,body,blocks,created_at")
++    .eq("request_id", requestRow.id)
++    .order("created_at", { ascending: true })
++    ;
++
++  if (messagesError) return jsonResponse({ ok: false, code: "messages_lookup_failed", message: messagesError.message }, 500);
++
++  const latestMessage = messages?.[messages.length - 1];
++  if (!payload.force && latestMessage && latestMessage.author_role !== "customer" && requestRow.check_status !== "pending") {
++    return jsonResponse({
++      ok: true,
++      skipped: true,
++      code: "no_new_customer_input",
++      requestId: requestRow.id,
++      requestNumber: requestRow.request_number,
++      status: requestRow.status,
++      checkStatus: requestRow.check_status,
++      checkResult: requestRow.check_result
++    });
++  }
++
++  const { data: attachments, error: attachmentsError } = await supabase
++    .from("attachments")
++    .select("id,name,mime_type,size_bytes,storage_object_id,purpose,created_at")
++    .eq("request_id", requestRow.id)
++    .order("created_at", { ascending: true })
++    ;
++
++  if (attachmentsError) return jsonResponse({ ok: false, code: "attachments_lookup_failed", message: attachmentsError.message }, 500);
++
++  const storageIds = [...new Set((attachments || []).map((item) => item.storage_object_id).filter(Boolean))] as string[];
++  const { data: storageRows } = storageIds.length
++    ? await supabase
++        .from("storage_objects")
++        .select("id,bucket,object_path,status,content_type,size_bytes")
++        .in("id", storageIds)
++
++    : { data: [] as StorageRow[] };
++  const storageById = new Map((storageRows || []).map((item) => [item.id, item]));
++  const attachmentsWithStorage = (attachments || []).map((attachment) => ({
++    ...attachment,
++    storage: attachment.storage_object_id ? storageById.get(attachment.storage_object_id) : undefined
++  }));
++
++  try {
++    await supabase
++      .from("requests")
++      .update({ status: "checking", check_status: "pending" })
++      .eq("id", requestRow.id);
++
++    const modelInput = summarizeRequestForModel(requestRow, messages || [], attachmentsWithStorage);
++    const { model, provider, reasoningEffort, usage, result } = await callDeepSeek(modelInput);
++    const checkedAt = new Date().toISOString();
++    const nextStatus = requestStatusFor(result);
++    const customerMessage = buildCustomerMessage(result);
++    const checkResult = {
++      ...result,
++      intake_stage: result.intake_stage,
++      can_prepare_draft: result.can_prepare_draft,
++      customer_message_type: result.customer_message_type,
++      status: result.status,
++      adapter: adapterId,
++      model,
++      provider,
++      reasoning_effort: reasoningEffort,
++      usage,
++      reason: checkReasonFor(result),
++      missing: result.missing_information,
++      questions: result.questions_for_user,
++      checkedAt,
++      version: 1,
++      trigger: payload.trigger || "manual",
++      source: {
++        request_id: requestRow.id,
++        request_number: requestRow.request_number,
++        message_count: messages?.length || 0,
++        attachment_count: attachments?.length || 0,
++        image_count_sent_to_model: 0
++      }
++    };
++
++    const { error: updateError } = await supabase
++      .from("requests")
++      .update({
++        status: nextStatus,
++        check_status: result.status,
++        check_result: checkResult,
++        customer_summary: result.customer_summary || requestRow.customer_summary || ""
++      })
++      .eq("id", requestRow.id);
++
++    if (updateError) throw new Error(`Could not update request: ${updateError.message}`);
++
++    const { error: messageInsertError } = await supabase
++      .from("request_messages")
++      .insert({
++        request_id: requestRow.id,
++        author_id: null,
++        author_role: "easy_harness",
++        body: customerMessage,
++        blocks: [{ type: "text", text: customerMessage }],
++        visibility: "thread"
++      });
++
++    if (messageInsertError) throw new Error(`Could not insert Easy Harness message: ${messageInsertError.message}`);
++
++    await supabase.from("integration_events").insert({
++      adapter: adapterId,
++      action: `check_${result.status}`,
++      target_type: "request",
++      target_id: requestRow.id,
++      detail: checkReasonFor(result),
++      payload: { requestNumber: requestRow.request_number, trigger: payload.trigger || "manual", model, provider }
++    });
++
++    return jsonResponse({
++      ok: true,
++      requestId: requestRow.id,
++      requestNumber: requestRow.request_number,
++      status: nextStatus,
++      checkStatus: result.status,
++      readiness: result.readiness,
++      checkResult,
++      message: customerMessage
++    });
++  } catch (error) {
++    const message = error instanceof Error ? error.message : "Unknown checking error";
++    await supabase.from("integration_events").insert({
++      adapter: adapterId,
++      action: "check_failed",
++      target_type: "request",
++      target_id: requestRow.id,
++      detail: message,
++      payload: { requestNumber: requestRow.request_number, trigger: payload.trigger || "manual" }
++    });
++    await supabase
++      .from("requests")
++      .update({
++        status: "needs_info",
++        check_status: "needs_info",
++        check_result: {
++          status: "needs_info",
++          adapter: adapterId,
++          reason: "Easy Harness could not finish automatic intake checking. Staff can review the request manually.",
++          missing: ["manual review"],
++          checkedAt: new Date().toISOString(),
++          error: message
++        }
++      })
++      .eq("id", requestRow.id);
++
++    return jsonResponse({ ok: false, code: "ai_checking_failed", requestId: requestRow.id, message }, 500);
++  }
+ });

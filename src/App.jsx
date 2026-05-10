@@ -4369,33 +4369,19 @@ function AuthModal({
         </p>
 
         {!notice && (
-          <div className="auth-provider-list" aria-label="Additional sign-in options">
+          <div className="auth-provider-list streamlined" aria-label="Additional sign-in options">
             <button
               type="button"
-              className="auth-provider-button"
+              className="auth-provider-button primary-provider"
               onClick={submitGoogle}
               disabled={loading || !authUsesSupabase || authUnavailable}
             >
-              <span className="provider-icon google-mark" aria-hidden="true">G</span>
               <span>
-                <strong>{loading ? "Opening Google…" : "Continue with Google"}</strong>
+                <strong>{loading ? "Opening Google sign-in…" : "Continue with Google"}</strong>
                 <small>Secure account sign-in</small>
               </span>
             </button>
-            <button type="button" className="auth-provider-button disabled" disabled>
-              <span className="provider-icon microsoft-mark" aria-hidden="true"><i /> <i /> <i /> <i /></span>
-              <span>
-                <strong>Continue with Microsoft</strong>
-                <small>Microsoft soon</small>
-              </span>
-            </button>
-            <button type="button" className="auth-provider-button disabled" disabled>
-              <span className="provider-icon apple-mark" aria-hidden="true">●</span>
-              <span>
-                <strong>Continue with Apple</strong>
-                <small>Apple soon</small>
-              </span>
-            </button>
+            <p className="auth-provider-note">Microsoft soon / Apple soon</p>
           </div>
         )}
         {!notice && authUsesSupabase && (
@@ -4781,10 +4767,7 @@ function StartScreen({
   return (
     <section className="start-screen">
       <div className="start-copy clean">
-        <h1>Tell us what you need to connect.</h1>
-        <p>
-          Upload photos, sketches, PDFs, or an old harness sample. Easy Harness will turn your description into a reviewable harness draft.
-        </p>
+        <h1>Upload what you have. We’ll build the harness you need.</h1>
       </div>
 
       <div className="upload-composer">
@@ -4794,7 +4777,7 @@ function StartScreen({
         <textarea
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          placeholder="Example: Connect a 12V battery to a controller, about 50cm, outdoor use..."
+          placeholder="Describe the connection you need, or upload the files you already have..."
           rows={1}
         />
         <input ref={uploadRef} type="file" multiple hidden onChange={handleUpload} />
@@ -5544,10 +5527,10 @@ function IntakeDraftCard({ checkResult, request }) {
   const title = readyForReview
     ? "Ready for Easy Harness review"
     : canPrepareDraft
-      ? "Draft needs a few details"
+      ? "Details needed"
       : "Waiting for harness details";
   const nextAction = readyForReview
-    ? "Easy Harness will review the draft and prepare the next update."
+    ? "Easy Harness will prepare the next confirmation step."
     : missing.length
       ? "Reply in the thread with the missing details you know."
       : "Add the connection goal, connector photos, or an old harness sample.";
@@ -5597,7 +5580,7 @@ function IntakeDraftCard({ checkResult, request }) {
 
       {(!!questions.length || !!missing.length || !!facts.length) && (
         <details className="full-draft-details">
-          <summary>View full intake draft</summary>
+          <summary>View full intake details</summary>
           <div className="full-draft-content">
             {draft.quantity && <p><strong>Quantity:</strong> {draft.quantity}</p>}
             {draft.estimated_length && <p><strong>Length:</strong> {draft.estimated_length}</p>}
