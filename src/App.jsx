@@ -607,7 +607,7 @@ function customerMessage(text, files = []) {
   return {
     id: messageId(),
     role: "customer",
-    createdAt: "Now",
+    createdAt: new Date().toISOString(),
     blocks: [
       { type: "text", text },
       ...(files.length ? [{ type: "attachments", files }] : [])
@@ -619,7 +619,7 @@ function easyMessage(text, files = [], extraBlocks = []) {
   return {
     id: messageId(),
     role: "easy",
-    createdAt: "Now",
+    createdAt: new Date().toISOString(),
     blocks: [
       { type: "text", text },
       ...(files.length ? [{ type: "attachments", files }] : []),
@@ -632,7 +632,7 @@ function draftMessage(id, title) {
   return {
     id: messageId(),
     role: "easy",
-    createdAt: "Now",
+    createdAt: new Date().toISOString(),
     tone: "draft",
     blocks: [{ type: "draft", id, title }]
   };
@@ -642,7 +642,7 @@ function eventMessage(title, body) {
   return {
     id: messageId(),
     role: "event",
-    createdAt: "Now",
+    createdAt: new Date().toISOString(),
     blocks: [{ type: "event", title, body }]
   };
 }
@@ -3152,7 +3152,7 @@ function App() {
         ? {
             id: `agent_${data.requestId || request.supabaseId}_${data.checkResult?.checkedAt || Date.now()}`,
             role: "easy",
-            createdAt: "Now",
+            createdAt: data.checkResult?.checkedAt || new Date().toISOString(),
             blocks: [{ type: "text", text: data.message }]
           }
         : null;
@@ -3564,7 +3564,11 @@ function App() {
     const text =
       description.trim() ||
       "I need a harness made from the uploaded design files.";
-    const files = uploadFiles.map(fileName);
+    const uploadDrafts = [...uploadFiles];
+    const files = uploadDrafts.map(fileName);
+    setDescription("");
+    setUploadFiles([]);
+    setFileError("");
     const nextId = makeRequestId(requests.length);
     const firstMessage = customerMessage(text, files);
     const nextRequest = {
@@ -3589,7 +3593,6 @@ function App() {
       messages: [firstMessage]
     };
 
-    const uploadDrafts = [...uploadFiles];
     const savedBundle = await createSupabaseRequestBundle(nextRequest, firstMessage, uploadDrafts, actor);
     const savedRequest = savedBundle?.requestRow
       ? {
@@ -3654,6 +3657,9 @@ function App() {
     sendingUserMessageRef.current = true;
     setSendingUserMessage(true);
     const attachedNames = filesToSend.map(fileName);
+    setUserComposer("");
+    setUserComposerFiles([]);
+    setFileError("");
     const remoteThread = Boolean(supabase && activeRequest.supabaseId && isUuidLike(currentUser?.id));
     const shouldRunRemoteChecking =
       remoteThread &&
@@ -5170,7 +5176,7 @@ function RequestWorkspace({
           <ThreadHeader request={request} />
           {shouldShowMissingInfo && <MissingInfoPrompt items={missingItems} checkResult={request.checkResult} />}
           <MessageList request={request} perspective={perspective} />
-          {agentActive && <AgentActivityCard mode={agentActivity.mode} />}
+          {agentActive && <AgentActivityCard mode={agentActivity.mode} startedAt={agentActivity.startedAt} />}
           <UserComposer
             value={composerValue}
             setValue={setComposerValue}
@@ -5219,7 +5225,7 @@ function MissingInfoPrompt({ items, checkResult }) {
   );
 }
 
-function AgentActivityCard({ mode }) {
+function AgentActivityCard({ mode, startedAt }) {
   const isInitial = mode === "initial";
   return (
     <article className="message message-easy agent-activity-card">
@@ -5229,7 +5235,7 @@ function AgentActivityCard({ mode }) {
       <div className="message-body">
         <div className="message-meta">
           <span>Easy Harness</span>
-          <time>Now</time>
+          <time>{displayTime(startedAt || new Date().toISOString())}</time>
         </div>
         <div className="agent-thinking">
           <strong>{isInitial ? "Easy Harness is analyzing your request…" : "Easy Harness is thinking through your update…"}</strong>
@@ -5331,7 +5337,7 @@ function MessageCard({ message, perspective, request }) {
       <div className="message-body">
         <div className="message-meta">
           <span>{actor}</span>
-          <time>{message.createdAt}</time>
+          <time>{displayTime(message.createdAt)}</time>
         </div>
         {message.blocks.map((block, index) => (
           <ContentBlock block={block} request={request} key={`${message.id}-${index}`} />

@@ -256,10 +256,16 @@ function buildCustomerMessage(result: IntakeResult) {
   }
 
   if (!result.can_prepare_draft || result.intake_stage === "not_enough_harness_context") {
+    const starterQuestions = [
+      "What devices, boards, batteries, sensors, or ports need to be connected?",
+      "Can you upload connector/port photos, an old harness sample, a pinout, or a simple sketch?",
+      "What approximate length and quantity do you need?"
+    ];
+    const shortQuestions = (questions.length ? questions : starterQuestions).slice(0, 3);
     return [
-      "Thanks. I need a little more harness-specific information before preparing a draft.",
-      ...questions.map((question, index) => `${index + 1}. ${question}`),
-      "A photo of the connector ends, an old harness sample, a simple sketch, or the device models would help."
+      "Thanks. I don’t have enough harness-specific information to prepare a draft yet.",
+      "Please provide a connection goal and relevant harness references, such as connector photos, an old harness sample, a pinout, or a simple sketch.",
+      ...shortQuestions.map((question, index) => `${index + 1}. ${question}`)
     ].join("\n\n");
   }
 
@@ -362,14 +368,17 @@ async function callDeepSeek(inputText: string) {
             "Your job is to convert a non-professional customer description plus uploaded material into a structured wire harness order draft.",
             "Easy Harness serves makers, developers, prototype users, and small-batch customers who may not know harness engineering language.",
             "Do not invent connector models, pinouts, wire gauges, certifications, current ratings, or waterproof levels when evidence is missing.",
-            "First run a relevance gate before drafting: decide whether the customer has provided a real harness/cable/connector assembly need.",
+            "First run a strict relevance gate before drafting: decide whether the customer has provided a real harness/cable/connector assembly need.",
             "Do not say a draft is prepared unless there is a real connection goal, such as device A to device B, an old harness to copy, connector ends, pinout, cable routing, or clear harness context.",
-            "If the user only asks whether an unrelated/unclear attachment is correct, or provides a generic commercial image/reference without any connection goal, set intake_stage to not_enough_harness_context and can_prepare_draft to false.",
+            "Generic phrases such as 'design a basic harness', 'see whether my attachment is correct', or an uploaded commercial/device reference image are NOT enough to prepare a draft unless the customer also states what needs to connect.",
+            "If the customer message is vague and the attachment metadata does not clearly indicate harness/connector/pinout/wiring/old-harness content, set intake_stage to not_enough_harness_context, can_prepare_draft to false, customer_message_type to request_harness_related_input, status to needs_info, and readiness to needs_clarification.",
+            "For not_enough_harness_context, do not ask detailed engineering questions yet. Ask only for harness-specific input: devices to connect, connector/port photos, old harness sample, simple sketch, approximate length, and quantity.",
             "If the submission is clearly unrelated to wire harnesses, cables, connector assemblies, adapters, pigtails, or looms, set intake_stage to irrelevant and status to rejected.",
             "If there is a connection goal but important parameters are missing, set intake_stage to needs_harness_details and can_prepare_draft to true.",
             "If enough information exists for a human Easy Harness reviewer to continue, set intake_stage to draft_ready_for_review and status to accepted, even if final quotation, exact materials, or factory confirmation still require staff work.",
+            "All customer-facing questions and summaries must be in English, even if the customer wrote in another language.",
             "Separate confirmed facts, assumptions, missing information, customer questions, and manufacturing notes.",
-            "Ask at most five user-friendly questions. Prioritize: devices to connect, power/signal/data use, voltage/current, length, quantity, environment, connector photos or model references.",
+            "Ask at most three questions when can_prepare_draft is false. Ask at most five questions when can_prepare_draft is true. Prioritize: devices to connect, connector/port photos, old harness sample or sketch, length, quantity, and environment.",
             "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
             "The JSON object must follow this schema shape:",
             jsonShape
