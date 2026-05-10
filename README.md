@@ -27,6 +27,10 @@ The front end now initializes Supabase Auth when `VITE_SUPABASE_URL` and
 keeps the local auth adapter available for offline localhost development. Hosted
 deployments do not silently create local accounts if Auth configuration is
 missing.
+For Supabase-authenticated users, the customer request path now reads and writes
+live Supabase records for `requests`, `request_messages`, and attachment
+metadata. Local storage remains the offline/demo fallback for development and
+for flow areas that have not been moved to the database yet.
 
 ## Run
 

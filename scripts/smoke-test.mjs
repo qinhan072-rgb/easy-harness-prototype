@@ -66,6 +66,16 @@ const checks = [
       app.includes("Account access is not available yet")
   },
   {
+    name: "supabase request data path is wired",
+    pass: app.includes("loadSupabaseRequestData") &&
+      app.includes("createSupabaseRequestBundle") &&
+      app.includes("supabaseRequestInsertFromLocal") &&
+      app.includes("supabaseMessageInsertFromLocal") &&
+      app.includes("updateSupabaseRequestFromLocal") &&
+      app.includes("requests (Supabase live)") &&
+      app.includes("attachments (Supabase live metadata)")
+  },
+  {
     name: "storage object ledger is present",
     pass: app.includes("easy-harness.storageObjects") &&
       app.includes("createStorageUploadAdapter") &&

@@ -708,8 +708,19 @@ function fileSizeLabel(file) {
   return `${(file.size / 1024 / 1024).toFixed(1)} MB`;
 }
 
+function displayTime(value) {
+  if (!value) return "Now";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, { month: "short", day: "numeric" });
+}
+
 function isEmailLike(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+}
+
+function isUuidLike(value) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value || "");
 }
 
 function draftFileFromBrowser(file) {
@@ -775,6 +786,121 @@ function requestMessageRecord(request, message) {
     createdAt: message.createdAt || "Now",
     source: "request_thread"
   };
+}
+
+function requestBodyFromBlocks(blocks = []) {
+  const textBlock = blocks.find((block) => block.type === "text");
+  const eventBlock = blocks.find((block) => block.type === "event");
+  const priceBlock = blocks.find((block) => block.type === "price");
+  if (textBlock?.text) return textBlock.text;
+  if (eventBlock?.body) return eventBlock.body;
+  if (priceBlock?.amount) return `Harness price released: $${priceBlock.amount}`;
+  return "";
+}
+
+function authorRoleToSupabase(role) {
+  if (role === "easy") return "easy_harness";
+  if (role === "event") return "event";
+  if (role === "system") return "system";
+  return "customer";
+}
+
+function authorRoleFromSupabase(role) {
+  if (role === "easy_harness") return "easy";
+  if (role === "event" || role === "system") return role;
+  return "customer";
+}
+
+function checkStatusToSupabase(checkResult = {}) {
+  if (checkResult.status === "accepted") return "accepted";
+  if (checkResult.status === "needs_info") return "needs_info";
+  if (checkResult.status === "rejected") return "rejected";
+  return "pending";
+}
+
+function supabaseRequestInsertFromLocal(request) {
+  return {
+    request_number: request.id,
+    customer_id: request.customerId,
+    customer_label: request.customer,
+    title: request.title,
+    status: request.status,
+    customer_summary: getFirstCustomerText(request),
+    check_status: checkStatusToSupabase(request.checkResult),
+    check_result: request.checkResult || {},
+    files_count: (request.files || []).length
+  };
+}
+
+function supabaseRequestUpdateFromLocal(request) {
+  return {
+    title: request.title,
+    status: request.status,
+    customer_summary: getFirstCustomerText(request),
+    check_status: checkStatusToSupabase(request.checkResult),
+    check_result: request.checkResult || {},
+    files_count: (request.files || []).length
+  };
+}
+
+function supabaseMessageInsertFromLocal(message, requestUuid, authorId) {
+  const authorRole = authorRoleToSupabase(message.role);
+  return {
+    request_id: requestUuid,
+    author_id: authorRole === "customer" ? authorId : null,
+    author_role: authorRole,
+    body: requestBodyFromBlocks(message.blocks),
+    blocks: message.blocks || [],
+    visibility: "thread"
+  };
+}
+
+function supabaseAttachmentInsertFromLocal(attachment, requestUuid, messageUuid, ownerId) {
+  return {
+    owner_id: ownerId,
+    request_id: requestUuid,
+    request_message_id: messageUuid || null,
+    name: attachment.name,
+    mime_type: attachment.type || "application/octet-stream",
+    size_bytes: attachment.size || 0,
+    purpose: "request_upload"
+  };
+}
+
+function localRequestFromSupabase(row, currentUser) {
+  const messages = [...(row.request_messages || [])]
+    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .map((message) => ({
+      id: message.id,
+      role: authorRoleFromSupabase(message.author_role),
+      createdAt: displayTime(message.created_at),
+      blocks: Array.isArray(message.blocks) && message.blocks.length
+        ? message.blocks
+        : [{ type: "text", text: message.body || "" }]
+    }));
+  const files = [...new Set((row.attachments || []).map((attachment) => attachment.name))];
+  return normalizeRequestShape({
+    id: row.request_number,
+    supabaseId: row.id,
+    customerId: row.customer_id,
+    customer: row.customer_label || currentUser?.name || "Customer",
+    title: row.title,
+    status: row.status,
+    checkResult: row.check_result || {
+      status: row.check_status || "pending",
+      adapter: "supabase",
+      reason: "",
+      missing: [],
+      checkedAt: ""
+    },
+    quotes: [],
+    activeQuoteId: row.active_quote_id || "",
+    confirmedQuoteId: row.confirmed_quote_id || "",
+    price: "",
+    files,
+    updated: displayTime(row.updated_at || row.created_at),
+    messages
+  });
 }
 
 function orderMessageRecord(order, message) {
@@ -1746,6 +1872,9 @@ function App() {
   const [authProviderStatus, setAuthProviderStatus] = useState(
     supabaseConfigured ? "connecting" : hostedAuthRequired ? "unavailable" : "local"
   );
+  const [databaseProviderStatus, setDatabaseProviderStatus] = useState(
+    supabaseConfigured ? "connecting" : "local"
+  );
 
   const uploadRef = useRef(null);
   const userComposerUploadRef = useRef(null);
@@ -1799,9 +1928,9 @@ function App() {
   const backendTableRows = useMemo(() => ([
     { localKey: "easy-harness.authSession", futureTable: "auth_sessions", owner: "Identity service", count: authSession ? 1 : 0 },
     { localKey: "easy-harness.users", futureTable: "profiles", owner: "Identity service", count: users.length },
-    { localKey: "easy-harness.requests", futureTable: "requests", owner: "Request service", count: requests.length },
-    { localKey: "easy-harness.requestMessages", futureTable: "request_messages", owner: "Request service", count: requestMessageRecords.length },
-    { localKey: "easy-harness.attachments", futureTable: "attachments", owner: "Storage service", count: attachmentRecords.length },
+    { localKey: "easy-harness.requests", futureTable: databaseProviderStatus === "ready" ? "requests (Supabase live)" : "requests", owner: "Request service", count: requests.length },
+    { localKey: "easy-harness.requestMessages", futureTable: databaseProviderStatus === "ready" ? "request_messages (Supabase live)" : "request_messages", owner: "Request service", count: requestMessageRecords.length },
+    { localKey: "easy-harness.attachments", futureTable: databaseProviderStatus === "ready" ? "attachments (Supabase live metadata)" : "attachments", owner: "Storage service", count: attachmentRecords.length },
     { localKey: "easy-harness.storageObjects", futureTable: "storage_objects", owner: "Storage service", count: storageObjectRecords.length },
     { localKey: "easy-harness.quotes", futureTable: "quotes", owner: "Quote service", count: quoteRecords.length },
     { localKey: "easy-harness.orders", futureTable: "orders", owner: "Order service", count: orders.length },
@@ -1814,6 +1943,7 @@ function App() {
     { localKey: "easy-harness.serviceEvents", futureTable: "integration_events", owner: "Adapter layer", count: serviceEvents.length }
   ]), [
     authSession,
+    databaseProviderStatus,
     users.length,
     requests.length,
     requestMessageRecords.length,
@@ -2004,30 +2134,37 @@ function App() {
             };
         const accepted = checkResult.status === "accepted";
         const needsInfo = checkResult.status === "needs_info";
-        updateRequest(processingRequestId, (request) => ({
-          ...request,
-          status: accepted ? "in_review" : needsInfo ? "needs_info" : "not_supported",
-          checkResult,
-          updated: "Just now",
-          messages: [
-            ...request.messages,
-            ...(accepted
-              ? [
-                  easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
-                  draftMessage(request.id, request.title),
-                  eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
-                ]
-              : needsInfo
+        let nextCheckedRequest = null;
+        updateRequest(processingRequestId, (request) => {
+          nextCheckedRequest = {
+            ...request,
+            status: accepted ? "in_review" : needsInfo ? "needs_info" : "not_supported",
+            checkResult,
+            updated: "Just now",
+            messages: [
+              ...request.messages,
+              ...(accepted
                 ? [
-                    easyMessage(`We need a little more information before review can start: ${checkResult.missing.join(", ")}. Add the details in this thread and Easy Harness will continue from here.`),
-                    eventMessage("More details needed", checkResult.reason)
+                    easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
+                    draftMessage(request.id, request.title),
+                    eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
                   ]
-                : [
-                    easyMessage("This request does not look like a wiring harness or connector assembly. Please start a new request with harness photos, drawings, or connector details."),
-                    eventMessage("Unable to review", checkResult.reason)
-                  ])
-          ]
-        }));
+                : needsInfo
+                  ? [
+                      easyMessage(`We need a little more information before review can start: ${checkResult.missing.join(", ")}. Add the details in this thread and Easy Harness will continue from here.`),
+                      eventMessage("More details needed", checkResult.reason)
+                    ]
+                  : [
+                      easyMessage("This request does not look like a wiring harness or connector assembly. Please start a new request with harness photos, drawings, or connector details."),
+                      eventMessage("Unable to review", checkResult.reason)
+                    ])
+            ]
+          };
+          return nextCheckedRequest;
+        });
+        if (nextCheckedRequest) {
+          updateSupabaseRequestFromLocal(nextCheckedRequest);
+        }
         recordServiceEvent(
           platformAdapters.checking.id,
           `check_${checkResult.status}`,
@@ -2208,6 +2345,164 @@ function App() {
     }
   }
 
+  async function loadSupabaseRequestData(user) {
+    if (!supabase || !user?.id) return;
+    setDatabaseProviderStatus("connecting");
+
+    const { data, error } = await supabase
+      .from("requests")
+      .select(`
+        id,
+        request_number,
+        customer_id,
+        customer_label,
+        title,
+        status,
+        customer_summary,
+        check_status,
+        check_result,
+        files_count,
+        active_quote_id,
+        confirmed_quote_id,
+        created_at,
+        updated_at,
+        request_messages (
+          id,
+          author_id,
+          author_role,
+          body,
+          blocks,
+          created_at
+        ),
+        attachments (
+          id,
+          owner_id,
+          request_id,
+          request_message_id,
+          name,
+          mime_type,
+          size_bytes,
+          purpose,
+          created_at
+        )
+      `)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      setDatabaseProviderStatus("error");
+      recordServiceEvent("supabase-database", "requests_load_failed", "user", user.id, error.message);
+      return;
+    }
+
+    const remoteRequests = (data || []).map((row) => localRequestFromSupabase(row, user));
+    const remoteMessages = remoteRequests.flatMap((request) =>
+      (request.messages || []).map((message) => requestMessageRecord(request, message))
+    );
+    const remoteAttachments = (data || []).flatMap((row) =>
+      (row.attachments || []).map((attachment) => ({
+        id: attachment.id,
+        requestId: row.request_number,
+        supabaseRequestId: row.id,
+        messageId: attachment.request_message_id || "",
+        uploadedBy: attachment.owner_id,
+        name: attachment.name,
+        size: attachment.size_bytes || 0,
+        type: attachment.mime_type || "application/octet-stream",
+        storageObjectId: "",
+        objectPath: "",
+        createdAt: displayTime(attachment.created_at)
+      }))
+    );
+
+    setRequests(remoteRequests);
+    setRequestMessageRecords(remoteMessages);
+    setAttachmentRecords(remoteAttachments);
+    if (remoteRequests[0]) setActiveRequestId(remoteRequests[0].id);
+    setDatabaseProviderStatus("ready");
+    recordServiceEvent(
+      "supabase-database",
+      "requests_loaded",
+      "user",
+      user.id,
+      `${remoteRequests.length} request record(s) loaded from Supabase.`
+    );
+  }
+
+  async function createSupabaseRequestBundle(request, firstMessage, uploadDrafts, actor) {
+    if (!supabase || !isUuidLike(actor?.id)) return null;
+
+    const { data: requestRow, error: requestError } = await supabase
+      .from("requests")
+      .insert(supabaseRequestInsertFromLocal(request))
+      .select("id,request_number,updated_at,created_at")
+      .single();
+
+    if (requestError) {
+      recordServiceEvent("supabase-database", "request_insert_failed", "request", request.id, requestError.message);
+      return null;
+    }
+
+    const { data: messageRow, error: messageError } = await supabase
+      .from("request_messages")
+      .insert(supabaseMessageInsertFromLocal(firstMessage, requestRow.id, actor.id))
+      .select("id,created_at")
+      .single();
+
+    if (messageError) {
+      recordServiceEvent("supabase-database", "request_message_insert_failed", "request", request.id, messageError.message);
+      return { requestRow, messageRow: null, attachments: [] };
+    }
+
+    const localAttachments = buildAttachmentRecords(uploadDrafts, request.id, firstMessage.id, actor.id);
+    const attachmentRows = localAttachments.map((attachment) =>
+      supabaseAttachmentInsertFromLocal(attachment, requestRow.id, messageRow.id, actor.id)
+    );
+    const { data: savedAttachments, error: attachmentError } = attachmentRows.length
+      ? await supabase
+          .from("attachments")
+          .insert(attachmentRows)
+          .select("id,name,mime_type,size_bytes,created_at")
+      : { data: [], error: null };
+
+    if (attachmentError) {
+      recordServiceEvent("supabase-database", "attachments_insert_failed", "request", request.id, attachmentError.message);
+    }
+
+    recordServiceEvent("supabase-database", "request_inserted", "request", request.id, "Request, first message, and attachment metadata saved to Supabase.");
+    return {
+      requestRow,
+      messageRow,
+      attachments: (savedAttachments || []).map((attachment) => ({
+        id: attachment.id,
+        requestId: request.id,
+        supabaseRequestId: requestRow.id,
+        messageId: messageRow?.id || "",
+        uploadedBy: actor.id,
+        name: attachment.name,
+        size: attachment.size_bytes || 0,
+        type: attachment.mime_type || "application/octet-stream",
+        storageObjectId: "",
+        objectPath: "",
+        createdAt: displayTime(attachment.created_at)
+      }))
+    };
+  }
+
+  async function updateSupabaseRequestFromLocal(request) {
+    if (!supabase || !request?.supabaseId) return;
+    const { error } = await supabase
+      .from("requests")
+      .update(supabaseRequestUpdateFromLocal(request))
+      .eq("id", request.supabaseId);
+
+    if (error) {
+      recordServiceEvent("supabase-database", "request_update_failed", "request", request.id, error.message);
+      return;
+    }
+
+    recordServiceEvent("supabase-database", "request_updated", "request", request.id, "Request status saved to Supabase.");
+  }
+
   async function fetchSupabaseProfile(authUser) {
     if (!supabase || !authUser?.id) return null;
     const { data, error } = await supabase
@@ -2241,6 +2536,7 @@ function App() {
     });
 
     signIn(user.id, createSupabaseAuthSession(session, user), user);
+    await loadSupabaseRequestData(user);
     recordServiceEvent("supabase-auth", action, "user", user.id, `${roleCopy[user.role]} session is active.`);
     setAuthProviderStatus("ready");
     return user;
@@ -2506,7 +2802,7 @@ function App() {
     submitRequestForUser(currentUser);
   }
 
-  function submitRequestForUser(actor) {
+  async function submitRequestForUser(actor) {
     if (!actor || actor.role !== "customer") return;
     if (!uploadFiles.length) {
       setFileError("Please upload at least one design file before submitting.");
@@ -2551,9 +2847,30 @@ function App() {
       messages: [firstMessage]
     };
 
-    setRequests((current) => [nextRequest, ...current]);
-    writeRequestMessageLedger(nextRequest, firstMessage);
-    appendAttachmentRecords(uploadFiles, nextId, firstMessage.id, actor.id);
+    const uploadDrafts = [...uploadFiles];
+    const savedBundle = await createSupabaseRequestBundle(nextRequest, firstMessage, uploadDrafts, actor);
+    const savedRequest = savedBundle?.requestRow
+      ? {
+          ...nextRequest,
+          supabaseId: savedBundle.requestRow.id,
+          updated: displayTime(savedBundle.requestRow.updated_at || savedBundle.requestRow.created_at),
+          messages: savedBundle.messageRow
+            ? [{
+                ...firstMessage,
+                id: savedBundle.messageRow.id,
+                createdAt: displayTime(savedBundle.messageRow.created_at)
+              }]
+            : nextRequest.messages
+        }
+      : nextRequest;
+
+    setRequests((current) => [savedRequest, ...current]);
+    writeRequestMessageLedger(savedRequest, savedRequest.messages[0]);
+    if (savedBundle?.attachments?.length) {
+      setAttachmentRecords((current) => [...savedBundle.attachments, ...current]);
+    } else {
+      appendAttachmentRecords(uploadDrafts, nextId, firstMessage.id, actor.id);
+    }
     addNotification({
       role: "staff",
       requestId: nextId,
@@ -2561,8 +2878,8 @@ function App() {
       body: `${nextId} is ready for review.`
     });
     recordAudit("request_created", "request", nextId, `${actor.email} created ${nextRequest.title}.`, actor);
-    setActiveRequestId(nextId);
-    setProcessingRequestId(nextId);
+    setActiveRequestId(savedRequest.id);
+    setProcessingRequestId(savedRequest.id);
     setDescription("");
     setUploadFiles([]);
     setFileError("");
