@@ -241,10 +241,13 @@ The staging Supabase project has the Stage 2A schema, RLS, and security
 hardening migrations applied. The Vercel front end can now initialize Supabase
 Auth with `VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`, and
 `VITE_APP_BASE_URL`. Supabase-authenticated customer requests, customer thread
-messages, attachment metadata, staff request replies, and released harness
-quotes now have live database write paths. Order, payment, shipment, order
-message, notification delivery, and audit persistence still need to move from
-the local ledgers to Supabase.
+messages, attachment metadata, staff request replies, released harness quotes,
+and customer quote-confirmation/order creation now have live database write
+paths. Checkout payment route selection and payment receipt now write
+`payments` and `payment_events` rows. Staff fulfillment edits now update
+orders and write `shipments` / `tracking_events`. Order message, notification
+delivery, and audit persistence still need to move from the local ledgers to
+Supabase.
 
 Current adapter replacement points:
 

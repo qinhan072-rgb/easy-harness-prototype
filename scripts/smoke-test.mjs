@@ -11,6 +11,8 @@ const rlsPath = resolve(root, "supabase", "migrations", "202605080002_stage_2a_r
 const hardeningPath = resolve(root, "supabase", "migrations", "202605080003_stage_2a_security_hardening.sql");
 const rlsGrantPath = resolve(root, "supabase", "migrations", "202605100001_stage_2a_rls_function_grants.sql");
 const checkingRpcPath = resolve(root, "supabase", "migrations", "202605100002_complete_request_check_rpc.sql");
+const confirmOrderRpcPath = resolve(root, "supabase", "migrations", "202605100003_confirm_request_order_rpc.sql");
+const paymentRpcPath = resolve(root, "supabase", "migrations", "202605100004_order_payment_rpc.sql");
 const envExamplePath = resolve(root, ".env.example");
 const stage2DocPath = resolve(root, "docs", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
@@ -32,6 +34,8 @@ const rlsSql = readIfExists(rlsPath);
 const hardeningSql = readIfExists(hardeningPath);
 const rlsGrantSql = readIfExists(rlsGrantPath);
 const checkingRpcSql = readIfExists(checkingRpcPath);
+const confirmOrderRpcSql = readIfExists(confirmOrderRpcPath);
+const paymentRpcSql = readIfExists(paymentRpcPath);
 const envExample = readIfExists(envExamplePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
@@ -87,6 +91,28 @@ const checks = [
       app.includes("localQuoteFromSupabase") &&
       app.includes(".from(\"quotes\")") &&
       app.includes("active_quote_id")
+  },
+  {
+    name: "supabase order confirmation path is wired",
+    pass: app.includes("confirmSupabaseRequestOrder") &&
+      app.includes('supabase.rpc("confirm_request_order"') &&
+      app.includes("loadSupabaseOrderData") &&
+      app.includes("localOrderFromSupabase") &&
+      app.includes(".from(\"orders\")")
+  },
+  {
+    name: "supabase payment record path is wired",
+    pass: app.includes("persistSupabasePayment") &&
+      app.includes('supabase.rpc("record_order_payment"') &&
+      app.includes("paymentProviderKey") &&
+      app.includes("payment_recorded")
+  },
+  {
+    name: "supabase staff fulfillment path is wired",
+    pass: app.includes("persistSupabaseStaffOrderUpdate") &&
+      app.includes(".from(\"shipments\")") &&
+      app.includes(".from(\"tracking_events\")") &&
+      app.includes("staff_order_updated")
   },
   {
     name: "storage object ledger is present",
@@ -356,6 +382,22 @@ const checks = [
       checkingRpcSql.includes("security definer") &&
       checkingRpcSql.includes("request_messages") &&
       checkingRpcSql.includes("grant execute on function public.complete_request_check")
+  },
+  {
+    name: "stage 2A order confirmation rpc creates checkout orders",
+    pass: confirmOrderRpcSql.includes("create or replace function public.confirm_request_order") &&
+      confirmOrderRpcSql.includes("returns public.orders") &&
+      confirmOrderRpcSql.includes("insert into public.orders") &&
+      confirmOrderRpcSql.includes("status = 'confirmed'") &&
+      confirmOrderRpcSql.includes("grant execute on function public.confirm_request_order")
+  },
+  {
+    name: "stage 2A payment rpc records checkout payment state",
+    pass: paymentRpcSql.includes("create or replace function public.record_order_payment") &&
+      paymentRpcSql.includes("returns public.payments") &&
+      paymentRpcSql.includes("insert into public.payments") &&
+      paymentRpcSql.includes("insert into public.payment_events") &&
+      paymentRpcSql.includes("grant execute on function public.record_order_payment")
   },
   {
     name: "stage 2A edge function contracts exist",

@@ -1737,6 +1737,57 @@ function createOrderFromRequest(request, user) {
   };
 }
 
+function localOrderFromSupabase(row, currentUser) {
+  const packageEstimate = row.package_estimate || {};
+  const storedShippingPrice = Number(row.shipping_price || 0);
+  const shippingOptions = getShippingOptions(packageEstimate).map((option, index) =>
+    index === 0 && storedShippingPrice
+      ? { ...option, price: storedShippingPrice }
+      : option
+  );
+  const requestNumber = row.requests?.request_number || row.snapshot?.requestNumber || "";
+
+  return normalizeOrderShape({
+    id: row.order_number,
+    supabaseId: row.id,
+    requestId: requestNumber,
+    quoteId: row.quote_id || "",
+    quoteVersion: row.snapshot?.confirmedQuote?.version || 1,
+    customerId: row.customer_id,
+    customer: currentUser?.name || row.requests?.customer_label || "Customer",
+    title: row.title,
+    status: row.status,
+    paymentStatus: row.payment_status,
+    paymentMethodId: "",
+    paymentProvider: "",
+    paymentReference: "",
+    paymentSession: null,
+    paidAt: "",
+    productionStatus: row.production_status,
+    fulfillmentStatus: row.fulfillment_status,
+    harnessPrice: Number(row.harness_price || 0),
+    currency: row.currency || "USD",
+    origin: defaultOrigin,
+    packageEstimate,
+    incoterm: row.incoterm || "DAP",
+    dutiesPolicy: "dap_not_collected",
+    address: row.address || {},
+    shippingOptions,
+    selectedShippingId: shippingOptions[0]?.id || "dhl-express",
+    productionLeadTime: row.production_lead_time || "7-10 business days after payment",
+    estimatedProductionComplete: row.estimated_production_complete || "",
+    trackingNumber: "",
+    carrierTrackingUrl: "",
+    trackingSource: "manual",
+    trackingEvents: [],
+    supportMessages: [],
+    bankTransferReference: `BT-${row.order_number}`,
+    internalNotes: "",
+    snapshot: row.snapshot || {},
+    updated: displayTime(row.updated_at || row.created_at)
+  });
+}
+
 function getShippingOptions(packageEstimate) {
   return quoteShippingRatesAdapter(packageEstimate).rates;
 }
@@ -1819,6 +1870,12 @@ function normalizeOrderShape(order) {
 
 function paymentMethodById(methodId) {
   return paymentMethods.find((method) => method.id === methodId) || paymentMethods[0];
+}
+
+function paymentProviderKey(method) {
+  if (method?.id === "paypal") return "paypal";
+  if (method?.id === "bank_transfer") return "bank_transfer";
+  return "stripe";
 }
 
 function estimateDate(daysFromNow) {
@@ -2261,7 +2318,145 @@ function App() {
     return order;
   }
 
-  function updateOrderFromStaff(orderId, patch, detail) {
+  async function confirmSupabaseRequestOrder(request, quote, order) {
+    if (!supabase || !request?.supabaseId || !isUuidLike(quote?.id)) return null;
+    const shipping = selectedShipping(order);
+    const { data, error } = await supabase.rpc("confirm_request_order", {
+      p_request_id: request.supabaseId,
+      p_quote_id: quote.id,
+      p_order_number: order.id,
+      p_title: order.title,
+      p_harness_price: order.harnessPrice,
+      p_shipping_price: Number(shipping?.price || 0),
+      p_total_due: orderTotal(order),
+      p_currency: order.currency || "USD",
+      p_address: order.address || {},
+      p_snapshot: {
+        ...(order.snapshot || {}),
+        requestNumber: request.id
+      },
+      p_package_estimate: order.packageEstimate || {},
+      p_production_lead_time: order.productionLeadTime || "",
+      p_estimated_production_complete: order.estimatedProductionComplete || null
+    });
+
+    if (error) {
+      recordServiceEvent("supabase-database", "order_confirm_failed", "request", request.id, error.message);
+      return null;
+    }
+
+    recordServiceEvent("supabase-database", "order_confirmed", "order", order.id, "Confirmed request and checkout order saved to Supabase.");
+    return localOrderFromSupabase(
+      {
+        ...data,
+        requests: {
+          request_number: request.id,
+          customer_label: request.customer
+        }
+      },
+      currentUser
+    );
+  }
+
+  async function persistSupabasePayment(order, method, session, patch, status) {
+    if (!supabase || !order?.supabaseId) return null;
+    const { data, error } = await supabase.rpc("record_order_payment", {
+      p_order_id: order.supabaseId,
+      p_provider: paymentProviderKey(method),
+      p_method: method.id,
+      p_status: status,
+      p_order_status: patch.status || order.status,
+      p_order_payment_status: patch.paymentStatus || order.paymentStatus,
+      p_provider_session_id: session?.id || "",
+      p_provider_reference: patch.paymentReference || "",
+      p_bank_reference: patch.paymentReference || order.bankTransferReference || "",
+      p_raw_payload: {
+        provider: method.provider,
+        methodId: method.id,
+        session: session || {},
+        orderNumber: order.id
+      }
+    });
+
+    if (error) {
+      recordServiceEvent("supabase-database", "payment_record_failed", "order", order.id, error.message);
+      return null;
+    }
+
+    recordServiceEvent("supabase-database", "payment_recorded", "order", order.id, `${method.provider} payment state saved to Supabase.`);
+    return data;
+  }
+
+  async function persistSupabaseStaffOrderUpdate(order, nextOrder, patch, detail) {
+    if (!supabase || !order?.supabaseId || !["staff", "admin"].includes(currentUser?.role)) return;
+    const shipping = selectedShipping(nextOrder);
+    const { error } = await supabase
+      .from("orders")
+      .update({
+        status: nextOrder.status,
+        payment_status: nextOrder.paymentStatus,
+        fulfillment_status: nextOrder.fulfillmentStatus,
+        production_status: nextOrder.productionStatus,
+        shipping_price: Number(shipping?.price || 0),
+        total_due: orderTotal(nextOrder),
+        address: nextOrder.address || {},
+        package_estimate: nextOrder.packageEstimate || {},
+        production_lead_time: nextOrder.productionLeadTime || "",
+        estimated_production_complete: nextOrder.estimatedProductionComplete || null
+      })
+      .eq("id", order.supabaseId);
+
+    if (error) {
+      recordServiceEvent("supabase-database", "staff_order_update_failed", "order", order.id, error.message);
+      return;
+    }
+
+    if ("trackingNumber" in patch || "fulfillmentStatus" in patch) {
+      const { data: shipment, error: shipmentError } = await supabase
+        .from("shipments")
+        .insert({
+          order_id: order.supabaseId,
+          provider: "dhl_express",
+          carrier: "DHL Express",
+          service: selectedShipping(nextOrder)?.name || "",
+          status: nextOrder.fulfillmentStatus || "not_shipped",
+          tracking_number: nextOrder.trackingNumber || null,
+          tracking_url: nextOrder.carrierTrackingUrl || null,
+          raw_payload: {
+            source: nextOrder.trackingSource || "manual",
+            orderNumber: order.id,
+            detail
+          }
+        })
+        .select("id")
+        .single();
+
+      if (shipmentError) {
+        recordServiceEvent("supabase-database", "shipment_insert_failed", "order", order.id, shipmentError.message);
+      } else if (nextOrder.trackingEvents?.length) {
+        const latestEvent = nextOrder.trackingEvents[0];
+        const { error: eventError } = await supabase
+          .from("tracking_events")
+          .insert({
+            shipment_id: shipment.id,
+            order_id: order.supabaseId,
+            carrier_code: "dhl_express",
+            status: latestEvent.status || nextOrder.fulfillmentStatus || "Updated",
+            description: latestEvent.detail || detail,
+            occurred_at: new Date().toISOString(),
+            raw_payload: latestEvent
+          });
+
+        if (eventError) {
+          recordServiceEvent("supabase-database", "tracking_event_insert_failed", "order", order.id, eventError.message);
+        }
+      }
+    }
+
+    recordServiceEvent("supabase-database", "staff_order_updated", "order", order.id, "Staff order update saved to Supabase.");
+  }
+
+  async function updateOrderFromStaff(orderId, patch, detail) {
     const order = orders.find((item) => item.id === orderId);
     const nextOrder = order ? { ...order, ...patch, updated: "Just now" } : null;
     updateOrder(orderId, (current) => ({
@@ -2294,6 +2489,9 @@ function App() {
         title: "Order updated",
         body: `${order.id}: ${detail}`
       });
+    }
+    if (order && nextOrder) {
+      await persistSupabaseStaffOrderUpdate(order, nextOrder, patch, detail);
     }
     recordAudit("order_updated", "order", orderId, detail);
   }
@@ -2485,6 +2683,58 @@ function App() {
     );
   }
 
+  async function loadSupabaseOrderData(user) {
+    if (!supabase || !user?.id) return;
+
+    const { data, error } = await supabase
+      .from("orders")
+      .select(`
+        id,
+        order_number,
+        request_id,
+        customer_id,
+        quote_id,
+        title,
+        status,
+        payment_status,
+        fulfillment_status,
+        production_status,
+        harness_price,
+        shipping_price,
+        total_due,
+        currency,
+        incoterm,
+        address,
+        snapshot,
+        package_estimate,
+        production_lead_time,
+        estimated_production_complete,
+        created_at,
+        updated_at,
+        requests (
+          request_number,
+          customer_label
+        )
+      `)
+      .order("updated_at", { ascending: false });
+
+    if (error) {
+      recordServiceEvent("supabase-database", "orders_load_failed", "user", user.id, error.message);
+      return;
+    }
+
+    const remoteOrders = (data || []).map((row) => localOrderFromSupabase(row, user));
+    setOrders(remoteOrders);
+    if (remoteOrders[0]) setActiveOrderId(remoteOrders[0].id);
+    recordServiceEvent(
+      "supabase-database",
+      "orders_loaded",
+      "user",
+      user.id,
+      `${remoteOrders.length} order record(s) loaded from Supabase.`
+    );
+  }
+
   async function createSupabaseRequestBundle(request, firstMessage, uploadDrafts, actor) {
     if (!supabase || !isUuidLike(actor?.id)) return null;
 
@@ -2663,6 +2913,7 @@ function App() {
 
     signIn(user.id, createSupabaseAuthSession(session, user), user);
     await loadSupabaseRequestData(user);
+    await loadSupabaseOrderData(user);
     recordServiceEvent("supabase-auth", action, "user", user.id, `${roleCopy[user.role]} session is active.`);
     setAuthProviderStatus("ready");
     return user;
@@ -3272,10 +3523,17 @@ function App() {
     setIncludeTable(false);
   }
 
-  function confirmRequest() {
+  async function confirmRequest() {
     if (activeRequest.status !== "ready_to_confirm") return;
     const quote = activeQuoteForRequest(activeRequest);
-    const nextOrder = ensureOrderForRequest(activeRequest);
+    const localOrder = createOrderFromRequest(activeRequest, currentUser);
+    const remoteOrder = quote ? await confirmSupabaseRequestOrder(activeRequest, quote, localOrder) : null;
+    const nextOrder = remoteOrder || ensureOrderForRequest(activeRequest);
+    if (remoteOrder) {
+      setOrders((current) => [remoteOrder, ...current.filter((order) => order.id !== remoteOrder.id)]);
+      writeShipmentLedger(remoteOrder);
+      recordAudit("order_created", "order", remoteOrder.id, `${remoteOrder.id} created from ${activeRequest.id}.`);
+    }
     updateRequest(activeRequest.id, (request) => ({
       ...request,
       status: "confirmed",
@@ -3305,7 +3563,7 @@ function App() {
     setUserView("order");
   }
 
-  function startPayment(methodId) {
+  async function startPayment(methodId) {
     if (!activeOrder) return;
     const method = paymentMethodById(methodId);
     setPaymentMethodId(methodId);
@@ -3328,6 +3586,7 @@ function App() {
       });
       recordAudit("bank_transfer_started", "order", activeOrder.id, `${method.provider} selected for checkout.`);
       recordServiceEvent(sessionResult.adapter, sessionResult.eventAction, "order", activeOrder.id, sessionResult.eventDetail);
+      await persistSupabasePayment(activeOrder, method, sessionResult.session, sessionResult.orderPatch, "pending");
       return;
     }
 
@@ -3340,10 +3599,11 @@ function App() {
       ...sessionResult.orderPatch
     });
     recordServiceEvent(sessionResult.adapter, sessionResult.eventAction, "order", activeOrder.id, sessionResult.eventDetail);
+    await persistSupabasePayment(activeOrder, method, sessionResult.session, sessionResult.orderPatch, "pending");
     setShowPayment(true);
   }
 
-  function markPaid(methodId = paymentMethodId) {
+  async function markPaid(methodId = paymentMethodId) {
     if (!activeOrder) return;
     const method = paymentMethodById(methodId);
     const callbackResult = confirmPaymentCallbackAdapter(activeOrder, method);
@@ -3372,6 +3632,7 @@ function App() {
     });
     recordAudit("payment_confirmed", "order", activeOrder.id, `${method.provider} checkout completed.`);
     recordServiceEvent(callbackResult.adapter, callbackResult.eventAction, "order", activeOrder.id, callbackResult.eventDetail);
+    await persistSupabasePayment(activeOrder, method, callbackResult.session, callbackResult.orderPatch, "paid");
     setShowPayment(false);
   }
 

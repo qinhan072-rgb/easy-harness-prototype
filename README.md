@@ -31,9 +31,14 @@ For Supabase-authenticated users, the customer request path now reads and writes
 live Supabase records for `requests`, `request_messages`, and attachment
 metadata. Staff request replies and released harness quotes now write to
 `request_messages`, `quotes`, and the request's active quote fields when a
-Supabase staff/admin session is present. Local storage remains the offline/demo
-fallback for development and for flow areas that have not been moved to the
-database yet.
+Supabase staff/admin session is present. Customer quote confirmation now calls a
+Supabase database function that confirms the request/quote and creates the
+checkout `orders` row together. Checkout payment route selection and simulated
+payment receipt now write `payments` and `payment_events` records for the
+confirmed order. Staff fulfillment edits now update the order and write
+shipment/tracking records to `shipments` and `tracking_events`. Local storage
+remains the offline/demo fallback for development and for flow areas that have
+not been moved to the database yet.
 
 ## Run
 
