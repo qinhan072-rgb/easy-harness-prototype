@@ -38,9 +38,12 @@ payment receipt now write `payments` and `payment_events` records for the
 confirmed order. Staff fulfillment edits now update the order and write
 shipment/tracking records to `shipments` and `tracking_events`. Order support
 messages, in-app notification records, notification delivery queue rows, and
-audit logs now also have Supabase write paths. Local storage remains the
-offline/demo fallback for development and for flow areas that have not been
-moved to the database yet.
+audit logs now also have Supabase write paths. Real browser-uploaded request
+files are uploaded to the private Supabase Storage bucket `request-attachments`
+and linked through `storage_objects` / `attachments`; sample demo filenames stay
+metadata-only because they do not contain browser file bytes. Local storage
+remains the offline/demo fallback for development and for flow areas that have
+not been moved to the database yet.
 
 ## Run
 

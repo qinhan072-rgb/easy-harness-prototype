@@ -247,9 +247,12 @@ paths. Checkout payment route selection and payment receipt now write
 `payments` and `payment_events` rows. Staff fulfillment edits now update
 orders and write `shipments` / `tracking_events`. Order support messages,
 notifications, notification delivery queue rows, and audit logs now have
-Supabase write paths. The largest remaining local/demo persistence gap is real
-file binary upload/storage-object signing, plus the external AI/payment/DHL
-provider calls.
+Supabase write paths. Real browser-uploaded request files are now uploaded to
+the private Supabase Storage bucket `request-attachments` and linked through
+`storage_objects` / `attachments`; sample demo filenames remain metadata-only
+because they do not contain binary file bytes. The largest remaining gaps are
+the external AI/payment/DHL/provider calls and production-grade signed download
+or preview handling.
 
 Current adapter replacement points:
 

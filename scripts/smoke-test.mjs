@@ -14,6 +14,7 @@ const checkingRpcPath = resolve(root, "supabase", "migrations", "202605100002_co
 const confirmOrderRpcPath = resolve(root, "supabase", "migrations", "202605100003_confirm_request_order_rpc.sql");
 const paymentRpcPath = resolve(root, "supabase", "migrations", "202605100004_order_payment_rpc.sql");
 const notificationAuditRpcPath = resolve(root, "supabase", "migrations", "202605100005_notifications_audit_rpc.sql");
+const storagePolicyPath = resolve(root, "supabase", "migrations", "202605100006_storage_upload_policies.sql");
 const envExamplePath = resolve(root, ".env.example");
 const stage2DocPath = resolve(root, "docs", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
@@ -38,6 +39,7 @@ const checkingRpcSql = readIfExists(checkingRpcPath);
 const confirmOrderRpcSql = readIfExists(confirmOrderRpcPath);
 const paymentRpcSql = readIfExists(paymentRpcPath);
 const notificationAuditRpcSql = readIfExists(notificationAuditRpcPath);
+const storagePolicySql = readIfExists(storagePolicyPath);
 const envExample = readIfExists(envExamplePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
@@ -123,6 +125,14 @@ const checks = [
       app.includes('supabase.rpc("record_platform_notification"') &&
       app.includes('supabase.rpc("record_platform_audit"') &&
       app.includes("loadSupabaseNotificationData")
+  },
+  {
+    name: "supabase storage upload path is wired",
+    pass: app.includes("persistSupabaseAttachments") &&
+      app.includes(".storage") &&
+      app.includes(".from(\"request-attachments\")") &&
+      app.includes("supabaseStorageObjectInsertFromAttachment") &&
+      app.includes("storage_object_id")
   },
   {
     name: "storage object ledger is present",
@@ -416,6 +426,13 @@ const checks = [
       notificationAuditRpcSql.includes("create or replace function public.record_platform_audit") &&
       notificationAuditRpcSql.includes("insert into public.audit_logs") &&
       notificationAuditRpcSql.includes("grant execute on function public.record_platform_audit")
+  },
+  {
+    name: "stage 2A storage bucket policies allow private uploads",
+    pass: storagePolicySql.includes("insert into storage.buckets") &&
+      storagePolicySql.includes("'request-attachments'") &&
+      storagePolicySql.includes("on storage.objects for insert") &&
+      storagePolicySql.includes("storage_objects_customer_insert_own_path")
   },
   {
     name: "stage 2A edge function contracts exist",

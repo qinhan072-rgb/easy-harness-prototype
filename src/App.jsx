@@ -729,7 +729,8 @@ function draftFileFromBrowser(file) {
     name: file.name,
     size: file.size,
     type: file.type || "application/octet-stream",
-    source: "browser"
+    source: "browser",
+    sourceFile: file
   };
 }
 
@@ -869,10 +870,23 @@ function supabaseAttachmentInsertFromLocal(attachment, requestUuid, messageUuid,
     owner_id: ownerId,
     request_id: requestUuid,
     request_message_id: messageUuid || null,
+    storage_object_id: isUuidLike(attachment.storageObjectId) ? attachment.storageObjectId : null,
     name: attachment.name,
     mime_type: attachment.type || "application/octet-stream",
     size_bytes: attachment.size || 0,
     purpose: "request_upload"
+  };
+}
+
+function supabaseStorageObjectInsertFromAttachment(attachment) {
+  return {
+    bucket: "request-attachments",
+    object_path: attachment.objectPath,
+    status: attachment.sourceFile ? "uploaded" : "pending_upload",
+    access_scope: "request_participants",
+    content_type: attachment.type || "application/octet-stream",
+    size_bytes: attachment.size || 0,
+    signed_upload_expires_at: null
   };
 }
 
@@ -1074,7 +1088,8 @@ function buildAttachmentRecords(files, requestId, messageIdValue, uploadedBy) {
       size: typeof file === "string" ? 0 : file.size || 0,
       type: typeof file === "string" ? "legacy" : file.type || "application/octet-stream",
       storageObjectId: storageObjectId(id),
-      objectPath: `requests/${requestId}/${id}-${name}`,
+      objectPath: `${uploadedBy}/requests/${requestId}/${id}-${name.replace(/[^\w.\-]+/g, "_")}`,
+      sourceFile: typeof file === "object" ? file.sourceFile || null : null,
       createdAt: "Now"
     };
   });
@@ -2950,20 +2965,13 @@ function App() {
       return { requestRow, messageRow: null, attachments: [] };
     }
 
-    const localAttachments = buildAttachmentRecords(uploadDrafts, request.id, firstMessage.id, actor.id);
-    const attachmentRows = localAttachments.map((attachment) =>
-      supabaseAttachmentInsertFromLocal(attachment, requestRow.id, messageRow.id, actor.id)
+    const savedAttachments = await persistSupabaseAttachments(
+      uploadDrafts,
+      request.id,
+      requestRow.id,
+      messageRow.id,
+      actor.id
     );
-    const { data: savedAttachments, error: attachmentError } = attachmentRows.length
-      ? await supabase
-          .from("attachments")
-          .insert(attachmentRows)
-          .select("id,name,mime_type,size_bytes,created_at")
-      : { data: [], error: null };
-
-    if (attachmentError) {
-      recordServiceEvent("supabase-database", "attachments_insert_failed", "request", request.id, attachmentError.message);
-    }
 
     recordServiceEvent("supabase-database", "request_inserted", "request", request.id, "Request, first message, and attachment metadata saved to Supabase.");
     return {
@@ -2978,11 +2986,86 @@ function App() {
         name: attachment.name,
         size: attachment.size_bytes || 0,
         type: attachment.mime_type || "application/octet-stream",
-        storageObjectId: "",
-        objectPath: "",
+        storageObjectId: attachment.storage_object_id || "",
+        objectPath: attachment.object_path || "",
         createdAt: displayTime(attachment.created_at)
       }))
     };
+  }
+
+  async function persistSupabaseAttachments(files, localRequestId, requestUuid, messageUuid, ownerId) {
+    if (!supabase || !files.length || !isUuidLike(ownerId)) return [];
+    const localAttachments = buildAttachmentRecords(files, localRequestId, messageUuid, ownerId);
+    const saved = [];
+
+    for (const attachment of localAttachments) {
+      let storageObjectId = "";
+      let uploaded = false;
+
+      if (attachment.sourceFile) {
+        const { error: uploadError } = await supabase.storage
+          .from("request-attachments")
+          .upload(attachment.objectPath, attachment.sourceFile, {
+            contentType: attachment.type || "application/octet-stream",
+            upsert: false
+          });
+
+        if (uploadError) {
+          recordServiceEvent("supabase-storage", "file_upload_failed", "request", localRequestId, uploadError.message);
+        } else {
+          uploaded = true;
+        }
+      }
+
+      const { data: storageRow, error: storageError } = await supabase
+        .from("storage_objects")
+        .insert({
+          ...supabaseStorageObjectInsertFromAttachment(attachment),
+          status: uploaded ? "uploaded" : "pending_upload"
+        })
+        .select("id,object_path,status")
+        .single();
+
+      if (storageError) {
+        recordServiceEvent("supabase-database", "storage_object_insert_failed", "request", localRequestId, storageError.message);
+      } else {
+        storageObjectId = storageRow.id;
+        setStorageObjectRecords((current) =>
+          mergeById(current, [
+            storageObjectRecordFromAttachment(
+              { ...attachment, storageObjectId },
+              {
+                status: uploaded ? "uploaded" : "pending_upload",
+                uploadMode: uploaded ? "supabase_storage" : "metadata_only"
+              }
+            )
+          ])
+        );
+      }
+
+      const { data: attachmentRow, error: attachmentError } = await supabase
+        .from("attachments")
+        .insert(supabaseAttachmentInsertFromLocal(
+          { ...attachment, storageObjectId },
+          requestUuid,
+          messageUuid,
+          ownerId
+        ))
+        .select("id,name,mime_type,size_bytes,storage_object_id,created_at")
+        .single();
+
+      if (attachmentError) {
+        recordServiceEvent("supabase-database", "attachment_insert_failed", "request", localRequestId, attachmentError.message);
+      } else {
+        saved.push({ ...attachmentRow, object_path: attachment.objectPath });
+      }
+    }
+
+    if (saved.length) {
+      recordServiceEvent("supabase-storage", "files_uploaded", "request", localRequestId, `${saved.length} file record(s) saved to Supabase Storage.`);
+    }
+
+    return saved;
   }
 
   async function updateSupabaseRequestFromLocal(request, generatedMessages = []) {
@@ -3559,19 +3642,15 @@ function App() {
           )
         }));
 
-        const localAttachments = buildAttachmentRecords(userComposerFiles, activeRequest.id, messageRow.id, currentUser.id);
-        const attachmentRows = localAttachments.map((attachment) =>
-          supabaseAttachmentInsertFromLocal(attachment, activeRequest.supabaseId, messageRow.id, currentUser.id)
+        const savedAttachments = await persistSupabaseAttachments(
+          userComposerFiles,
+          activeRequest.id,
+          activeRequest.supabaseId,
+          messageRow.id,
+          currentUser.id
         );
-        const { data: savedAttachments, error: attachmentError } = attachmentRows.length
-          ? await supabase
-              .from("attachments")
-              .insert(attachmentRows)
-              .select("id,name,mime_type,size_bytes,created_at")
-          : { data: [], error: null };
 
-        if (attachmentError) {
-          recordServiceEvent("supabase-database", "attachments_insert_failed", "request", activeRequest.id, attachmentError.message);
+        if (!savedAttachments.length && userComposerFiles.length) {
           appendAttachmentRecords(userComposerFiles, activeRequest.id, messageRow.id, currentUser.id);
         } else if (savedAttachments?.length) {
           setAttachmentRecords((current) => [
@@ -3584,8 +3663,8 @@ function App() {
               name: attachment.name,
               size: attachment.size_bytes || 0,
               type: attachment.mime_type || "application/octet-stream",
-              storageObjectId: "",
-              objectPath: "",
+              storageObjectId: attachment.storage_object_id || "",
+              objectPath: attachment.object_path || "",
               createdAt: displayTime(attachment.created_at)
             })),
             ...current
