@@ -74,7 +74,7 @@ type IntakeResult = {
   risk_flags: string[];
 };
 
-const adapterId = "ai-intake-agent-v1";
+const adapterId = "deepseek-intake-agent-v1";
 const supportedStatus = new Set(["draft_saved", "checking", "needs_info", "not_supported", "in_review"]);
 const imageTypes = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
 const isUuidLike = (value = "") => /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
@@ -259,40 +259,36 @@ function summarizeRequestForModel(requestRow: RequestRow, messages: MessageRow[]
       size_bytes: attachment.size_bytes,
       purpose: attachment.purpose,
       storage_status: attachment.storage?.status || "metadata_only",
-      note: imageTypes.has(attachment.mime_type) ? "Image may be provided separately to the model." : "Non-image file is available to Easy Harness staff; use metadata and user text only unless its contents appear in the conversation."
+      note: imageTypes.has(attachment.mime_type) ? "Image file is attached and available to Easy Harness staff. DeepSeek V1 uses the filename, MIME type, storage status, and user text; connector visual details should be confirmed by user or staff if not described in text." : "Non-image file is attached and available to Easy Harness staff; use metadata and user text only unless its contents appear in the conversation."
     }))
   }, null, 2);
 }
 
-async function createSignedImageInputs(supabase: any, attachments: Array<AttachmentRow & { storage?: StorageRow }>) {
-  const imageInputs: Array<Record<string, unknown>> = [];
-  const imageAttachments = attachments.filter((attachment) => {
-    const type = attachment.mime_type || attachment.storage?.content_type || "";
-    return imageTypes.has(type) && attachment.storage?.bucket && attachment.storage?.object_path && attachment.storage?.status === "uploaded";
-  }).slice(0, 6);
-
-  for (const attachment of imageAttachments) {
-    const storage = attachment.storage as StorageRow;
-    const { data, error } = await supabase.storage.from(storage.bucket).createSignedUrl(storage.object_path, 60 * 10);
-    if (!error && data?.signedUrl) {
-      imageInputs.push({
-        type: "image_url",
-        image_url: {
-          url: data.signedUrl,
-          detail: "low"
-        }
-      });
-    }
+function extractJsonObject(text: string) {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error("DeepSeek returned an empty intake result.");
+  if (trimmed.startsWith("```")) {
+    const withoutFence = trimmed
+      .replace(/^```(?:json)?\s*/i, "")
+      .replace(/\s*```$/i, "")
+      .trim();
+    if (withoutFence) return withoutFence;
   }
-
-  return imageInputs;
+  const first = trimmed.indexOf("{");
+  const last = trimmed.lastIndexOf("}");
+  if (first >= 0 && last > first) return trimmed.slice(first, last + 1);
+  return trimmed;
 }
 
-async function callOpenAI(inputText: string, imageInputs: Array<Record<string, unknown>>) {
-  const apiKey = Deno.env.get("OPENAI_API_KEY") || "";
-  const model = Deno.env.get("OPENAI_MODEL") || "gpt-4.1-mini";
+async function callDeepSeek(inputText: string) {
+  const apiKey = Deno.env.get("DEEPSEEK_API_KEY") || "";
+  const baseUrl = (Deno.env.get("DEEPSEEK_BASE_URL") || "https://api.deepseek.com").replace(/\/$/, "");
+  const model = Deno.env.get("DEEPSEEK_MODEL") || "deepseek-v4-pro";
+  const reasoningEffort = Deno.env.get("DEEPSEEK_REASONING_EFFORT") || "max";
+  const maxTokens = Number(Deno.env.get("DEEPSEEK_MAX_TOKENS") || "12000");
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
+  const jsonShape = JSON.stringify(intakeSchema, null, 2);
+  const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${apiKey}`,
@@ -300,16 +296,13 @@ async function callOpenAI(inputText: string, imageInputs: Array<Record<string, u
     },
     body: JSON.stringify({
       model,
-      temperature: 0.2,
-      max_tokens: 2600,
-      response_format: {
-        type: "json_schema",
-        json_schema: {
-          name: "easy_harness_intake_result",
-          strict: true,
-          schema: intakeSchema
-        }
+      stream: false,
+      max_tokens: maxTokens,
+      thinking: {
+        type: "enabled",
+        reasoning_effort: reasoningEffort === "high" ? "high" : "max"
       },
+      response_format: { type: "json_object" },
       messages: [
         {
           role: "system",
@@ -321,18 +314,15 @@ async function callOpenAI(inputText: string, imageInputs: Array<Record<string, u
             "Separate confirmed facts, assumptions, missing information, customer questions, and manufacturing notes.",
             "Ask at most five user-friendly questions. Prioritize: devices to connect, power/signal/data use, voltage/current, length, quantity, environment, connector photos or model references.",
             "If the request is not about a wire harness, cable, connector assembly, adapter, pigtail, or loom, mark it rejected.",
-            "If enough information exists for a human Easy Harness reviewer to continue, mark it accepted even if final quotation, exact materials, or factory confirmation still require staff work."
+            "If enough information exists for a human Easy Harness reviewer to continue, mark it accepted even if final quotation, exact materials, or factory confirmation still require staff work.",
+            "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
+            "The JSON object must follow this schema shape:",
+            jsonShape
           ].join("\n")
         },
         {
           role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Analyze this Easy Harness request and return the structured intake result.\n\n${inputText}`
-            },
-            ...imageInputs
-          ]
+          content: `Analyze this Easy Harness request and return the structured intake result as JSON only.\n\n${inputText}`
         }
       ]
     })
@@ -340,15 +330,19 @@ async function callOpenAI(inputText: string, imageInputs: Array<Record<string, u
 
   const raw = await response.text();
   if (!response.ok) {
-    throw new Error(`OpenAI request failed (${response.status}): ${raw.slice(0, 800)}`);
+    throw new Error(`DeepSeek request failed (${response.status}): ${raw.slice(0, 1200)}`);
   }
 
   const data = JSON.parse(raw);
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error("OpenAI returned an empty intake result.");
+  if (!content) throw new Error("DeepSeek returned an empty intake result.");
+  const parsed = JSON.parse(extractJsonObject(content));
   return {
     model,
-    result: normalizeIntakeResult(JSON.parse(content))
+    provider: "deepseek",
+    reasoningEffort,
+    usage: data?.usage || null,
+    result: normalizeIntakeResult(parsed)
   };
 }
 
@@ -361,7 +355,7 @@ Deno.serve(async (request) => {
     return jsonResponse({ ok: false, code: "invalid_checking_request", message: "requestId is required." }, 400);
   }
 
-  const missing = requiredEnv(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "OPENAI_API_KEY"]);
+  const missing = requiredEnv(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY", "DEEPSEEK_API_KEY"]);
   if (missing.length) return integrationNotConfigured("ai_intake_checking", missing);
 
   const authHeader = request.headers.get("Authorization") || "";
@@ -470,8 +464,7 @@ Deno.serve(async (request) => {
       .eq("id", requestRow.id);
 
     const modelInput = summarizeRequestForModel(requestRow, messages || [], attachmentsWithStorage);
-    const imageInputs = await createSignedImageInputs(supabase, attachmentsWithStorage);
-    const { model, result } = await callOpenAI(modelInput, imageInputs);
+    const { model, provider, reasoningEffort, usage, result } = await callDeepSeek(modelInput);
     const checkedAt = new Date().toISOString();
     const nextStatus = requestStatusFor(result);
     const customerMessage = buildCustomerMessage(result);
@@ -480,6 +473,9 @@ Deno.serve(async (request) => {
       status: result.status,
       adapter: adapterId,
       model,
+      provider,
+      reasoning_effort: reasoningEffort,
+      usage,
       reason: checkReasonFor(result),
       missing: result.missing_information,
       questions: result.questions_for_user,
@@ -491,7 +487,7 @@ Deno.serve(async (request) => {
         request_number: requestRow.request_number,
         message_count: messages?.length || 0,
         attachment_count: attachments?.length || 0,
-        image_count_sent_to_model: imageInputs.length
+        image_count_sent_to_model: 0
       }
     };
 
@@ -526,7 +522,7 @@ Deno.serve(async (request) => {
       target_type: "request",
       target_id: requestRow.id,
       detail: checkReasonFor(result),
-      payload: { requestNumber: requestRow.request_number, trigger: payload.trigger || "manual", model }
+      payload: { requestNumber: requestRow.request_number, trigger: payload.trigger || "manual", model, provider }
     });
 
     return jsonResponse({
