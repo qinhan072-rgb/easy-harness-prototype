@@ -3101,6 +3101,48 @@ function App() {
     recordServiceEvent("supabase-database", "request_updated", "request", request.id, "Request status saved to Supabase.");
   }
 
+  async function invokeSupabaseChecking(request, trigger = "manual") {
+    if (!supabase || !request?.supabaseId || !currentUser) return null;
+
+    recordServiceEvent(
+      platformAdapters.checking.id,
+      "remote_check_started",
+      "request",
+      request.id,
+      "Easy Harness intake agent is analyzing the latest customer input."
+    );
+
+    const { data, error } = await supabase.functions.invoke("run-checking", {
+      body: {
+        requestId: request.supabaseId,
+        trigger
+      }
+    });
+
+    if (error || !data?.ok) {
+      recordServiceEvent(
+        platformAdapters.checking.id,
+        "remote_check_failed",
+        "request",
+        request.id,
+        error?.message || data?.message || data?.code || "Easy Harness intake agent did not finish."
+      );
+      return null;
+    }
+
+    recordServiceEvent(
+      platformAdapters.checking.id,
+      `remote_check_${data.checkStatus || "completed"}`,
+      "request",
+      request.id,
+      data.readiness || "Easy Harness intake agent updated the request draft."
+    );
+
+    await loadSupabaseRequestData(currentUser);
+    if (data.requestNumber) setActiveRequestId(data.requestNumber);
+    return data;
+  }
+
   async function persistSupabaseStaffRequestUpdate(request, messages = [], quote = null) {
     if (!supabase || !request?.supabaseId || !isUuidLike(currentUser?.id)) return null;
     const savedMessages = [];
@@ -3547,6 +3589,7 @@ function App() {
         savedRequest.id,
         "Request is waiting for Easy Harness checking."
       );
+      await invokeSupabaseChecking(savedRequest, "initial_request");
     } else {
       setProcessingRequestId(savedRequest.id);
       setUserView("processing");
@@ -3558,6 +3601,9 @@ function App() {
     if (!text && !userComposerFiles.length) return;
     const attachedNames = userComposerFiles.map(fileName);
     const remoteThread = Boolean(supabase && activeRequest.supabaseId && isUuidLike(currentUser?.id));
+    const shouldRunRemoteChecking =
+      remoteThread &&
+      ["checking", "needs_info", "not_supported", "draft_saved"].includes(activeRequest.status);
     const message = {
       id: messageId(),
       role: "customer",
@@ -3671,6 +3717,9 @@ function App() {
           ]);
         }
         recordServiceEvent("supabase-database", "request_message_inserted", "request", activeRequest.id, "Customer update saved to Supabase.");
+        if (shouldRunRemoteChecking) {
+          await invokeSupabaseChecking(activeRequest, "customer_followup");
+        }
       }
     } else {
       appendAttachmentRecords(userComposerFiles, activeRequest.id, message.id, currentUser.id);
@@ -5328,6 +5377,75 @@ function UserComposer({
   );
 }
 
+function IntakeDraftCard({ checkResult }) {
+  const hasDraft =
+    checkResult?.adapter === "ai-intake-agent-v1" ||
+    checkResult?.factory_draft ||
+    checkResult?.customer_summary ||
+    checkResult?.confirmed_facts?.length ||
+    checkResult?.missing?.length;
+
+  if (!hasDraft) return null;
+
+  const missing = checkResult?.missing || checkResult?.missing_information || [];
+  const questions = checkResult?.questions || checkResult?.questions_for_user || [];
+  const facts = checkResult?.confirmed_facts || [];
+  const draft = checkResult?.factory_draft || {};
+
+  return (
+    <div className="side-card">
+      <h2>Intake draft</h2>
+      {checkResult?.customer_summary && <p>{checkResult.customer_summary}</p>}
+
+      {draft.connection_goal && (
+        <div className="account-meta-row">
+          <span>Goal</span>
+          <strong>{draft.connection_goal}</strong>
+        </div>
+      )}
+      {draft.quantity && (
+        <div className="account-meta-row">
+          <span>Quantity</span>
+          <strong>{draft.quantity}</strong>
+        </div>
+      )}
+      {draft.estimated_length && (
+        <div className="account-meta-row">
+          <span>Length</span>
+          <strong>{draft.estimated_length}</strong>
+        </div>
+      )}
+
+      {!!facts.length && (
+        <div className="mini-list-block">
+          <span>Confirmed</span>
+          <ul>
+            {facts.slice(0, 4).map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {!!missing.length && (
+        <div className="mini-list-block warning">
+          <span>Still needed</span>
+          <ul>
+            {missing.slice(0, 5).map((item) => <li key={item}>{formatMissingInfoItem(item)}</li>)}
+          </ul>
+        </div>
+      )}
+
+      {!!questions.length && (
+        <div className="mini-list-block">
+          <span>Questions asked</span>
+          <ul>
+            {questions.slice(0, 5).map((item) => <li key={item}>{item}</li>)}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
   const ready = request.status === "ready_to_confirm";
   const confirmed = request.status === "confirmed";
@@ -5337,6 +5455,7 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
 
   return (
     <aside className="request-side-panel">
+      <IntakeDraftCard checkResult={request.checkResult} />
       <div className="side-card price-card">
         <div className="price-header">
           <span>Harness price</span>
