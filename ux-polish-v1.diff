@@ -1,0 +1,635 @@
+diff -ruN easy-harness-agent-behavior-v3/src/App.jsx easy-harness-ux-polish-v1/src/App.jsx
+--- easy-harness-agent-behavior-v3/src/App.jsx	2026-05-10 09:30:09.443217413 +0000
++++ easy-harness-ux-polish-v1/src/App.jsx	2026-05-10 09:57:00.585904357 +0000
+@@ -4369,16 +4369,33 @@
+         </p>
+ 
+         {!notice && (
+-          <div className="auth-provider-row" aria-label="Additional sign-in options">
++          <div className="auth-provider-list" aria-label="Additional sign-in options">
+             <button
+               type="button"
++              className="auth-provider-button"
+               onClick={submitGoogle}
+               disabled={loading || !authUsesSupabase || authUnavailable}
+             >
+-              Google
++              <span className="provider-icon google-mark" aria-hidden="true">G</span>
++              <span>
++                <strong>{loading ? "Opening Google…" : "Continue with Google"}</strong>
++                <small>Secure account sign-in</small>
++              </span>
++            </button>
++            <button type="button" className="auth-provider-button disabled" disabled>
++              <span className="provider-icon microsoft-mark" aria-hidden="true"><i /> <i /> <i /> <i /></span>
++              <span>
++                <strong>Continue with Microsoft</strong>
++                <small>Microsoft soon</small>
++              </span>
++            </button>
++            <button type="button" className="auth-provider-button disabled" disabled>
++              <span className="provider-icon apple-mark" aria-hidden="true">●</span>
++              <span>
++                <strong>Continue with Apple</strong>
++                <small>Apple soon</small>
++              </span>
+             </button>
+-            <button type="button" disabled>Microsoft soon</button>
+-            <button type="button" disabled>Apple soon</button>
+           </div>
+         )}
+         {!notice && authUsesSupabase && (
+@@ -4398,13 +4415,13 @@
+ 
+         {notice ? (
+           <div className="auth-check-email">
+-            <div className="auth-check-icon">
+-              <MailCheck size={30} />
++            <div className={`auth-check-icon ${notice.type === "google" ? "loading" : ""}`}>
++              {notice.type === "google" ? <span className="loading-ring" /> : <MailCheck size={30} />}
+             </div>
+-            <h3>{notice.type === "google" ? "Continue with Google" : "Check your email"}</h3>
++            <h3>{notice.type === "google" ? "Opening Google sign-in…" : "Check your email"}</h3>
+             <p>
+               {notice.type === "google" ? (
+-                notice.message
++                "A secure Google sign-in window should open. Complete sign-in there and return to Easy Harness."
+               ) : (
+                 <>
+                   We sent a secure link to <strong>{notice.email}</strong>. Open the link to finish
+@@ -4412,6 +4429,12 @@
+                 </>
+               )}
+             </p>
++            {notice.type === "google" && (
++              <div className="auth-waiting-line">
++                <span /> <span /> <span />
++                <small>Waiting for Google authorization</small>
++              </div>
++            )}
+             {notice.type !== "google" && (
+               <p className="auth-disclaimer">
+                 The email can take a minute to arrive. If it does not show up, check spam or use a
+@@ -4757,16 +4780,10 @@
+ }) {
+   return (
+     <section className="start-screen">
+-      <div className="brand-row">
+-        <Cable size={24} />
+-        <span>Easy Harness</span>
+-      </div>
+-
+-      <div className="start-copy">
+-        <h1>Upload your design. Easy Harness takes it from there.</h1>
++      <div className="start-copy clean">
++        <h1>Tell us what you need to connect.</h1>
+         <p>
+-          Add photos, sketches, PDFs, or an old harness sample. Tell us the
+-          connection you need in plain language.
++          Upload photos, sketches, PDFs, or an old harness sample. Easy Harness will turn your description into a reviewable harness draft.
+         </p>
+       </div>
+ 
+@@ -4777,7 +4794,7 @@
+         <textarea
+           value={description}
+           onChange={(event) => setDescription(event.target.value)}
+-          placeholder="Tell us what you need to connect..."
++          placeholder="Example: Connect a 12V battery to a controller, about 50cm, outdoor use..."
+           rows={1}
+         />
+         <input ref={uploadRef} type="file" multiple hidden onChange={handleUpload} />
+@@ -5499,7 +5516,7 @@
+   );
+ }
+ 
+-function IntakeDraftCard({ checkResult }) {
++function IntakeDraftCard({ checkResult, request }) {
+   const hasDraft =
+     checkResult?.adapter === "ai-intake-agent-v1" ||
+     checkResult?.adapter === "deepseek-intake-agent-v1" ||
+@@ -5508,68 +5525,97 @@
+     checkResult?.confirmed_facts?.length ||
+     checkResult?.missing?.length;
+ 
+-  if (!hasDraft) return null;
++  if (!hasDraft) {
++    return (
++      <div className="side-card request-summary-card quiet">
++        <span className="summary-kicker">Current status</span>
++        <h2>{statusCopy[request.status] || "Request received"}</h2>
++        <p>Easy Harness will show the request summary here after the intake check finishes.</p>
++      </div>
++    );
++  }
+ 
+   const missing = checkResult?.missing || checkResult?.missing_information || [];
+   const questions = checkResult?.questions || checkResult?.questions_for_user || [];
+   const facts = checkResult?.confirmed_facts || [];
+   const draft = checkResult?.factory_draft || {};
+   const canPrepareDraft = checkResult?.can_prepare_draft !== false;
+-  const title = canPrepareDraft
+-    ? checkResult?.readiness === "ready_for_admin_review" || checkResult?.status === "accepted"
+-      ? "Ready for review"
+-      : "Intake draft"
+-    : "Waiting for harness details";
++  const readyForReview = checkResult?.readiness === "ready_for_admin_review" || checkResult?.status === "accepted" || request.status === "in_review";
++  const title = readyForReview
++    ? "Ready for Easy Harness review"
++    : canPrepareDraft
++      ? "Draft needs a few details"
++      : "Waiting for harness details";
++  const nextAction = readyForReview
++    ? "Easy Harness will review the draft and prepare the next update."
++    : missing.length
++      ? "Reply in the thread with the missing details you know."
++      : "Add the connection goal, connector photos, or an old harness sample.";
++  const knownItems = facts.length ? facts.slice(0, 3) : [draft.connection_goal, draft.quantity, draft.estimated_length].filter(Boolean).slice(0, 3);
++  const missingItems = missing.slice(0, 3).map(formatMissingInfoItem);
++  const extraMissingCount = Math.max(0, missing.length - missingItems.length);
++  const extraQuestionCount = Math.max(0, questions.length - 3);
+ 
+   return (
+-    <div className="side-card">
++    <div className="side-card request-summary-card">
++      <span className="summary-kicker">Current status</span>
+       <h2>{title}</h2>
+-      {checkResult?.customer_summary && <p>{checkResult.customer_summary}</p>}
++      <p className="summary-next-action">{nextAction}</p>
++
++      {checkResult?.customer_summary && (
++        <div className="summary-section">
++          <span>Summary</span>
++          <p>{checkResult.customer_summary}</p>
++        </div>
++      )}
+ 
+       {draft.connection_goal && (
+-        <div className="account-meta-row">
++        <div className="summary-section compact-meta">
+           <span>Goal</span>
+           <strong>{draft.connection_goal}</strong>
+         </div>
+       )}
+-      {draft.quantity && (
+-        <div className="account-meta-row">
+-          <span>Quantity</span>
+-          <strong>{draft.quantity}</strong>
+-        </div>
+-      )}
+-      {draft.estimated_length && (
+-        <div className="account-meta-row">
+-          <span>Length</span>
+-          <strong>{draft.estimated_length}</strong>
+-        </div>
+-      )}
+ 
+-      {!!facts.length && (
+-        <div className="mini-list-block">
+-          <span>Confirmed</span>
++      {!!knownItems.length && (
++        <div className="summary-section">
++          <span>Known so far</span>
+           <ul>
+-            {facts.slice(0, 4).map((item) => <li key={item}>{item}</li>)}
++            {knownItems.map((item) => <li key={item}>{item}</li>)}
+           </ul>
+         </div>
+       )}
+ 
+-      {!!missing.length && (
+-        <div className="mini-list-block warning">
+-          <span>Still needed</span>
++      {!!missingItems.length && (
++        <div className="summary-section warning">
++          <span>Needed next</span>
+           <ul>
+-            {missing.slice(0, 5).map((item) => <li key={item}>{formatMissingInfoItem(item)}</li>)}
++            {missingItems.map((item) => <li key={item}>{item}</li>)}
+           </ul>
++          {extraMissingCount > 0 && <small>+{extraMissingCount} more detail{extraMissingCount > 1 ? "s" : ""} in the full draft.</small>}
+         </div>
+       )}
+ 
+-      {!!questions.length && (
+-        <div className="mini-list-block">
+-          <span>Questions asked</span>
+-          <ul>
+-            {questions.slice(0, 5).map((item) => <li key={item}>{item}</li>)}
+-          </ul>
+-        </div>
++      {(!!questions.length || !!missing.length || !!facts.length) && (
++        <details className="full-draft-details">
++          <summary>View full intake draft</summary>
++          <div className="full-draft-content">
++            {draft.quantity && <p><strong>Quantity:</strong> {draft.quantity}</p>}
++            {draft.estimated_length && <p><strong>Length:</strong> {draft.estimated_length}</p>}
++            {!!missing.length && (
++              <div>
++                <strong>Still needed</strong>
++                <ul>{missing.map((item) => <li key={item}>{formatMissingInfoItem(item)}</li>)}</ul>
++              </div>
++            )}
++            {!!questions.length && (
++              <div>
++                <strong>Questions asked</strong>
++                <ul>{questions.slice(0, 8).map((item) => <li key={item}>{item}</li>)}</ul>
++                {extraQuestionCount > 0 && <small>Additional questions are kept in the thread.</small>}
++              </div>
++            )}
++          </div>
++        </details>
+       )}
+     </div>
+   );
+@@ -5581,48 +5627,48 @@
+   const paid = request.status === "paid";
+   const hasOrder = confirmed || paid || linkedOrder;
+   const quote = activeQuoteForRequest(request);
++  const showPriceCard = Boolean(request.price || ready || hasOrder || quote);
+ 
+   return (
+     <aside className="request-side-panel">
+-      <IntakeDraftCard checkResult={request.checkResult} />
+-      <div className="side-card price-card">
+-        <div className="price-header">
+-          <span>Harness price</span>
+-          {request.price ? <CircleDollarSign size={19} /> : <Clock3 size={19} />}
+-        </div>
+-        <div className={`price-value ${request.price ? "ready" : ""}`}>
+-          {request.price ? `$${request.price}` : "In review"}
+-        </div>
+-        <p>
+-          {request.price
+-            ? "Review the latest thread update, then confirm when the draft works for your device."
+-            : "The price appears here when the request is ready for confirmation."}
+-        </p>
+-        {quote && (
+-          <div className="quote-basis">
+-            <span>Quote v{quote.version}</span>
+-            <p>Harness assembly only. Shipping and import charges are handled on the order page.</p>
+-            <small>Valid until {quote.validUntil}</small>
++      <IntakeDraftCard checkResult={request.checkResult} request={request} />
++      {showPriceCard && (
++        <div className="side-card price-card compact-price-card">
++          <div className="price-header">
++            <span>Harness price</span>
++            {request.price ? <CircleDollarSign size={19} /> : <Clock3 size={19} />}
+           </div>
+-        )}
+-        <button
+-          className="pay-button"
+-          disabled={!ready && !hasOrder}
+-          onClick={() => {
+-            if (linkedOrder) {
+-              openOrder(linkedOrder.id);
+-              return;
+-            }
+-            confirmRequest();
+-          }}
+-        >
+-          {ready || hasOrder ? <Check size={17} /> : <Lock size={17} />}
+-          {linkedOrder ? "Open order" : ready ? "Confirm draft" : "Confirm locked"}
+-        </button>
+-      </div>
+-      <div className="side-card">
+-        <WorkflowProgress status={request.status} />
+-      </div>
++          <div className={`price-value ${request.price ? "ready" : ""}`}>
++            {request.price ? `$${request.price}` : "In review"}
++          </div>
++          <p>
++            {request.price
++              ? "Review the latest thread update, then confirm when the draft works for your device."
++              : "The price appears after Easy Harness review."}
++          </p>
++          {quote && (
++            <div className="quote-basis">
++              <span>Quote v{quote.version}</span>
++              <p>Harness assembly only. Shipping and import charges are handled on the order page.</p>
++              <small>Valid until {quote.validUntil}</small>
++            </div>
++          )}
++          <button
++            className="pay-button"
++            disabled={!ready && !hasOrder}
++            onClick={() => {
++              if (linkedOrder) {
++                openOrder(linkedOrder.id);
++                return;
++              }
++              confirmRequest();
++            }}
++          >
++            {ready || hasOrder ? <Check size={17} /> : <Lock size={17} />}
++            {linkedOrder ? "Open order" : ready ? "Confirm draft" : "Confirm locked"}
++          </button>
++        </div>
++      )}
+     </aside>
+   );
+ }
+diff -ruN easy-harness-agent-behavior-v3/src/styles.css easy-harness-ux-polish-v1/src/styles.css
+--- easy-harness-agent-behavior-v3/src/styles.css	2026-05-10 09:30:09.453636177 +0000
++++ easy-harness-ux-polish-v1/src/styles.css	2026-05-10 09:57:00.596630463 +0000
+@@ -3858,3 +3858,300 @@
+   0%, 100% { box-shadow: 0 0 0 0 rgba(14, 168, 151, 0.18); }
+   50% { box-shadow: 0 0 0 8px rgba(14, 168, 151, 0); }
+ }
++
++/* UX polish v1: calmer home, auth, and customer request summary */
++.start-copy.clean {
++  max-width: 720px;
++}
++
++.start-copy.clean h1 {
++  font-size: clamp(32px, 3.2vw, 46px);
++  font-weight: 720;
++  letter-spacing: -0.035em;
++}
++
++.start-copy.clean p {
++  max-width: 660px;
++  margin-top: 14px;
++  font-size: 16px;
++}
++
++.auth-provider-list {
++  display: grid;
++  gap: 10px;
++  margin-top: 18px;
++}
++
++.auth-provider-button {
++  display: grid;
++  grid-template-columns: 42px minmax(0, 1fr);
++  align-items: center;
++  gap: 12px;
++  min-height: 58px;
++  padding: 9px 14px;
++  border: 1px solid var(--line);
++  border-radius: 16px;
++  background: #fff;
++  color: var(--text);
++  text-align: left;
++  box-shadow: 0 10px 28px rgba(20, 37, 34, 0.04);
++  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease;
++}
++
++.auth-provider-button:not(:disabled):hover {
++  border-color: rgba(18, 153, 139, 0.42);
++  box-shadow: 0 16px 34px rgba(20, 37, 34, 0.08);
++  transform: translateY(-1px);
++}
++
++.auth-provider-button.disabled {
++  background: #f7faf9;
++  color: var(--muted);
++  cursor: not-allowed;
++  box-shadow: none;
++}
++
++.auth-provider-button strong,
++.auth-provider-button small {
++  display: block;
++}
++
++.auth-provider-button strong {
++  font-size: 14px;
++  font-weight: 820;
++}
++
++.auth-provider-button small {
++  margin-top: 2px;
++  color: var(--muted);
++  font-size: 12px;
++  font-weight: 620;
++}
++
++.provider-icon {
++  display: inline-flex;
++  align-items: center;
++  justify-content: center;
++  width: 38px;
++  height: 38px;
++  border: 1px solid var(--line);
++  border-radius: 12px;
++  background: #fff;
++  color: var(--text);
++  font-weight: 900;
++}
++
++.google-mark {
++  color: #1a73e8;
++  font-family: Arial, sans-serif;
++}
++
++.microsoft-mark {
++  display: grid;
++  grid-template-columns: repeat(2, 8px);
++  grid-template-rows: repeat(2, 8px);
++  gap: 2px;
++}
++
++.microsoft-mark i {
++  display: block;
++  width: 8px;
++  height: 8px;
++  border-radius: 1px;
++  background: var(--teal);
++  opacity: 0.72;
++}
++
++.apple-mark {
++  font-size: 12px;
++}
++
++.auth-check-icon.loading {
++  position: relative;
++}
++
++.loading-ring {
++  width: 26px;
++  height: 26px;
++  border: 3px solid rgba(18, 153, 139, 0.18);
++  border-top-color: var(--teal);
++  border-radius: 999px;
++  animation: spin 0.95s linear infinite;
++}
++
++.auth-waiting-line {
++  display: flex;
++  align-items: center;
++  gap: 6px;
++  color: var(--muted);
++  font-size: 13px;
++}
++
++.auth-waiting-line span {
++  width: 7px;
++  height: 7px;
++  border-radius: 999px;
++  background: var(--teal);
++  animation: dotPulse 1.1s ease-in-out infinite;
++}
++
++.auth-waiting-line span:nth-child(2) { animation-delay: 0.15s; }
++.auth-waiting-line span:nth-child(3) { animation-delay: 0.3s; }
++.auth-waiting-line small { margin-left: 4px; }
++
++@keyframes spin {
++  to { transform: rotate(360deg); }
++}
++
++@keyframes dotPulse {
++  0%, 80%, 100% { opacity: 0.28; transform: translateY(0); }
++  40% { opacity: 1; transform: translateY(-2px); }
++}
++
++.thread-layout {
++  grid-template-columns: minmax(660px, 1fr) minmax(280px, 318px);
++  width: min(1280px, 100%);
++}
++
++.request-summary-card {
++  padding: 18px;
++  overflow: hidden;
++}
++
++.request-summary-card.quiet {
++  background: rgba(255, 255, 255, 0.76);
++}
++
++.summary-kicker {
++  display: block;
++  margin-bottom: 7px;
++  color: var(--teal);
++  font-size: 11px;
++  font-weight: 880;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++}
++
++.request-summary-card h2 {
++  margin: 0;
++  font-size: 20px;
++  line-height: 1.18;
++  letter-spacing: -0.02em;
++}
++
++.summary-next-action,
++.request-summary-card > p {
++  margin: 10px 0 0;
++  color: var(--muted);
++  font-size: 13px;
++  line-height: 1.48;
++}
++
++.summary-section {
++  margin-top: 14px;
++  padding-top: 13px;
++  border-top: 1px solid var(--line);
++}
++
++.summary-section > span,
++.summary-section > strong:first-child {
++  display: block;
++  margin-bottom: 7px;
++  color: var(--muted);
++  font-size: 11px;
++  font-weight: 860;
++  letter-spacing: 0.08em;
++  text-transform: uppercase;
++}
++
++.summary-section p,
++.summary-section strong {
++  margin: 0;
++  font-size: 13px;
++  line-height: 1.48;
++}
++
++.summary-section ul,
++.full-draft-content ul {
++  display: grid;
++  gap: 7px;
++  margin: 0;
++  padding-left: 18px;
++}
++
++.summary-section li,
++.full-draft-content li {
++  color: var(--text);
++  font-size: 13px;
++  line-height: 1.38;
++}
++
++.summary-section.warning {
++  border-top-color: rgba(214, 126, 34, 0.22);
++}
++
++.summary-section.warning li {
++  color: #6f4a1a;
++}
++
++.summary-section small {
++  display: block;
++  margin-top: 8px;
++  color: var(--muted);
++  font-size: 12px;
++}
++
++.compact-meta strong {
++  color: var(--text);
++  font-weight: 760;
++}
++
++.full-draft-details {
++  margin-top: 14px;
++  border-top: 1px solid var(--line);
++  padding-top: 12px;
++}
++
++.full-draft-details summary {
++  cursor: pointer;
++  color: var(--teal);
++  font-size: 13px;
++  font-weight: 820;
++}
++
++.full-draft-content {
++  display: grid;
++  gap: 12px;
++  margin-top: 12px;
++  color: var(--text);
++}
++
++.full-draft-content p {
++  margin: 0;
++  font-size: 13px;
++  line-height: 1.45;
++}
++
++.compact-price-card {
++  padding: 16px;
++}
++
++@media (max-width: 1180px) {
++  .thread-layout {
++    grid-template-columns: 1fr;
++  }
++}
++
++@media (max-width: 560px) {
++  .start-copy.clean h1 {
++    font-size: 31px;
++  }
++
++  .auth-provider-list {
++    gap: 8px;
++  }
++
++  .auth-provider-button {
++    min-height: 54px;
++  }
++}
