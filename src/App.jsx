@@ -65,6 +65,8 @@ const statusRank = {
 
 const workflowSteps = ["Check", "Draft", "Review", "Confirm", "Pay"];
 
+const intakeOutcomeCopy = { needs_info: "More details needed", not_supported: "Unable to review" };
+
 const sampleFiles = ["connector-photo.jpg", "old-harness.png", "notes.pdf"];
 const maxFilesPerUpload = 8;
 const maxFileSizeBytes = 25 * 1024 * 1024;
@@ -1075,6 +1077,31 @@ function mergeById(current, records) {
   return [...map.values()];
 }
 
+function requestIdentity(request = {}) {
+  return request.supabaseId || request.id;
+}
+
+function dedupeRequestsByIdentity(items = []) {
+  const map = new Map();
+  items.forEach((item) => {
+    const key = requestIdentity(item);
+    if (!key) return;
+    map.set(key, { ...(map.get(key) || {}), ...item });
+  });
+  return [...map.values()];
+}
+
+function appendMessageIfMissing(messages = [], message) {
+  if (!message) return messages;
+  const body = requestBodyFromBlocks(message.blocks || []);
+  const exists = messages.some((item) => {
+    const sameId = item.id && message.id && item.id === message.id;
+    const sameBody = body && requestBodyFromBlocks(item.blocks || []) === body && item.role === message.role;
+    return sameId || sameBody;
+  });
+  return exists ? messages : [...messages, message];
+}
+
 function buildAttachmentRecords(files, requestId, messageIdValue, uploadedBy) {
   return files.map((file) => {
     const id = file.id || attachmentId();
@@ -2017,6 +2044,8 @@ function App() {
   const [fileError, setFileError] = useState("");
   const [processingIndex, setProcessingIndex] = useState(-1);
   const [processingRequestId, setProcessingRequestId] = useState("");
+  const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [sendingUserMessage, setSendingUserMessage] = useState(false);
   const [userComposer, setUserComposer] = useState("");
   const [userComposerFiles, setUserComposerFiles] = useState([]);
   const [staffComposer, setStaffComposer] = useState("");
@@ -2041,6 +2070,8 @@ function App() {
 
   const uploadRef = useRef(null);
   const userComposerUploadRef = useRef(null);
+  const submittingRequestRef = useRef(false);
+  const sendingUserMessageRef = useRef(false);
 
   const currentUser = useMemo(
     () => users.find((user) => user.id === currentUserId) || null,
@@ -2049,10 +2080,10 @@ function App() {
 
   const visibleRequests = useMemo(() => {
     if (!currentUser) return [];
-    if (currentUser.role === "customer") {
-      return requests.filter((request) => request.customerId === currentUser.id);
-    }
-    return requests;
+    const scoped = currentUser.role === "customer"
+      ? requests.filter((request) => request.customerId === currentUser.id)
+      : requests;
+    return dedupeRequestsByIdentity(scoped);
   }, [currentUser, requests]);
 
   const activeRequest = useMemo(
@@ -2285,74 +2316,21 @@ function App() {
     timers.push(
       window.setTimeout(() => {
         const requestForCheck = requests.find((request) => request.id === processingRequestId);
-        if (requestForCheck?.supabaseId) {
-          recordServiceEvent(
-            platformAdapters.checking.id,
-            "check_queued",
-            "request",
-            processingRequestId,
-            "Request is waiting for Easy Harness checking."
-          );
-          setUserView("thread");
-          return;
-        }
-        const adapterResponse = requestForCheck ? runCheckingAdapter(requestForCheck) : null;
-        const checkResult = adapterResponse
-          ? adapterResponse.result
-          : {
-              status: "needs_info",
-              adapter: platformAdapters.checking.id,
-              reason: "We could not read the submitted request. Please add the details again.",
-              missing: ["request details"],
-              checkedAt: "Now"
-            };
-        const accepted = checkResult.status === "accepted";
-        const needsInfo = checkResult.status === "needs_info";
-        const generatedMessages = accepted
-          ? [
-              easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
-              draftMessage(processingRequestId, requestForCheck?.title || "Harness request"),
-              eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
-            ]
-          : needsInfo
-            ? [
-                easyMessage(`We need a little more information before review can start: ${checkResult.missing.join(", ")}. Add the details in this thread and Easy Harness will continue from here.`),
-                eventMessage("More details needed", checkResult.reason)
-              ]
-            : [
-                easyMessage("This request does not look like a wiring harness or connector assembly. Please start a new request with harness photos, drawings, or connector details."),
-                eventMessage("Unable to review", checkResult.reason)
-              ];
-        let nextCheckedRequest = null;
-        updateRequest(processingRequestId, (request) => {
-          nextCheckedRequest = {
-            ...request,
-            status: accepted ? "in_review" : needsInfo ? "needs_info" : "not_supported",
-            checkResult,
-            updated: "Just now",
-            messages: [
-              ...request.messages,
-              ...generatedMessages
-            ]
-          };
-          return nextCheckedRequest;
-        });
-        if (nextCheckedRequest) {
-          updateSupabaseRequestFromLocal(nextCheckedRequest, generatedMessages);
-        }
         recordServiceEvent(
           platformAdapters.checking.id,
-          `check_${checkResult.status}`,
+          requestForCheck?.supabaseId ? "check_queued" : "check_waiting_for_staff",
           "request",
           processingRequestId,
-          adapterResponse ? `${checkResult.reason} Input: ${adapterResponse.input.fileCount} file(s).` : checkResult.reason
+          requestForCheck?.supabaseId
+            ? "Request is waiting for Easy Harness checking."
+            : "Request is saved without a live intake agent. Staff can review it manually."
         );
         setUserView("thread");
-      }, 3000)
+      }, 1800)
     );
 
     return () => timers.forEach(window.clearTimeout);
-  }, [processingRequestId, userView]);
+  }, [processingRequestId, requests, userView]);
 
   function updateRequest(requestId, updater) {
     setRequests((current) =>
@@ -2806,7 +2784,7 @@ function App() {
       return;
     }
 
-    const remoteRequests = (data || []).map((row) => localRequestFromSupabase(row, user));
+    const remoteRequests = dedupeRequestsByIdentity((data || []).map((row) => localRequestFromSupabase(row, user)));
     const remoteMessages = remoteRequests.flatMap((request) =>
       (request.messages || []).map((message) => requestMessageRecord(request, message))
     );
@@ -2829,7 +2807,10 @@ function App() {
     setRequests(remoteRequests);
     setRequestMessageRecords(remoteMessages);
     setAttachmentRecords(remoteAttachments);
-    if (remoteRequests[0]) setActiveRequestId(remoteRequests[0].id);
+    setActiveRequestId((current) => {
+      if (current && remoteRequests.some((request) => request.id === current)) return current;
+      return remoteRequests[0]?.id || current;
+    });
     setDatabaseProviderStatus("ready");
     recordServiceEvent(
       "supabase-database",
@@ -3138,7 +3119,36 @@ function App() {
       data.readiness || "Easy Harness intake agent updated the request draft."
     );
 
+    const aiMessage = data.message
+      ? {
+          id: `agent_${data.requestId || request.supabaseId}_${data.checkResult?.checkedAt || Date.now()}`,
+          role: "easy",
+          createdAt: "Now",
+          blocks: [{ type: "text", text: data.message }]
+        }
+      : null;
+    const nextStatus = data.status || request.status;
+    const nextCheckResult = data.checkResult || request.checkResult;
+
+    updateRequest(data.requestNumber || request.id, (current) => ({
+      ...current,
+      status: nextStatus,
+      checkResult: nextCheckResult,
+      updated: "Just now",
+      messages: appendMessageIfMissing(current.messages || [], aiMessage)
+    }));
+
     await loadSupabaseRequestData(currentUser);
+
+    if (aiMessage) {
+      updateRequest(data.requestNumber || request.id, (current) => ({
+        ...current,
+        status: nextStatus,
+        checkResult: nextCheckResult,
+        updated: "Just now",
+        messages: appendMessageIfMissing(current.messages || [], aiMessage)
+      }));
+    }
     if (data.requestNumber) setActiveRequestId(data.requestNumber);
     return data;
   }
@@ -3483,6 +3493,7 @@ function App() {
   }
 
   function startRequest() {
+    if (submittingRequestRef.current || submittingRequest) return;
     if (!uploadFiles.length) {
       setFileError("Please upload at least one design file before submitting.");
       return;
@@ -3499,8 +3510,11 @@ function App() {
   }
 
   async function submitRequestForUser(actor) {
-    if (!actor || actor.role !== "customer") return;
-    if (!uploadFiles.length) {
+    if (!actor || actor.role !== "customer" || submittingRequestRef.current) return;
+    submittingRequestRef.current = true;
+    setSubmittingRequest(true);
+    try {
+      if (!uploadFiles.length) {
       setFileError("Please upload at least one design file before submitting.");
       return;
     }
@@ -3560,7 +3574,7 @@ function App() {
         }
       : nextRequest;
 
-    setRequests((current) => [savedRequest, ...current]);
+    setRequests((current) => dedupeRequestsByIdentity([savedRequest, ...current]));
     writeRequestMessageLedger(savedRequest, savedRequest.messages[0]);
     if (savedBundle?.attachments?.length) {
       setAttachmentRecords((current) => [...savedBundle.attachments, ...current]);
@@ -3594,12 +3608,20 @@ function App() {
       setProcessingRequestId(savedRequest.id);
       setUserView("processing");
     }
+    } finally {
+      submittingRequestRef.current = false;
+      setSubmittingRequest(false);
+    }
   }
 
   async function sendUserMessage() {
+    if (sendingUserMessageRef.current) return;
     const text = userComposer.trim();
-    if (!text && !userComposerFiles.length) return;
-    const attachedNames = userComposerFiles.map(fileName);
+    const filesToSend = [...userComposerFiles];
+    if (!text && !filesToSend.length) return;
+    sendingUserMessageRef.current = true;
+    setSendingUserMessage(true);
+    const attachedNames = filesToSend.map(fileName);
     const remoteThread = Boolean(supabase && activeRequest.supabaseId && isUuidLike(currentUser?.id));
     const shouldRunRemoteChecking =
       remoteThread &&
@@ -3616,6 +3638,7 @@ function App() {
       ]
     };
 
+    try {
     updateRequest(activeRequest.id, (request) => {
       const baseMessages = [...request.messages, message];
       const nextFiles = [...new Set([...(request.files || []), ...attachedNames])];
@@ -3637,35 +3660,13 @@ function App() {
           messages: baseMessages
         };
       }
-      const shouldRecheck = ["needs_info", "not_supported", "checking"].includes(request.status);
-      const adapterResponse = shouldRecheck
-        ? runCheckingAdapter({ ...request, files: nextFiles, messages: baseMessages })
-        : null;
-      const checkResult = adapterResponse ? adapterResponse.result : request.checkResult;
-      const acceptedAfterUpdate = shouldRecheck && checkResult.status === "accepted";
-      const nextMessages = acceptedAfterUpdate
-        ? [
-            ...baseMessages,
-            easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
-            draftMessage(request.id, request.title),
-            eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
-          ]
-        : baseMessages;
-
       return {
         ...request,
         files: nextFiles,
-        status:
-          acceptedAfterUpdate || request.status === "draft_saved"
-            ? "in_review"
-            : shouldRecheck && checkResult.status === "needs_info"
-              ? "needs_info"
-              : shouldRecheck && checkResult.status === "rejected"
-                ? "not_supported"
-                : request.status,
-        checkResult,
+        status: request.status === "draft_saved" ? "checking" : request.status,
+        checkResult: request.checkResult,
         updated: "Just now",
-        messages: nextMessages
+        messages: baseMessages
       };
     });
 
@@ -3689,15 +3690,15 @@ function App() {
         }));
 
         const savedAttachments = await persistSupabaseAttachments(
-          userComposerFiles,
+          filesToSend,
           activeRequest.id,
           activeRequest.supabaseId,
           messageRow.id,
           currentUser.id
         );
 
-        if (!savedAttachments.length && userComposerFiles.length) {
-          appendAttachmentRecords(userComposerFiles, activeRequest.id, messageRow.id, currentUser.id);
+        if (!savedAttachments.length && filesToSend.length) {
+          appendAttachmentRecords(filesToSend, activeRequest.id, messageRow.id, currentUser.id);
         } else if (savedAttachments?.length) {
           setAttachmentRecords((current) => [
             ...savedAttachments.map((attachment) => ({
@@ -3722,7 +3723,7 @@ function App() {
         }
       }
     } else {
-      appendAttachmentRecords(userComposerFiles, activeRequest.id, message.id, currentUser.id);
+      appendAttachmentRecords(filesToSend, activeRequest.id, message.id, currentUser.id);
     }
     writeRequestMessageLedger(activeRequest, message);
     addNotification({
@@ -3738,6 +3739,10 @@ function App() {
     setUserComposer("");
     setUserComposerFiles([]);
     setFileError("");
+    } finally {
+      sendingUserMessageRef.current = false;
+      setSendingUserMessage(false);
+    }
   }
 
   async function sendStaffUpdate() {
@@ -4107,6 +4112,7 @@ function App() {
             handleUpload={handleUpload}
             fillSampleRequest={fillSampleRequest}
             startRequest={startRequest}
+            submittingRequest={submittingRequest}
             currentUser={currentUser}
             termsChecked={termsChecked}
             setTermsChecked={setTermsChecked}
@@ -4166,6 +4172,7 @@ function App() {
             uploadRef={userComposerUploadRef}
             handleUpload={(event) => handleUpload(event, "composer")}
             sendMessage={sendUserMessage}
+            sendingMessage={sendingUserMessage}
             confirmRequest={confirmRequest}
             fileError={fileError}
             openOrder={openOrder}
@@ -4525,7 +4532,7 @@ function UserSidebar({
       {sidebarOpen && showPrivateNav && (requests.length || orders.length) ? (
         <div className="draft-list">
           <div className="sidebar-section-title">Recent requests</div>
-          {requests.slice(0, 6).map((request) => (
+          {dedupeRequestsByIdentity(requests).slice(0, 6).map((request) => (
             <button
               className={`draft-list-item ${request.id === activeRequest?.id ? "active" : ""}`}
               key={request.id}
@@ -4702,6 +4709,7 @@ function StartScreen({
   handleUpload,
   fillSampleRequest,
   startRequest,
+  submittingRequest = false,
   currentUser,
   termsChecked,
   setTermsChecked,
@@ -4734,8 +4742,8 @@ function StartScreen({
           rows={1}
         />
         <input ref={uploadRef} type="file" multiple hidden onChange={handleUpload} />
-        <button className="send-button" onClick={startRequest} aria-label="Start request">
-          <ArrowRight size={21} />
+        <button className="send-button" onClick={startRequest} aria-label="Start request" disabled={submittingRequest}>
+          {submittingRequest ? <Clock3 size={21} /> : <ArrowRight size={21} />}
         </button>
       </div>
 
@@ -4833,7 +4841,7 @@ function RequestsList({ requests, openRequest }) {
       </div>
 
       <div className="request-list">
-        {requests.map((request) => (
+        {dedupeRequestsByIdentity(requests).map((request) => (
           <button
             className="request-row"
             key={request.id}
@@ -5112,6 +5120,7 @@ function RequestWorkspace({
   uploadRef,
   handleUpload,
   sendMessage,
+  sendingMessage = false,
   confirmRequest,
   fileError,
   openOrder,
@@ -5137,6 +5146,7 @@ function RequestWorkspace({
             uploadRef={uploadRef}
             handleUpload={handleUpload}
             sendMessage={sendMessage}
+            sending={sendingMessage}
             fileError={fileError}
           />
         </div>
@@ -5341,6 +5351,7 @@ function UserComposer({
   uploadRef,
   handleUpload,
   sendMessage,
+  sending = false,
   fileError
 }) {
   return (
@@ -5354,7 +5365,7 @@ function UserComposer({
       )}
       {fileError && <div className="composer-error">{fileError}</div>}
       <div className="thread-composer">
-        <button className="attach-button" onClick={() => uploadRef.current?.click()}>
+        <button className="attach-button" onClick={() => uploadRef.current?.click()} disabled={sending}>
           <Plus size={19} />
         </button>
         <input ref={uploadRef} type="file" multiple hidden onChange={handleUpload} />
@@ -5362,15 +5373,19 @@ function UserComposer({
           value={value}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === "Enter") sendMessage();
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              sendMessage();
+            }
           }}
-          placeholder="Add details or upload more files..."
+          disabled={sending}
+          placeholder={sending ? "Easy Harness is updating..." : "Add details or upload more files..."}
         />
-        <button className="composer-tool" onClick={() => uploadRef.current?.click()} aria-label="Attach file">
+        <button className="composer-tool" onClick={() => uploadRef.current?.click()} aria-label="Attach file" disabled={sending}>
           <FileText size={18} />
         </button>
-        <button className="send-button small" onClick={sendMessage} aria-label="Send">
-          <Send size={17} />
+        <button className="send-button small" onClick={sendMessage} aria-label="Send" disabled={sending}>
+          {sending ? <Clock3 size={17} /> : <Send size={17} />}
         </button>
       </div>
     </div>
@@ -5380,6 +5395,7 @@ function UserComposer({
 function IntakeDraftCard({ checkResult }) {
   const hasDraft =
     checkResult?.adapter === "ai-intake-agent-v1" ||
+    checkResult?.adapter === "deepseek-intake-agent-v1" ||
     checkResult?.factory_draft ||
     checkResult?.customer_summary ||
     checkResult?.confirmed_facts?.length ||

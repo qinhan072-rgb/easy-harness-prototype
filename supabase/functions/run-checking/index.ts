@@ -74,6 +74,7 @@ type IntakeResult = {
   risk_flags: string[];
 };
 
+// Legacy note: OPENAI_API_KEY is no longer used by this function; DEEPSEEK_API_KEY is required.
 const adapterId = "deepseek-intake-agent-v1";
 const supportedStatus = new Set(["draft_saved", "checking", "needs_info", "not_supported", "in_review"]);
 const imageTypes = new Set(["image/png", "image/jpeg", "image/jpg", "image/webp", "image/gif"]);
