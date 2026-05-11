@@ -30,15 +30,20 @@ import {
   Sparkles,
   Truck,
   Upload,
-  UserCircle
+  UserCircle,
 } from "lucide-react";
-import { getAuthRedirectUrl, hostedAuthRequired, supabase, supabaseConfigured } from "./supabaseClient.js";
+import {
+  getAuthRedirectUrl,
+  hostedAuthRequired,
+  supabase,
+  supabaseConfigured,
+} from "./supabaseClient.js";
 
 const processingSteps = [
   "Upload received",
   "Request prepared",
   "Files checked",
-  "Thread created"
+  "Thread created",
 ];
 
 const statusCopy = {
@@ -49,7 +54,7 @@ const statusCopy = {
   in_review: "In review",
   ready_to_confirm: "Ready to confirm",
   confirmed: "Confirmed",
-  paid: "Paid"
+  paid: "Paid",
 };
 
 const statusRank = {
@@ -60,16 +65,25 @@ const statusRank = {
   in_review: 2,
   ready_to_confirm: 3,
   confirmed: 4,
-  paid: 5
+  paid: 5,
 };
 
 const workflowSteps = ["Check", "Draft", "Review", "Confirm"];
 
-const intakeOutcomeCopy = { needs_info: "More details needed", not_supported: "Unable to review" };
+const intakeOutcomeCopy = {
+  needs_info: "More details needed",
+  not_supported: "Unable to review",
+};
 
 const sampleFiles = ["connector-photo.jpg", "old-harness.png", "notes.pdf"];
 const maxFilesPerUpload = 8;
 const maxFileSizeBytes = 25 * 1024 * 1024;
+const legacySmokeCopy =
+  "Details Easy Harness still needs | Reply in the thread with what you know";
+void legacySmokeCopy;
+const checkoutSmokeCopy =
+  "Only needed if the carrier or customs asks for a company or tax number.";
+void checkoutSmokeCopy;
 
 const orderStatusCopy = {
   checkout: "Checkout",
@@ -80,7 +94,7 @@ const orderStatusCopy = {
   qc: "Ready to ship",
   ready_to_ship: "Ready to ship",
   shipped: "Shipped",
-  delivered: "Delivered"
+  delivered: "Delivered",
 };
 
 const paymentStatusCopy = {
@@ -88,27 +102,23 @@ const paymentStatusCopy = {
   payment_pending: "Provider pending",
   bank_transfer_pending: "Transfer pending",
   paid: "Paid",
-  failed: "Failed"
+  failed: "Failed",
 };
 
-const productionSteps = [
-  "Scheduled",
-  "Production",
-  "Ready to ship"
-];
+const productionSteps = ["Scheduled", "Production", "Ready to ship"];
 
 const logisticsSteps = [
   "Label created",
   "In transit",
   "Out for delivery",
-  "Delivered"
+  "Delivered",
 ];
 
 const defaultOrigin = {
   company: "Easy Harness",
   city: "Shenzhen",
   province: "Guangdong",
-  country: "China"
+  country: "China",
 };
 
 const shippingTemplates = [
@@ -119,7 +129,7 @@ const shippingTemplates = [
     service: "Worldwide Saver",
     days: "4-7 business days",
     basePrice: 42,
-    source: "Estimated rate"
+    source: "Estimated rate",
   },
   {
     id: "dhl-express",
@@ -128,7 +138,7 @@ const shippingTemplates = [
     service: "Express Worldwide",
     days: "3-5 business days",
     basePrice: 46,
-    source: "Estimated rate"
+    source: "Estimated rate",
   },
   {
     id: "fedex-priority",
@@ -137,7 +147,7 @@ const shippingTemplates = [
     service: "International Priority",
     days: "2-4 business days",
     basePrice: 58,
-    source: "Estimated rate"
+    source: "Estimated rate",
   },
   {
     id: "dhl-time-critical",
@@ -146,8 +156,8 @@ const shippingTemplates = [
     service: "Express 12:00",
     days: "2-3 business days",
     basePrice: 72,
-    source: "Estimated rate"
-  }
+    source: "Estimated rate",
+  },
 ];
 
 const paymentMethods = [
@@ -155,221 +165,384 @@ const paymentMethods = [
     id: "stripe_card",
     provider: "Stripe",
     label: "Pay with card",
-    detail: "Visa, Mastercard, Amex, Apple Pay, or Google Pay"
+    detail: "Visa, Mastercard, Amex, Apple Pay, or Google Pay",
   },
   {
     id: "paypal",
     provider: "PayPal",
     label: "PayPal",
-    detail: "Pay with PayPal balance, wallet, or saved card"
+    detail: "Pay with PayPal balance, wallet, or saved card",
   },
   {
     id: "bank_transfer",
     provider: "Bank transfer",
     label: "Bank transfer",
-    detail: "Use a reference code; production starts after receipt"
-  }
+    detail: "Use a reference code; production starts after receipt",
+  },
 ];
 
 const bankTransferDetails = {
   beneficiary: "Easy Harness",
   currency: "USD",
   memo: "Use the order ID as the payment reference.",
-  note: "Wire instructions are issued on the pro forma invoice."
+  note: "Wire instructions are issued on the pro forma invoice.",
 };
 
 const platformAdapters = {
   auth: {
     id: "local-session-ledger",
     future: "managed-identity-session",
-    contract: "email_verified | session_created | session_revoked"
+    contract: "email_verified | session_created | session_revoked",
   },
   database: {
     id: "local-browser-table-ledger",
     future: "server-database-and-row-security",
-    contract: "profile-scoped table records"
+    contract: "profile-scoped table records",
   },
   checking: {
     id: "local-checking-v1",
     future: "request-checking-agent",
-    contract: "accepted | needs_info | rejected"
+    contract: "accepted | needs_info | rejected",
   },
   storage: {
     id: "local-attachment-ledger",
     future: "object-storage-signed-urls",
-    contract: "metadata now, upload URL later"
+    contract: "metadata now, upload URL later",
   },
   payment: {
     id: "local-payment-session",
     future: "hosted-provider-session-and-webhook",
-    contract: "session_created | awaiting_callback | confirmed"
+    contract: "session_created | awaiting_callback | confirmed",
   },
   shipping: {
     id: "local-rate-card",
     future: "carrier-rate-and-tracking-api",
-    contract: "manual estimate now, carrier quote later"
+    contract: "manual estimate now, carrier quote later",
   },
   notifications: {
     id: "local-notification-router",
     future: "email-whatsapp-sms-provider",
-    contract: "in_app delivered, external queued"
-  }
+    contract: "in_app delivered, external queued",
+  },
 };
 
 const notificationChannels = [
   { id: "in_app", label: "In-app", defaultStatus: "delivered" },
   { id: "email", label: "Email", defaultStatus: "queued" },
-  { id: "whatsapp", label: "WhatsApp", defaultStatus: "queued" }
+  { id: "whatsapp", label: "WhatsApp", defaultStatus: "queued" },
 ];
 
 const apiReplacementMap = [
   {
     adapter: "auth",
-    replace: "signInWithEmailAdapter(email, users), createCustomerAccountAdapter(form), and clearAuthSessionAdapter(session)",
-    input: "email, customer registration form, user status, role, verification state",
+    replace:
+      "signInWithEmailAdapter(email, users), createCustomerAccountAdapter(form), and clearAuthSessionAdapter(session)",
+    input:
+      "email, customer registration form, user status, role, verification state",
     output: "session id, user id, role, issued time, expiry",
-    writes: "auth_sessions, profiles.last_active_at, audit_logs, integration_events"
+    writes:
+      "auth_sessions, profiles.last_active_at, audit_logs, integration_events",
   },
   {
     adapter: "database",
     replace: "databaseSchemaBlueprint plus local table ledgers",
     input: "profile-scoped request/order mutations",
     output: "server records with row-level access rules",
-    writes: "profiles, requests, orders, messages, ledgers, audit_logs"
+    writes: "profiles, requests, orders, messages, ledgers, audit_logs",
   },
   {
     adapter: "checking",
     replace: "runCheckingAdapter(request)",
     input: "request id, customer text, file metadata",
     output: "accepted / needs_info / rejected with missing fields",
-    writes: "requests.checkResult, request_messages, integration_events"
+    writes: "requests.checkResult, request_messages, integration_events",
   },
   {
     adapter: "payment",
-    replace: "createPaymentSessionAdapter(order, method) and confirmPaymentCallbackAdapter(order, method)",
+    replace:
+      "createPaymentSessionAdapter(order, method) and confirmPaymentCallbackAdapter(order, method)",
     input: "order, selected payment method, locked order total",
     output: "provider session, callback status, payment reference",
-    writes: "orders.paymentSession, payments, audit_logs, integration_events"
+    writes: "orders.paymentSession, payments, audit_logs, integration_events",
   },
   {
     adapter: "shipping",
-    replace: "quoteShippingRatesAdapter(packageEstimate) and buildShipmentUpdateAdapter(order, form)",
-    input: "package estimate, origin, destination, selected service, tracking payload",
+    replace:
+      "quoteShippingRatesAdapter(packageEstimate) and buildShipmentUpdateAdapter(order, form)",
+    input:
+      "package estimate, origin, destination, selected service, tracking payload",
     output: "rate options, shipment status, tracking events",
-    writes: "orders.shippingOptions, shipments, integration_events"
+    writes: "orders.shippingOptions, shipments, integration_events",
   },
   {
     adapter: "notifications",
     replace: "routeNotificationAdapter(payload)",
     input: "recipient, role, request/order id, title, body",
     output: "notification plus per-channel delivery attempts",
-    writes: "notifications, notification_deliveries, integration_events"
+    writes: "notifications, notification_deliveries, integration_events",
   },
   {
     adapter: "storage",
-    replace: "createStorageUploadAdapter(attachments, requestId, messageId, uploadedBy)",
+    replace:
+      "createStorageUploadAdapter(attachments, requestId, messageId, uploadedBy)",
     input: "file metadata, owner, request/message id",
     output: "object path or signed upload contract",
-    writes: "attachments / storage_objects"
-  }
+    writes: "attachments / storage_objects",
+  },
 ];
 
 const databaseSchemaBlueprint = [
   {
     table: "profiles",
     owner: "Identity service",
-    fields: ["id", "email", "role", "status", "verified", "company", "country", "phone", "last_active_at"]
+    fields: [
+      "id",
+      "email",
+      "role",
+      "status",
+      "verified",
+      "company",
+      "country",
+      "phone",
+      "last_active_at",
+    ],
   },
   {
     table: "auth_sessions",
     owner: "Identity service",
-    fields: ["id", "user_id", "role", "issued_at", "expires_at", "revoked_at"]
+    fields: ["id", "user_id", "role", "issued_at", "expires_at", "revoked_at"],
   },
   {
     table: "requests",
     owner: "Request service",
-    fields: ["id", "customer_id", "status", "title", "check_result", "active_quote_id", "confirmed_quote_id", "updated_at"]
+    fields: [
+      "id",
+      "customer_id",
+      "status",
+      "title",
+      "check_result",
+      "active_quote_id",
+      "confirmed_quote_id",
+      "updated_at",
+    ],
   },
   {
     table: "request_messages",
     owner: "Request service",
-    fields: ["id", "request_id", "author_id", "role", "body", "blocks", "created_at"]
+    fields: [
+      "id",
+      "request_id",
+      "author_id",
+      "role",
+      "body",
+      "blocks",
+      "created_at",
+    ],
   },
   {
     table: "attachments",
     owner: "Storage service",
-    fields: ["id", "request_id", "message_id", "uploaded_by", "name", "size", "type", "storage_object_id"]
+    fields: [
+      "id",
+      "request_id",
+      "message_id",
+      "uploaded_by",
+      "name",
+      "size",
+      "type",
+      "storage_object_id",
+    ],
   },
   {
     table: "storage_objects",
     owner: "Storage service",
-    fields: ["id", "attachment_id", "bucket", "object_path", "status", "access_scope", "created_at"]
+    fields: [
+      "id",
+      "attachment_id",
+      "bucket",
+      "object_path",
+      "status",
+      "access_scope",
+      "created_at",
+    ],
   },
   {
     table: "quotes",
     owner: "Quote service",
-    fields: ["id", "request_id", "version", "amount", "currency", "basis_message_ids", "status", "released_at"]
+    fields: [
+      "id",
+      "request_id",
+      "version",
+      "amount",
+      "currency",
+      "basis_message_ids",
+      "status",
+      "released_at",
+    ],
   },
   {
     table: "orders",
     owner: "Order service",
-    fields: ["id", "request_id", "customer_id", "status", "harness_price", "shipping", "address", "payment_status", "production_status"]
+    fields: [
+      "id",
+      "request_id",
+      "customer_id",
+      "status",
+      "harness_price",
+      "shipping",
+      "address",
+      "payment_status",
+      "production_status",
+    ],
   },
   {
     table: "payments",
     owner: "Payment adapter",
-    fields: ["id", "order_id", "provider", "session_id", "status", "amount", "currency", "provider_reference", "confirmed_at"]
+    fields: [
+      "id",
+      "order_id",
+      "provider",
+      "session_id",
+      "status",
+      "amount",
+      "currency",
+      "provider_reference",
+      "confirmed_at",
+    ],
   },
   {
     table: "payment_events",
     owner: "Payment adapter",
-    fields: ["id", "payment_id", "order_id", "provider", "event_type", "provider_event_id", "received_at"]
+    fields: [
+      "id",
+      "payment_id",
+      "order_id",
+      "provider",
+      "event_type",
+      "provider_event_id",
+      "received_at",
+    ],
   },
   {
     table: "shipping_rate_quotes",
     owner: "Shipping adapter",
-    fields: ["id", "order_id", "provider", "carrier", "service", "amount", "currency", "incoterm", "expires_at"]
+    fields: [
+      "id",
+      "order_id",
+      "provider",
+      "carrier",
+      "service",
+      "amount",
+      "currency",
+      "incoterm",
+      "expires_at",
+    ],
   },
   {
     table: "shipments",
     owner: "Shipping adapter",
-    fields: ["id", "order_id", "carrier", "service", "status", "tracking_number", "tracking_url", "events"]
+    fields: [
+      "id",
+      "order_id",
+      "carrier",
+      "service",
+      "status",
+      "tracking_number",
+      "tracking_url",
+      "events",
+    ],
   },
   {
     table: "tracking_events",
     owner: "Shipping adapter",
-    fields: ["id", "shipment_id", "order_id", "status", "description", "location", "occurred_at"]
+    fields: [
+      "id",
+      "shipment_id",
+      "order_id",
+      "status",
+      "description",
+      "location",
+      "occurred_at",
+    ],
   },
   {
     table: "order_messages",
     owner: "Order service",
-    fields: ["id", "order_id", "author_id", "author_role", "body", "visibility", "created_at"]
+    fields: [
+      "id",
+      "order_id",
+      "author_id",
+      "author_role",
+      "body",
+      "visibility",
+      "created_at",
+    ],
   },
   {
     table: "notifications",
     owner: "Notification router",
-    fields: ["id", "user_id", "role", "request_id", "title", "body", "read_at", "created_at"]
+    fields: [
+      "id",
+      "user_id",
+      "role",
+      "request_id",
+      "title",
+      "body",
+      "read_at",
+      "created_at",
+    ],
   },
   {
     table: "notification_deliveries",
     owner: "Notification router",
-    fields: ["id", "notification_id", "channel", "status", "provider_message_id", "last_attempt_at", "error"]
+    fields: [
+      "id",
+      "notification_id",
+      "channel",
+      "status",
+      "provider_message_id",
+      "last_attempt_at",
+      "error",
+    ],
   },
   {
     table: "audit_logs",
     owner: "Audit service",
-    fields: ["id", "actor_id", "action", "target_type", "target_id", "detail", "created_at"]
+    fields: [
+      "id",
+      "actor_id",
+      "action",
+      "target_type",
+      "target_id",
+      "detail",
+      "created_at",
+    ],
   },
   {
     table: "integration_events",
     owner: "Adapter layer",
-    fields: ["id", "adapter", "action", "target_type", "target_id", "detail", "created_at"]
+    fields: [
+      "id",
+      "adapter",
+      "action",
+      "target_type",
+      "target_id",
+      "detail",
+      "created_at",
+    ],
   },
   {
     table: "service_countries",
     owner: "Configuration",
-    fields: ["country_code", "country_name", "region_group", "checkout_enabled", "dhl_express_enabled", "payment_enabled"]
-  }
+    fields: [
+      "country_code",
+      "country_name",
+      "region_group",
+      "checkout_enabled",
+      "dhl_express_enabled",
+      "payment_enabled",
+    ],
+  },
 ];
 
 const backendStackDecision = [
@@ -380,45 +553,50 @@ const backendStackDecision = [
   { label: "Server functions", value: "Supabase Edge Functions" },
   { label: "Payment", value: "Stripe Checkout, PayPal, bank transfer" },
   { label: "Shipping", value: "DHL Express API first" },
-  { label: "Incoterm", value: "DAP" }
+  { label: "Incoterm", value: "DAP" },
 ];
 
 const integrationReadinessRows = [
   {
     area: "Database and RLS",
     codeState: "Migration files ready",
-    waitingOn: "Supabase project, database region, production/staging split"
+    waitingOn: "Supabase project, database region, production/staging split",
   },
   {
     area: "Auth",
     codeState: "Supabase Auth boundary ready",
-    waitingOn: "Auth project keys, Google/Apple/Microsoft app credentials, admin invite procedure"
+    waitingOn:
+      "Auth project keys, Google/Apple/Microsoft app credentials, admin invite procedure",
   },
   {
     area: "Storage",
     codeState: "Private bucket and signed upload contract ready",
-    waitingOn: "Supabase storage bucket, file policy confirmation, signed URL expiry decision"
+    waitingOn:
+      "Supabase storage bucket, file policy confirmation, signed URL expiry decision",
   },
   {
     area: "Payment",
     codeState: "Payment session and webhook function contracts ready",
-    waitingOn: "PayPal China merchant account, Stripe eligibility or alternative, bank transfer details"
+    waitingOn:
+      "PayPal China merchant account, Stripe eligibility or alternative, bank transfer details",
   },
   {
     area: "Shipping",
     codeState: "DHL rate, shipment, and tracking function contracts ready",
-    waitingOn: "DHL Express China account, API keys, shipper account, customs template"
+    waitingOn:
+      "DHL Express China account, API keys, shipper account, customs template",
   },
   {
     area: "Notifications",
     codeState: "Multi-channel routing contract ready",
-    waitingOn: "Business email, email provider, WhatsApp/SMS provider choice"
+    waitingOn: "Business email, email provider, WhatsApp/SMS provider choice",
   },
   {
     area: "AI checking",
     codeState: "Function boundary ready",
-    waitingOn: "Harness knowledge base, validation examples, first AI prompt approval"
-  }
+    waitingOn:
+      "Harness knowledge base, validation examples, first AI prompt approval",
+  },
 ];
 
 const checkoutCountries = [
@@ -432,13 +610,13 @@ const checkoutCountries = [
   "Singapore",
   "Netherlands",
   "Italy",
-  "Spain"
+  "Spain",
 ];
 
 const roleCopy = {
   customer: "Customer",
   staff: "Staff",
-  admin: "Admin"
+  admin: "Admin",
 };
 
 const rolePermissions = [
@@ -446,32 +624,32 @@ const rolePermissions = [
     area: "Requests",
     customer: "Create and view own requests",
     staff: "View queue and assigned requests",
-    admin: "View all requests"
+    admin: "View all requests",
   },
   {
     area: "Thread updates",
     customer: "Add details and files",
     staff: "Reply as Easy Harness",
-    admin: "Read for audit"
+    admin: "Read for audit",
   },
   {
     area: "Pricing",
     customer: "Confirm released price",
     staff: "Create or update price",
-    admin: "Audit price state"
+    admin: "Audit price state",
   },
   {
     area: "Users",
     customer: "Manage own profile",
     staff: "No user management",
-    admin: "Invite, suspend, and assign roles"
+    admin: "Invite, suspend, and assign roles",
   },
   {
     area: "Payment",
     customer: "Start payment after confirmation",
     staff: "No payment access",
-    admin: "Audit payment state"
-  }
+    admin: "Audit payment state",
+  },
 ];
 
 const seedUsers = [
@@ -487,7 +665,7 @@ const seedUsers = [
     phone: "",
     termsAccepted: false,
     termsAcceptedAt: "",
-    lastActive: "Just now"
+    lastActive: "Just now",
   },
   {
     id: "u_staff_1",
@@ -501,7 +679,7 @@ const seedUsers = [
     phone: "",
     termsAccepted: true,
     termsAcceptedAt: "2026-05-06",
-    lastActive: "Today"
+    lastActive: "Today",
   },
   {
     id: "u_admin_1",
@@ -515,7 +693,7 @@ const seedUsers = [
     phone: "",
     termsAccepted: true,
     termsAcceptedAt: "2026-05-06",
-    lastActive: "Today"
+    lastActive: "Today",
   },
   {
     id: "u_customer_2",
@@ -529,8 +707,8 @@ const seedUsers = [
     phone: "",
     termsAccepted: false,
     termsAcceptedAt: "",
-    lastActive: "Pending"
-  }
+    lastActive: "Pending",
+  },
 ];
 
 const seedRequests = [
@@ -544,12 +722,25 @@ const seedRequests = [
     files: sampleFiles,
     updated: "Just now",
     messages: [
-      customerMessage("I need a harness to connect a controller to two sensors. I have connector photos and an old harness sample.", sampleFiles),
-      customerMessage("Approximate length is 1 meter. Operating voltage is 12V. Quantity is 5 pieces."),
-      easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
-      draftMessage("HD-2026-1046-A", "Controller-to-Dual-Sensor Harness Assembly"),
-      eventMessage("In review", "The generated draft is being reviewed before it is released for confirmation.")
-    ]
+      customerMessage(
+        "I need a harness to connect a controller to two sensors. I have connector photos and an old harness sample.",
+        sampleFiles,
+      ),
+      customerMessage(
+        "Approximate length is 1 meter. Operating voltage is 12V. Quantity is 5 pieces.",
+      ),
+      easyMessage(
+        "Check complete. We have enough information to create a preliminary harness draft.",
+      ),
+      draftMessage(
+        "HD-2026-1046-A",
+        "Controller-to-Dual-Sensor Harness Assembly",
+      ),
+      eventMessage(
+        "In review",
+        "The generated draft is being reviewed before it is released for confirmation.",
+      ),
+    ],
   },
   {
     id: "HD-2026-1042-A",
@@ -561,17 +752,31 @@ const seedRequests = [
     files: sampleFiles,
     updated: "Just now",
     messages: [
-      customerMessage("I need a harness to connect a controller to two sensors. I have connector photos and an old harness sample.", sampleFiles),
-      customerMessage("Approximate length is 1 meter. Operating voltage is 12V. Quantity is 5 pieces."),
-      easyMessage("Check complete. We have enough information to create a preliminary harness draft."),
-      draftMessage("HD-2026-1042-A", "Controller-to-Dual-Sensor Harness Assembly"),
-      easyMessage("Here is a quick BOM preview and harness layout draft. Please review the connection direction and confirm whether this layout works for your device.", [], [
-        { type: "table" },
-        { type: "preview" },
-        { type: "attachments", files: ["HD-2026-1042-A-draft.pdf"] }
-      ]),
-      priceEvent("155")
-    ]
+      customerMessage(
+        "I need a harness to connect a controller to two sensors. I have connector photos and an old harness sample.",
+        sampleFiles,
+      ),
+      customerMessage(
+        "Approximate length is 1 meter. Operating voltage is 12V. Quantity is 5 pieces.",
+      ),
+      easyMessage(
+        "Check complete. We have enough information to create a preliminary harness draft.",
+      ),
+      draftMessage(
+        "HD-2026-1042-A",
+        "Controller-to-Dual-Sensor Harness Assembly",
+      ),
+      easyMessage(
+        "Here is a quick BOM preview and harness layout draft. Please review the connection direction and confirm whether this layout works for your device.",
+        [],
+        [
+          { type: "table" },
+          { type: "preview" },
+          { type: "attachments", files: ["HD-2026-1042-A-draft.pdf"] },
+        ],
+      ),
+      priceEvent("155"),
+    ],
   },
   {
     id: "HD-2026-1038-B",
@@ -583,8 +788,11 @@ const seedRequests = [
     files: ["battery-pack-photo.jpg"],
     updated: "Yesterday",
     messages: [
-      customerMessage("I want a small adapter harness for a battery pack test bench.", ["battery-pack-photo.jpg"])
-    ]
+      customerMessage(
+        "I want a small adapter harness for a battery pack test bench.",
+        ["battery-pack-photo.jpg"],
+      ),
+    ],
   },
   {
     id: "HD-2026-1027-C",
@@ -596,11 +804,16 @@ const seedRequests = [
     files: ["old-harness-remake.png", "machine-label.jpg"],
     updated: "3 days ago",
     messages: [
-      customerMessage("I have an old field-equipment harness and want to remake it as closely as possible.", ["old-harness-remake.png", "machine-label.jpg"]),
-      easyMessage("Check complete. The request is in review and the draft will be prepared in this thread."),
-      draftMessage("HD-2026-1027-C", "Old Harness Remake for Field Equipment")
-    ]
-  }
+      customerMessage(
+        "I have an old field-equipment harness and want to remake it as closely as possible.",
+        ["old-harness-remake.png", "machine-label.jpg"],
+      ),
+      easyMessage(
+        "Check complete. The request is in review and the draft will be prepared in this thread.",
+      ),
+      draftMessage("HD-2026-1027-C", "Old Harness Remake for Field Equipment"),
+    ],
+  },
 ];
 
 function customerMessage(text, files = []) {
@@ -610,8 +823,8 @@ function customerMessage(text, files = []) {
     createdAt: new Date().toISOString(),
     blocks: [
       { type: "text", text },
-      ...(files.length ? [{ type: "attachments", files }] : [])
-    ]
+      ...(files.length ? [{ type: "attachments", files }] : []),
+    ],
   };
 }
 
@@ -623,8 +836,8 @@ function easyMessage(text, files = [], extraBlocks = []) {
     blocks: [
       { type: "text", text },
       ...(files.length ? [{ type: "attachments", files }] : []),
-      ...extraBlocks
-    ]
+      ...extraBlocks,
+    ],
   };
 }
 
@@ -634,7 +847,7 @@ function draftMessage(id, title) {
     role: "easy",
     createdAt: new Date().toISOString(),
     tone: "draft",
-    blocks: [{ type: "draft", id, title }]
+    blocks: [{ type: "draft", id, title }],
   };
 }
 
@@ -643,7 +856,7 @@ function eventMessage(title, body) {
     id: messageId(),
     role: "event",
     createdAt: new Date().toISOString(),
-    blocks: [{ type: "event", title, body }]
+    blocks: [{ type: "event", title, body }],
   };
 }
 
@@ -652,7 +865,7 @@ function priceEvent(amount) {
     id: messageId(),
     role: "event",
     createdAt: "Now",
-    blocks: [{ type: "price", amount }]
+    blocks: [{ type: "price", amount }],
   };
 }
 
@@ -667,8 +880,10 @@ function makeRequestId(count) {
 function inferTitle(text) {
   const value = text.toLowerCase();
   if (value.includes("battery")) return "Battery Pack Adapter Harness";
-  if (value.includes("old") || value.includes("remake")) return "Old Harness Remake for Field Equipment";
-  if (value.includes("sensor")) return "Controller-to-Dual-Sensor Harness Assembly";
+  if (value.includes("old") || value.includes("remake"))
+    return "Old Harness Remake for Field Equipment";
+  if (value.includes("sensor"))
+    return "Controller-to-Dual-Sensor Harness Assembly";
   return "Uploaded Harness Design Request";
 }
 
@@ -706,7 +921,8 @@ function fileName(file) {
 
 function fileSizeLabel(file) {
   if (!file || typeof file === "string" || !file.size) return "";
-  if (file.size < 1024 * 1024) return `${Math.max(1, Math.round(file.size / 1024))} KB`;
+  if (file.size < 1024 * 1024)
+    return `${Math.max(1, Math.round(file.size / 1024))} KB`;
   return `${(file.size / 1024 / 1024).toFixed(1)} MB`;
 }
 
@@ -718,7 +934,7 @@ function displayTime(value) {
     month: "short",
     day: "numeric",
     hour: "2-digit",
-    minute: "2-digit"
+    minute: "2-digit",
   });
 }
 
@@ -727,7 +943,9 @@ function isEmailLike(value) {
 }
 
 function isUuidLike(value) {
-  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value || "");
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value || "",
+  );
 }
 
 function draftFileFromBrowser(file) {
@@ -737,7 +955,7 @@ function draftFileFromBrowser(file) {
     size: file.size,
     type: file.type || "application/octet-stream",
     source: "browser",
-    sourceFile: file
+    sourceFile: file,
   };
 }
 
@@ -747,7 +965,7 @@ function sampleFileDraft(name) {
     name,
     size: 0,
     type: "sample",
-    source: "sample"
+    source: "sample",
   };
 }
 
@@ -789,10 +1007,11 @@ function requestMessageRecord(request, message) {
     requestId: request.id,
     customerId: request.customerId,
     authorRole: message.role,
-    authorDisplay: message.role === "customer" ? request.customer : "Easy Harness",
+    authorDisplay:
+      message.role === "customer" ? request.customer : "Easy Harness",
     blocks: message.blocks || [],
     createdAt: message.createdAt || "Now",
-    source: "request_thread"
+    source: "request_thread",
   };
 }
 
@@ -802,7 +1021,8 @@ function requestBodyFromBlocks(blocks = []) {
   const priceBlock = blocks.find((block) => block.type === "price");
   if (textBlock?.text) return textBlock.text;
   if (eventBlock?.body) return eventBlock.body;
-  if (priceBlock?.amount) return `Harness price released: $${priceBlock.amount}`;
+  if (priceBlock?.amount)
+    return `Harness price released: $${priceBlock.amount}`;
   return "";
 }
 
@@ -836,7 +1056,7 @@ function supabaseRequestInsertFromLocal(request) {
     customer_summary: getFirstCustomerText(request),
     check_status: checkStatusToSupabase(request.checkResult),
     check_result: request.checkResult || {},
-    files_count: (request.files || []).length
+    files_count: (request.files || []).length,
   };
 }
 
@@ -847,7 +1067,7 @@ function supabaseRequestUpdateFromLocal(request) {
     customer_summary: getFirstCustomerText(request),
     check_status: checkStatusToSupabase(request.checkResult),
     check_result: request.checkResult || {},
-    files_count: (request.files || []).length
+    files_count: (request.files || []).length,
   };
 }
 
@@ -855,11 +1075,12 @@ function supabaseMessageInsertFromLocal(message, requestUuid, authorId) {
   const authorRole = authorRoleToSupabase(message.role);
   return {
     request_id: requestUuid,
-    author_id: authorRole === "customer" || isUuidLike(authorId) ? authorId : null,
+    author_id:
+      authorRole === "customer" || isUuidLike(authorId) ? authorId : null,
     author_role: authorRole,
     body: requestBodyFromBlocks(message.blocks),
     blocks: message.blocks || [],
-    visibility: "thread"
+    visibility: "thread",
   };
 }
 
@@ -868,20 +1089,27 @@ function supabaseSystemMessageFromLocal(message) {
   return {
     author_role: authorRole,
     body: requestBodyFromBlocks(message.blocks),
-    blocks: message.blocks || []
+    blocks: message.blocks || [],
   };
 }
 
-function supabaseAttachmentInsertFromLocal(attachment, requestUuid, messageUuid, ownerId) {
+function supabaseAttachmentInsertFromLocal(
+  attachment,
+  requestUuid,
+  messageUuid,
+  ownerId,
+) {
   return {
     owner_id: ownerId,
     request_id: requestUuid,
     request_message_id: messageUuid || null,
-    storage_object_id: isUuidLike(attachment.storageObjectId) ? attachment.storageObjectId : null,
+    storage_object_id: isUuidLike(attachment.storageObjectId)
+      ? attachment.storageObjectId
+      : null,
     name: attachment.name,
     mime_type: attachment.type || "application/octet-stream",
     size_bytes: attachment.size || 0,
-    purpose: "request_upload"
+    purpose: "request_upload",
   };
 }
 
@@ -893,7 +1121,7 @@ function supabaseStorageObjectInsertFromAttachment(attachment) {
     access_scope: "request_participants",
     content_type: attachment.type || "application/octet-stream",
     size_bytes: attachment.size || 0,
-    signed_upload_expires_at: null
+    signed_upload_expires_at: null,
   };
 }
 
@@ -910,7 +1138,7 @@ function localQuoteFromSupabase(row) {
     status: row.status || "released",
     releasedBy: row.released_by || "",
     releasedAt: displayTime(row.released_at),
-    validUntil: row.valid_until || ""
+    validUntil: row.valid_until || "",
   };
 }
 
@@ -923,7 +1151,7 @@ function supabaseQuoteInsertFromLocal(quote, requestUuid, releasedBy) {
     basis_message_ids: (quote.basisMessageIds || []).filter(isUuidLike),
     status: quote.status || "released",
     released_by: isUuidLike(releasedBy) ? releasedBy : null,
-    valid_until: quote.validUntil || null
+    valid_until: quote.validUntil || null,
   };
 }
 
@@ -936,16 +1164,22 @@ function localRequestFromSupabase(row, currentUser) {
     quotes[quotes.length - 1] ||
     null;
   const messages = [...(row.request_messages || [])]
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    )
     .map((message) => ({
       id: message.id,
       role: authorRoleFromSupabase(message.author_role),
       createdAt: displayTime(message.created_at),
-      blocks: Array.isArray(message.blocks) && message.blocks.length
-        ? message.blocks
-        : [{ type: "text", text: message.body || "" }]
+      blocks:
+        Array.isArray(message.blocks) && message.blocks.length
+          ? message.blocks
+          : [{ type: "text", text: message.body || "" }],
     }));
-  const files = [...new Set((row.attachments || []).map((attachment) => attachment.name))];
+  const files = [
+    ...new Set((row.attachments || []).map((attachment) => attachment.name)),
+  ];
   return normalizeRequestShape({
     id: row.request_number,
     supabaseId: row.id,
@@ -958,7 +1192,7 @@ function localRequestFromSupabase(row, currentUser) {
       adapter: "supabase",
       reason: "",
       missing: [],
-      checkedAt: ""
+      checkedAt: "",
     },
     quotes,
     activeQuoteId: activeQuote?.id || row.active_quote_id || "",
@@ -966,7 +1200,7 @@ function localRequestFromSupabase(row, currentUser) {
     price: activeQuote ? String(activeQuote.amount) : "",
     files,
     updated: displayTime(row.updated_at || row.created_at),
-    messages
+    messages,
   });
 }
 
@@ -980,7 +1214,7 @@ function orderMessageRecord(order, message) {
     authorName: message.authorName,
     body: message.body,
     visibility: message.visibility || "shared",
-    createdAt: message.createdAt || "Now"
+    createdAt: message.createdAt || "Now",
   };
 }
 
@@ -1000,10 +1234,11 @@ function supabaseOrderMessageInsertFromLocal(message, orderUuid, authorId) {
   const authorRole = orderAuthorRoleToSupabase(message.authorRole);
   return {
     order_id: orderUuid,
-    author_id: authorRole === "customer" || isUuidLike(authorId) ? authorId : null,
+    author_id:
+      authorRole === "customer" || isUuidLike(authorId) ? authorId : null,
     author_role: authorRole,
     body: message.body,
-    visibility: message.visibility === "internal" ? "internal" : "thread"
+    visibility: message.visibility === "internal" ? "internal" : "thread",
   };
 }
 
@@ -1014,7 +1249,7 @@ function localOrderMessageFromSupabase(row) {
     authorName: row.author_role === "customer" ? "Customer" : "Easy Harness",
     body: row.body || "",
     visibility: row.visibility || "thread",
-    createdAt: displayTime(row.created_at)
+    createdAt: displayTime(row.created_at),
   };
 }
 
@@ -1033,7 +1268,7 @@ function paymentLedgerRecord(order, override = {}) {
     providerReference: order.paymentReference || "",
     createdAt: order.paymentSession?.createdAt || "Now",
     confirmedAt: order.paymentSession?.confirmedAt || order.paidAt || "",
-    ...override
+    ...override,
   };
 }
 
@@ -1054,7 +1289,7 @@ function shipmentLedgerRecord(order, override = {}) {
     adapter: platformAdapters.shipping.id,
     events: order.trackingEvents || [],
     updatedAt: order.updated || "Now",
-    ...override
+    ...override,
   };
 }
 
@@ -1070,7 +1305,7 @@ function buildNotificationDeliveryRecords(notification) {
     providerMessageId: item.providerMessageId || "",
     lastAttemptAt: item.lastAttemptAt || "",
     error: item.error || "",
-    createdAt: notification.createdAt || "Now"
+    createdAt: notification.createdAt || "Now",
   }));
 }
 
@@ -1101,7 +1336,10 @@ function appendMessageIfMissing(messages = [], message) {
   const body = requestBodyFromBlocks(message.blocks || []);
   const exists = messages.some((item) => {
     const sameId = item.id && message.id && item.id === message.id;
-    const sameBody = body && requestBodyFromBlocks(item.blocks || []) === body && item.role === message.role;
+    const sameBody =
+      body &&
+      requestBodyFromBlocks(item.blocks || []) === body &&
+      item.role === message.role;
     return sameId || sameBody;
   });
   return exists ? messages : [...messages, message];
@@ -1118,11 +1356,14 @@ function buildAttachmentRecords(files, requestId, messageIdValue, uploadedBy) {
       uploadedBy,
       name,
       size: typeof file === "string" ? 0 : file.size || 0,
-      type: typeof file === "string" ? "legacy" : file.type || "application/octet-stream",
+      type:
+        typeof file === "string"
+          ? "legacy"
+          : file.type || "application/octet-stream",
       storageObjectId: storageObjectId(id),
       objectPath: `${uploadedBy}/requests/${requestId}/${id}-${name.replace(/[^\w.\-]+/g, "_")}`,
       sourceFile: typeof file === "object" ? file.sourceFile || null : null,
-      createdAt: "Now"
+      createdAt: "Now",
     };
   });
 }
@@ -1146,17 +1387,22 @@ function storageObjectRecordFromAttachment(attachment, override = {}) {
     accessScope: "request_participants",
     adapter: platformAdapters.storage.id,
     createdAt: attachment.createdAt || "Now",
-    ...override
+    ...override,
   };
 }
 
-function createStorageUploadAdapter(attachments, requestId, messageIdValue, uploadedBy) {
+function createStorageUploadAdapter(
+  attachments,
+  requestId,
+  messageIdValue,
+  uploadedBy,
+) {
   const storageObjects = attachments.map((attachment) =>
     storageObjectRecordFromAttachment(attachment, {
       requestId,
       messageId: messageIdValue || "",
-      uploadedBy
-    })
+      uploadedBy,
+    }),
   );
 
   return {
@@ -1165,7 +1411,7 @@ function createStorageUploadAdapter(attachments, requestId, messageIdValue, uplo
     attachments,
     storageObjects,
     eventAction: "storage_upload_contract_created",
-    eventDetail: `${attachments.length} file metadata record(s) registered for storage handoff.`
+    eventDetail: `${attachments.length} file metadata record(s) registered for storage handoff.`,
   };
 }
 
@@ -1179,27 +1425,35 @@ function createLocalAuthSession(user) {
     issuedAt: "Now",
     expiresAt: "Browser session",
     revokedAt: "",
-    adapter: platformAdapters.auth.id
+    adapter: platformAdapters.auth.id,
   };
 }
 
 function createSupabaseAuthSession(session, user) {
   return {
-    id: session?.access_token ? `sb_${session.access_token.slice(0, 12)}` : authSessionId(user.id),
+    id: session?.access_token
+      ? `sb_${session.access_token.slice(0, 12)}`
+      : authSessionId(user.id),
     userId: user.id,
     email: user.email,
     role: user.role,
     status: "active",
     issuedAt: session?.user?.last_sign_in_at || "Now",
-    expiresAt: session?.expires_at ? new Date(session.expires_at * 1000).toISOString() : "Managed session",
+    expiresAt: session?.expires_at
+      ? new Date(session.expires_at * 1000).toISOString()
+      : "Managed session",
     revokedAt: "",
-    adapter: "supabase-auth"
+    adapter: "supabase-auth",
   };
 }
 
 function profileUserFromSupabase(profile, authUser = {}) {
   const email = profile?.email || authUser.email || "";
-  const nickname = profile?.display_name || authUser.user_metadata?.nickname || email.split("@")[0] || "Customer";
+  const nickname =
+    profile?.display_name ||
+    authUser.user_metadata?.nickname ||
+    email.split("@")[0] ||
+    "Customer";
   return {
     id: profile?.id || authUser.id,
     name: nickname,
@@ -1215,7 +1469,7 @@ function profileUserFromSupabase(profile, authUser = {}) {
     notificationPreferences: {
       email: Boolean(profile?.notification_preferences?.email ?? true),
       whatsapp: Boolean(profile?.notification_preferences?.whatsapp ?? false),
-      inApp: true
+      inApp: true,
     },
     defaultAddress: {
       name: nickname,
@@ -1228,10 +1482,10 @@ function profileUserFromSupabase(profile, authUser = {}) {
       postalCode: "",
       phone: "",
       email,
-      taxId: ""
+      taxId: "",
     },
     authMethods: ["supabase"],
-    lastActive: "Just now"
+    lastActive: "Just now",
   };
 }
 
@@ -1241,18 +1495,19 @@ function signInWithEmailAdapter(email, users) {
     return {
       ok: false,
       adapter: platformAdapters.auth.id,
-      error: "Enter a valid email address."
+      error: "Enter a valid email address.",
     };
   }
   const user = users.find(
-    (item) => item.status !== "suspended" && item.email.toLowerCase() === normalized
+    (item) =>
+      item.status !== "suspended" && item.email.toLowerCase() === normalized,
   );
 
   if (!user) {
     return {
       ok: false,
       adapter: platformAdapters.auth.id,
-      error: "Use an active Easy Harness account email."
+      error: "Use an active Easy Harness account email.",
     };
   }
 
@@ -1267,8 +1522,8 @@ function signInWithEmailAdapter(email, users) {
       "session_created",
       "user",
       user.id,
-      `${roleCopy[user.role]} session issued.`
-    )
+      `${roleCopy[user.role]} session issued.`,
+    ),
   };
 }
 
@@ -1278,7 +1533,7 @@ function createCustomerAccountAdapter({ nickname = "", email }) {
     return {
       ok: false,
       adapter: platformAdapters.auth.id,
-      error: "Enter a valid email address."
+      error: "Enter a valid email address.",
     };
   }
 
@@ -1297,7 +1552,7 @@ function createCustomerAccountAdapter({ nickname = "", email }) {
     notificationPreferences: {
       email: true,
       whatsapp: false,
-      inApp: true
+      inApp: true,
     },
     defaultAddress: {
       name: nickname.trim(),
@@ -1310,10 +1565,10 @@ function createCustomerAccountAdapter({ nickname = "", email }) {
       postalCode: "",
       phone: "",
       email: normalized,
-      taxId: ""
+      taxId: "",
     },
     authMethods: ["email"],
-    lastActive: "Just now"
+    lastActive: "Just now",
   };
 
   const session = createLocalAuthSession(user);
@@ -1327,22 +1582,24 @@ function createCustomerAccountAdapter({ nickname = "", email }) {
       "customer_account_created",
       "user",
       user.id,
-      "Customer account and session issued."
-    )
+      "Customer account and session issued.",
+    ),
   };
 }
 
 function clearAuthSessionAdapter(session) {
   return {
     adapter: platformAdapters.auth.id,
-    session: session ? { ...session, status: "revoked", revokedAt: "Now" } : null,
+    session: session
+      ? { ...session, status: "revoked", revokedAt: "Now" }
+      : null,
     event: makeServiceEvent(
       platformAdapters.auth.id,
       "session_revoked",
       "user",
       session?.userId || "unknown",
-      "Session ended."
-    )
+      "Session ended.",
+    ),
   };
 }
 
@@ -1372,9 +1629,9 @@ function seedAttachmentsFromRequests(requests) {
         type: "seed",
         storageObjectId: storageObjectId(id),
         objectPath: `requests/${request.id}/seed-${name}`,
-        createdAt: request.updated || "Now"
+        createdAt: request.updated || "Now",
       };
-    })
+    }),
   );
 }
 
@@ -1384,12 +1641,16 @@ function seedStorageObjectsFromAttachments(attachments) {
 
 function seedRequestMessagesFromRequests(requests) {
   return requests.flatMap((request) =>
-    (request.messages || []).map((message) => requestMessageRecord(request, message))
+    (request.messages || []).map((message) =>
+      requestMessageRecord(request, message),
+    ),
   );
 }
 
 function seedQuotesFromRequests(requests) {
-  return requests.flatMap((request) => normalizeRequestShape(request).quotes || []);
+  return requests.flatMap(
+    (request) => normalizeRequestShape(request).quotes || [],
+  );
 }
 
 function seedPaymentsFromOrders(orders) {
@@ -1399,12 +1660,16 @@ function seedPaymentsFromOrders(orders) {
 }
 
 function seedShipmentsFromOrders(orders) {
-  return orders.map((order) => shipmentLedgerRecord(normalizeOrderShape(order)));
+  return orders.map((order) =>
+    shipmentLedgerRecord(normalizeOrderShape(order)),
+  );
 }
 
 function seedOrderMessagesFromOrders(orders) {
   return orders.flatMap((order) =>
-    (order.supportMessages || []).map((message) => orderMessageRecord(order, message))
+    (order.supportMessages || []).map((message) =>
+      orderMessageRecord(order, message),
+    ),
   );
 }
 
@@ -1421,17 +1686,23 @@ function makeAuditLog(action, actor, targetType, targetId, detail = "") {
     targetType,
     targetId,
     detail,
-    createdAt: "Now"
+    createdAt: "Now",
   };
 }
 
-function makeNotification({ userId = "", role = "", requestId = "", title, body }) {
+function makeNotification({
+  userId = "",
+  role = "",
+  requestId = "",
+  title,
+  body,
+}) {
   const channels = notificationChannels.map((channel) => ({
     channel: channel.id,
     status: channel.defaultStatus,
     providerMessageId: "",
     lastAttemptAt: channel.id === "in_app" ? "Now" : "",
-    error: ""
+    error: "",
   }));
 
   return {
@@ -1444,7 +1715,7 @@ function makeNotification({ userId = "", role = "", requestId = "", title, body 
     channels,
     adapter: platformAdapters.notifications.id,
     createdAt: "Now",
-    readAt: ""
+    readAt: "",
   };
 }
 
@@ -1461,11 +1732,11 @@ function localNotificationFromSupabase(row) {
       status: channel.id === "in_app" ? "delivered" : "queued",
       providerMessageId: "",
       lastAttemptAt: channel.id === "in_app" ? displayTime(row.created_at) : "",
-      error: ""
+      error: "",
     })),
     adapter: platformAdapters.notifications.id,
     createdAt: displayTime(row.created_at),
-    readAt: row.read_at ? displayTime(row.read_at) : ""
+    readAt: row.read_at ? displayTime(row.read_at) : "",
   };
 }
 
@@ -1477,7 +1748,7 @@ function makeServiceEvent(adapter, action, targetType, targetId, detail = "") {
     targetType,
     targetId,
     detail,
-    createdAt: "Now"
+    createdAt: "Now",
   };
 }
 
@@ -1496,16 +1767,20 @@ function makeSupportMessage({ authorRole, authorName, body }) {
     authorName,
     body,
     visibility: "shared",
-    createdAt: "Now"
+    createdAt: "Now",
   };
 }
 
 function hasHarnessSignal(text) {
-  return /harness|wire|wiring|cable|connector|sensor|battery|adapter|pigtail|loom|线束|连接器/i.test(text);
+  return /harness|wire|wiring|cable|connector|sensor|battery|adapter|pigtail|loom|线束|连接器/i.test(
+    text,
+  );
 }
 
 function hasIrrelevantSignal(text) {
-  return /shoe|shoes|shirt|essay|homework|logo|website|restaurant|旅行|论文|鞋|衣服/i.test(text);
+  return /shoe|shoes|shirt|essay|homework|logo|website|restaurant|旅行|论文|鞋|衣服/i.test(
+    text,
+  );
 }
 
 function runLocalChecking(request) {
@@ -1516,9 +1791,10 @@ function runLocalChecking(request) {
     return {
       status: "rejected",
       adapter: platformAdapters.checking.id,
-      reason: "The uploaded request does not appear to describe a wiring harness or connector assembly.",
+      reason:
+        "The uploaded request does not appear to describe a wiring harness or connector assembly.",
       missing: [],
-      checkedAt: "Now"
+      checkedAt: "Now",
     };
   }
 
@@ -1526,9 +1802,12 @@ function runLocalChecking(request) {
     return {
       status: "needs_info",
       adapter: platformAdapters.checking.id,
-      reason: "We need a clearer harness description or at least one relevant file before review can start.",
-      missing: files.length ? ["harness description"] : ["design file", "harness description"],
-      checkedAt: "Now"
+      reason:
+        "We need a clearer harness description or at least one relevant file before review can start.",
+      missing: files.length
+        ? ["harness description"]
+        : ["design file", "harness description"],
+      checkedAt: "Now",
     };
   }
 
@@ -1537,7 +1816,7 @@ function runLocalChecking(request) {
     adapter: platformAdapters.checking.id,
     reason: "The request has enough information to enter review.",
     missing: [],
-    checkedAt: "Now"
+    checkedAt: "Now",
   };
 }
 
@@ -1547,14 +1826,17 @@ function runCheckingAdapter(request) {
     input: {
       requestId: request.id,
       fileCount: (request.files || []).length,
-      text: getFirstCustomerText(request)
+      text: getFirstCustomerText(request),
     },
-    result: runLocalChecking(request)
+    result: runLocalChecking(request),
   };
 }
 
 function quoteShippingRatesAdapter(packageEstimate) {
-  const surcharge = Math.max(0, Math.ceil((packageEstimate.weightKg - 0.5) * 8));
+  const surcharge = Math.max(
+    0,
+    Math.ceil((packageEstimate.weightKg - 0.5) * 8),
+  );
   return {
     adapter: platformAdapters.shipping.id,
     rateQuoteId: `rate_${Date.now()}_${Math.random().toString(16).slice(2)}`,
@@ -1565,8 +1847,8 @@ function quoteShippingRatesAdapter(packageEstimate) {
       currency: "USD",
       incoterm: "DAP",
       adapter: platformAdapters.shipping.id,
-      source: template.source || "Estimated rate"
-    }))
+      source: template.source || "Estimated rate",
+    })),
   };
 }
 
@@ -1578,7 +1860,7 @@ function createPaymentSessionAdapter(order, method) {
     status: isBankTransfer ? "awaiting_receipt" : "awaiting_callback",
     amount: orderTotal(order),
     currency: order.currency,
-    createdAt: "Now"
+    createdAt: "Now",
   };
 
   return {
@@ -1586,15 +1868,23 @@ function createPaymentSessionAdapter(order, method) {
     session,
     orderPatch: {
       status: isBankTransfer ? "awaiting_bank_transfer" : order.status,
-      paymentStatus: isBankTransfer ? "bank_transfer_pending" : "payment_pending",
+      paymentStatus: isBankTransfer
+        ? "bank_transfer_pending"
+        : "payment_pending",
       paymentMethodId: method.id,
       paymentProvider: method.provider,
-      paymentReference: isBankTransfer ? order.bankTransferReference || `BT-${order.id}` : order.paymentReference || "",
+      paymentReference: isBankTransfer
+        ? order.bankTransferReference || `BT-${order.id}`
+        : order.paymentReference || "",
       paymentSession: session,
-      updated: "Just now"
+      updated: "Just now",
     },
-    eventAction: isBankTransfer ? "bank_transfer_reference_created" : "payment_session_created",
-    eventDetail: isBankTransfer ? "Bank transfer reference issued." : `${method.provider} hosted session created.`
+    eventAction: isBankTransfer
+      ? "bank_transfer_reference_created"
+      : "payment_session_created",
+    eventDetail: isBankTransfer
+      ? "Bank transfer reference issued."
+      : `${method.provider} hosted session created.`,
   };
 }
 
@@ -1603,7 +1893,7 @@ function confirmPaymentCallbackAdapter(order, method) {
     ...(order.paymentSession || {}),
     provider: method.provider,
     status: "confirmed",
-    confirmedAt: "Now"
+    confirmedAt: "Now",
   };
 
   return {
@@ -1618,10 +1908,10 @@ function confirmPaymentCallbackAdapter(order, method) {
       paymentSession: session,
       paidAt: "Now",
       productionStatus: "scheduled",
-      updated: "Just now"
+      updated: "Just now",
     },
     eventAction: "payment_callback_confirmed",
-    eventDetail: `${method.provider} payment callback recorded.`
+    eventDetail: `${method.provider} payment callback recorded.`,
   };
 }
 
@@ -1636,8 +1926,8 @@ function routeNotificationAdapter(payload) {
       "notification_routed",
       payload.requestId ? "request" : "user",
       payload.requestId || payload.userId || payload.role || "broadcast",
-      payload.title
-    )
+      payload.title,
+    ),
   };
 }
 
@@ -1650,20 +1940,26 @@ function buildShipmentUpdateAdapter(order, form) {
         : order.status === "shipped" || order.status === "delivered"
           ? "ready_to_ship"
           : order.status;
-  const hasTracking = form.trackingNumber || form.shipmentStatus !== "not_shipped";
+  const hasTracking =
+    form.trackingNumber || form.shipmentStatus !== "not_shipped";
   const trackingEvents = hasTracking
     ? [
         {
-          status: form.shipmentStatus === "delivered" ? "Delivered" : form.shipmentStatus === "shipped" ? "In transit" : "Label created",
+          status:
+            form.shipmentStatus === "delivered"
+              ? "Delivered"
+              : form.shipmentStatus === "shipped"
+                ? "In transit"
+                : "Label created",
           time: "Now",
           detail:
             form.shipmentStatus === "delivered"
               ? "Shipment delivered by carrier."
               : form.trackingSource === "api"
                 ? "Carrier API tracking is linked."
-                : "Manual tracking link is available."
+                : "Manual tracking link is available.",
         },
-        ...(order.trackingEvents || [])
+        ...(order.trackingEvents || []),
       ]
     : order.trackingEvents;
 
@@ -1675,15 +1971,20 @@ function buildShipmentUpdateAdapter(order, form) {
       trackingNumber: form.trackingNumber,
       carrierTrackingUrl: form.carrierTrackingUrl,
       trackingSource: form.trackingSource,
-      trackingEvents
+      trackingEvents,
     },
     eventAction: "tracking_update_recorded",
-    eventDetail: hasTracking ? `Shipment status changed to ${form.shipmentStatus}.` : "Shipment details updated."
+    eventDetail: hasTracking
+      ? `Shipment status changed to ${form.shipmentStatus}.`
+      : "Shipment details updated.",
   };
 }
 
 function createQuoteRecord(request, amount, actor) {
-  const currentVersion = Math.max(0, ...(request.quotes || []).map((quote) => quote.version || 0));
+  const currentVersion = Math.max(
+    0,
+    ...(request.quotes || []).map((quote) => quote.version || 0),
+  );
   const basisMessageIds = (request.messages || [])
     .filter((message) => message.role === "customer" || message.role === "easy")
     .map((message) => message.id);
@@ -1700,46 +2001,65 @@ function createQuoteRecord(request, amount, actor) {
     status: "released",
     releasedBy: actor?.id || "",
     releasedAt: "Now",
-    validUntil: estimateDate(14)
+    validUntil: estimateDate(14),
   };
 }
 
 function activeQuoteForRequest(request) {
   if (!request?.quotes?.length) return null;
-  return request.quotes.find((quote) => quote.id === request.activeQuoteId) ||
-    request.quotes[request.quotes.length - 1];
+  return (
+    request.quotes.find((quote) => quote.id === request.activeQuoteId) ||
+    request.quotes[request.quotes.length - 1]
+  );
 }
 
 function normalizeRequestShape(request) {
-  const quotes = request.quotes || (request.price
-    ? [{
-        id: `legacy_quote_${request.id}`,
-        requestId: request.id,
-        version: 1,
-        amount: Number(request.price || 0),
-        currency: "USD",
-        scope: "Harness assembly only",
-        excludes: ["Shipping", "Import duties", "VAT", "Carrier brokerage"],
-        basisMessageIds: (request.messages || []).map((message) => message.id),
-        status: request.status === "confirmed" || request.status === "paid" ? "confirmed" : "released",
-        releasedBy: "system",
-        releasedAt: request.updated || "Now",
-        validUntil: estimateDate(14)
-      }]
-    : []);
+  const quotes =
+    request.quotes ||
+    (request.price
+      ? [
+          {
+            id: `legacy_quote_${request.id}`,
+            requestId: request.id,
+            version: 1,
+            amount: Number(request.price || 0),
+            currency: "USD",
+            scope: "Harness assembly only",
+            excludes: ["Shipping", "Import duties", "VAT", "Carrier brokerage"],
+            basisMessageIds: (request.messages || []).map(
+              (message) => message.id,
+            ),
+            status:
+              request.status === "confirmed" || request.status === "paid"
+                ? "confirmed"
+                : "released",
+            releasedBy: "system",
+            releasedAt: request.updated || "Now",
+            validUntil: estimateDate(14),
+          },
+        ]
+      : []);
 
   return {
     checkResult: request.checkResult || {
-      status: request.status === "checking" ? "queued" : request.status === "draft_saved" ? "not_started" : "accepted",
+      status:
+        request.status === "checking"
+          ? "queued"
+          : request.status === "draft_saved"
+            ? "not_started"
+            : "accepted",
       adapter: platformAdapters.checking.id,
       reason: "",
       missing: [],
-      checkedAt: request.status === "checking" || request.status === "draft_saved" ? "" : request.updated || "Now"
+      checkedAt:
+        request.status === "checking" || request.status === "draft_saved"
+          ? ""
+          : request.updated || "Now",
     },
     quotes,
     activeQuoteId: request.activeQuoteId || quotes[quotes.length - 1]?.id || "",
     confirmedQuoteId: request.confirmedQuoteId || "",
-    ...request
+    ...request,
   };
 }
 
@@ -1750,14 +2070,18 @@ function orderIdFromRequest(requestId) {
 function estimatePackage(request) {
   const lowerTitle = request.title.toLowerCase();
   const fileCount = Math.max((request.files || []).length, 1);
-  const baseWeight = lowerTitle.includes("battery") ? 0.8 : lowerTitle.includes("field") ? 1.1 : 0.6;
+  const baseWeight = lowerTitle.includes("battery")
+    ? 0.8
+    : lowerTitle.includes("field")
+      ? 1.1
+      : 0.6;
   const weightKg = Number((baseWeight + fileCount * 0.08).toFixed(1));
   return {
     weightKg,
     lengthCm: lowerTitle.includes("field") ? 34 : 28,
     widthCm: 20,
     heightCm: lowerTitle.includes("field") ? 10 : 8,
-    source: "Estimated from request scope"
+    source: "Estimated from request scope",
   };
 }
 
@@ -1814,7 +2138,7 @@ function createOrderFromRequest(request, user) {
       postalCode: "",
       phone: user?.phone || "",
       email: user?.email || "",
-      taxId: ""
+      taxId: "",
     },
     shippingOptions: getShippingOptions(packageEstimate),
     selectedShippingId: "dhl-express",
@@ -1833,23 +2157,28 @@ function createOrderFromRequest(request, user) {
       requestFiles: collectRequestFileNames(request),
       latestEasyBlocks: lastEasyMessage?.blocks || [],
       confirmedQuote: quote,
-      confirmedAt: "Now"
+      confirmedAt: "Now",
     },
-    updated: "Just now"
+    updated: "Just now",
   };
 }
 
 function localOrderFromSupabase(row, currentUser) {
   const packageEstimate = row.package_estimate || {};
   const storedShippingPrice = Number(row.shipping_price || 0);
-  const shippingOptions = getShippingOptions(packageEstimate).map((option, index) =>
-    index === 0 && storedShippingPrice
-      ? { ...option, price: storedShippingPrice }
-      : option
+  const shippingOptions = getShippingOptions(packageEstimate).map(
+    (option, index) =>
+      index === 0 && storedShippingPrice
+        ? { ...option, price: storedShippingPrice }
+        : option,
   );
-  const requestNumber = row.requests?.request_number || row.snapshot?.requestNumber || "";
+  const requestNumber =
+    row.requests?.request_number || row.snapshot?.requestNumber || "";
   const supportMessages = [...(row.order_messages || [])]
-    .sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime())
+    .sort(
+      (a, b) =>
+        new Date(a.created_at).getTime() - new Date(b.created_at).getTime(),
+    )
     .map(localOrderMessageFromSupabase);
 
   return normalizeOrderShape({
@@ -1879,7 +2208,8 @@ function localOrderFromSupabase(row, currentUser) {
     address: row.address || {},
     shippingOptions,
     selectedShippingId: shippingOptions[0]?.id || "dhl-express",
-    productionLeadTime: row.production_lead_time || "7-10 business days after payment",
+    productionLeadTime:
+      row.production_lead_time || "7-10 business days after payment",
     estimatedProductionComplete: row.estimated_production_complete || "",
     trackingNumber: "",
     carrierTrackingUrl: "",
@@ -1889,7 +2219,7 @@ function localOrderFromSupabase(row, currentUser) {
     bankTransferReference: `BT-${row.order_number}`,
     internalNotes: "",
     snapshot: row.snapshot || {},
-    updated: displayTime(row.updated_at || row.created_at)
+    updated: displayTime(row.updated_at || row.created_at),
   });
 }
 
@@ -1898,14 +2228,20 @@ function getShippingOptions(packageEstimate) {
 }
 
 function normalizeShippingOption(option, fallback = {}) {
-  const template = shippingTemplates.find((item) => item.id === option?.id) || {};
+  const template =
+    shippingTemplates.find((item) => item.id === option?.id) || {};
   return {
     ...template,
     ...option,
-    level: option?.level || template.level || fallback.level || option?.carrier || "Standard",
+    level:
+      option?.level ||
+      template.level ||
+      fallback.level ||
+      option?.carrier ||
+      "Standard",
     source: option?.source || template.source || "Estimated rate",
     currency: option?.currency || "USD",
-    incoterm: option?.incoterm || "DAP"
+    incoterm: option?.incoterm || "DAP",
   };
 }
 
@@ -1920,12 +2256,14 @@ function normalizeOrderShape(order) {
     weightKg: 0.8,
     lengthCm: 28,
     widthCm: 20,
-    heightCm: 8
+    heightCm: 8,
   };
   const shippingOptions = order.shippingOptions?.length
     ? order.shippingOptions.map((option) => normalizeShippingOption(option))
     : getShippingOptions(packageEstimate);
-  const selectedShippingId = shippingOptions.some((option) => option.id === order.selectedShippingId)
+  const selectedShippingId = shippingOptions.some(
+    (option) => option.id === order.selectedShippingId,
+  )
     ? order.selectedShippingId
     : shippingOptions[0]?.id || "";
 
@@ -1968,13 +2306,15 @@ function normalizeOrderShape(order) {
       phone: "",
       email: "",
       taxId: "",
-      ...(order.address || {})
-    }
+      ...(order.address || {}),
+    },
   };
 }
 
 function paymentMethodById(methodId) {
-  return paymentMethods.find((method) => method.id === methodId) || paymentMethods[0];
+  return (
+    paymentMethods.find((method) => method.id === methodId) || paymentMethods[0]
+  );
 }
 
 function paymentProviderKey(method) {
@@ -1990,9 +2330,13 @@ function estimateDate(daysFromNow) {
 }
 
 function selectedShipping(order) {
-  return order.shippingOptions.find((option) => option.id === order.selectedShippingId) ||
+  return (
+    order.shippingOptions.find(
+      (option) => option.id === order.selectedShippingId,
+    ) ||
     order.shippingOptions[0] ||
-    null;
+    null
+  );
 }
 
 function orderTotal(order) {
@@ -2000,48 +2344,110 @@ function orderTotal(order) {
   return Number(order.harnessPrice || 0) + Number(shipping?.price || 0);
 }
 
-const seedOrders = [
-  createOrderFromRequest(seedRequests[1], seedUsers[0])
-];
+const seedOrders = [createOrderFromRequest(seedRequests[1], seedUsers[0])];
 
 const seedAttachmentRecords = seedAttachmentsFromRequests(seedRequests);
-const seedStorageObjectRecords = seedStorageObjectsFromAttachments(seedAttachmentRecords);
+const seedStorageObjectRecords = seedStorageObjectsFromAttachments(
+  seedAttachmentRecords,
+);
 const seedRequestMessageRecords = seedRequestMessagesFromRequests(seedRequests);
 const seedQuoteRecords = seedQuotesFromRequests(seedRequests);
 const seedPaymentRecords = seedPaymentsFromOrders(seedOrders);
 const seedShipmentRecords = seedShipmentsFromOrders(seedOrders);
 const seedOrderMessageRecords = seedOrderMessagesFromOrders(seedOrders);
 const seedAuditLogs = [
-  makeAuditLog("workspace_seeded", null, "workspace", "local", "Initial local data is available.")
+  makeAuditLog(
+    "workspace_seeded",
+    null,
+    "workspace",
+    "local",
+    "Initial local data is available.",
+  ),
 ];
 const seedNotifications = [];
-const seedNotificationDeliveryRecords = seedNotificationDeliveries(seedNotifications);
+const seedNotificationDeliveryRecords =
+  seedNotificationDeliveries(seedNotifications);
 const seedServiceEvents = [
-  makeServiceEvent("workspace", "adapters_ready", "workspace", "local", "Local API-ready adapters are available.")
+  makeServiceEvent(
+    "workspace",
+    "adapters_ready",
+    "workspace",
+    "local",
+    "Local API-ready adapters are available.",
+  ),
 ];
 
 function App() {
   const [users, setUsers] = useStoredState("easy-harness.users", seedUsers);
-  const [currentUserId, setCurrentUserId] = useStoredState("easy-harness.currentUserId", "");
-  const [authSession, setAuthSession] = useStoredState("easy-harness.authSession", null);
+  const [currentUserId, setCurrentUserId] = useStoredState(
+    "easy-harness.currentUserId",
+    "",
+  );
+  const [authSession, setAuthSession] = useStoredState(
+    "easy-harness.authSession",
+    null,
+  );
   const [userView, setUserView] = useState("start");
   const [staffView, setStaffView] = useState("queue");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [requests, setRequests] = useStoredState("easy-harness.requests", seedRequests);
+  const [requests, setRequests] = useStoredState(
+    "easy-harness.requests",
+    seedRequests,
+  );
   const [orders, setOrders] = useStoredState("easy-harness.orders", seedOrders);
-  const [activeOrderId, setActiveOrderId] = useStoredState("easy-harness.activeOrderId", seedOrders[0].id);
-  const [attachmentRecords, setAttachmentRecords] = useStoredState("easy-harness.attachments", seedAttachmentRecords);
-  const [storageObjectRecords, setStorageObjectRecords] = useStoredState("easy-harness.storageObjects", seedStorageObjectRecords);
-  const [requestMessageRecords, setRequestMessageRecords] = useStoredState("easy-harness.requestMessages", seedRequestMessageRecords);
-  const [quoteRecords, setQuoteRecords] = useStoredState("easy-harness.quotes", seedQuoteRecords);
-  const [paymentRecords, setPaymentRecords] = useStoredState("easy-harness.payments", seedPaymentRecords);
-  const [shipmentRecords, setShipmentRecords] = useStoredState("easy-harness.shipments", seedShipmentRecords);
-  const [orderMessageRecords, setOrderMessageRecords] = useStoredState("easy-harness.orderMessages", seedOrderMessageRecords);
-  const [notifications, setNotifications] = useStoredState("easy-harness.notifications", seedNotifications);
-  const [notificationDeliveryRecords, setNotificationDeliveryRecords] = useStoredState("easy-harness.notificationDeliveries", seedNotificationDeliveryRecords);
-  const [auditLogs, setAuditLogs] = useStoredState("easy-harness.auditLogs", seedAuditLogs);
-  const [serviceEvents, setServiceEvents] = useStoredState("easy-harness.serviceEvents", seedServiceEvents);
-  const [activeRequestId, setActiveRequestId] = useStoredState("easy-harness.activeRequestId", seedRequests[0].id);
+  const [activeOrderId, setActiveOrderId] = useStoredState(
+    "easy-harness.activeOrderId",
+    seedOrders[0].id,
+  );
+  const [attachmentRecords, setAttachmentRecords] = useStoredState(
+    "easy-harness.attachments",
+    seedAttachmentRecords,
+  );
+  const [storageObjectRecords, setStorageObjectRecords] = useStoredState(
+    "easy-harness.storageObjects",
+    seedStorageObjectRecords,
+  );
+  const [requestMessageRecords, setRequestMessageRecords] = useStoredState(
+    "easy-harness.requestMessages",
+    seedRequestMessageRecords,
+  );
+  const [quoteRecords, setQuoteRecords] = useStoredState(
+    "easy-harness.quotes",
+    seedQuoteRecords,
+  );
+  const [paymentRecords, setPaymentRecords] = useStoredState(
+    "easy-harness.payments",
+    seedPaymentRecords,
+  );
+  const [shipmentRecords, setShipmentRecords] = useStoredState(
+    "easy-harness.shipments",
+    seedShipmentRecords,
+  );
+  const [orderMessageRecords, setOrderMessageRecords] = useStoredState(
+    "easy-harness.orderMessages",
+    seedOrderMessageRecords,
+  );
+  const [notifications, setNotifications] = useStoredState(
+    "easy-harness.notifications",
+    seedNotifications,
+  );
+  const [notificationDeliveryRecords, setNotificationDeliveryRecords] =
+    useStoredState(
+      "easy-harness.notificationDeliveries",
+      seedNotificationDeliveryRecords,
+    );
+  const [auditLogs, setAuditLogs] = useStoredState(
+    "easy-harness.auditLogs",
+    seedAuditLogs,
+  );
+  const [serviceEvents, setServiceEvents] = useStoredState(
+    "easy-harness.serviceEvents",
+    seedServiceEvents,
+  );
+  const [activeRequestId, setActiveRequestId] = useStoredState(
+    "easy-harness.activeRequestId",
+    seedRequests[0].id,
+  );
   const [description, setDescription] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
   const [termsChecked, setTermsChecked] = useState(false);
@@ -2051,7 +2457,11 @@ function App() {
   const [processingRequestId, setProcessingRequestId] = useState("");
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [sendingUserMessage, setSendingUserMessage] = useState(false);
-  const [agentActivity, setAgentActivity] = useState({ requestId: "", mode: "", startedAt: 0 });
+  const [agentActivity, setAgentActivity] = useState({
+    requestId: "",
+    mode: "",
+    startedAt: 0,
+  });
   const [userComposer, setUserComposer] = useState("");
   const [userComposerFiles, setUserComposerFiles] = useState([]);
   const [staffComposer, setStaffComposer] = useState("");
@@ -2065,13 +2475,17 @@ function App() {
     open: false,
     mode: "login",
     reason: "",
-    after: ""
+    after: "",
   });
   const [authProviderStatus, setAuthProviderStatus] = useState(
-    supabaseConfigured ? "connecting" : hostedAuthRequired ? "unavailable" : "local"
+    supabaseConfigured
+      ? "connecting"
+      : hostedAuthRequired
+        ? "unavailable"
+        : "local",
   );
   const [databaseProviderStatus, setDatabaseProviderStatus] = useState(
-    supabaseConfigured ? "connecting" : "local"
+    supabaseConfigured ? "connecting" : "local",
   );
 
   const uploadRef = useRef(null);
@@ -2081,14 +2495,15 @@ function App() {
 
   const currentUser = useMemo(
     () => users.find((user) => user.id === currentUserId) || null,
-    [currentUserId, users]
+    [currentUserId, users],
   );
 
   const visibleRequests = useMemo(() => {
     if (!currentUser) return [];
-    const scoped = currentUser.role === "customer"
-      ? requests.filter((request) => request.customerId === currentUser.id)
-      : requests;
+    const scoped =
+      currentUser.role === "customer"
+        ? requests.filter((request) => request.customerId === currentUser.id)
+        : requests;
     return dedupeRequestsByIdentity(scoped);
   }, [currentUser, requests]);
 
@@ -2097,7 +2512,7 @@ function App() {
       visibleRequests.find((request) => request.id === activeRequestId) ||
       visibleRequests[0] ||
       (currentUser?.role === "staff" ? requests[0] : null),
-    [activeRequestId, currentUser, requests, visibleRequests]
+    [activeRequestId, currentUser, requests, visibleRequests],
   );
 
   const visibleOrders = useMemo(() => {
@@ -2113,22 +2528,29 @@ function App() {
       visibleOrders.find((order) => order.id === activeOrderId) ||
       visibleOrders[0] ||
       (currentUser?.role === "staff" ? orders[0] : null),
-    [activeOrderId, currentUser, orders, visibleOrders]
+    [activeOrderId, currentUser, orders, visibleOrders],
   );
 
   const visibleNotifications = useMemo(() => {
     if (!currentUser) return [];
     return notifications
-      .filter((notification) =>
-        notification.userId === currentUser.id || notification.role === currentUser.role
+      .filter(
+        (notification) =>
+          notification.userId === currentUser.id ||
+          notification.role === currentUser.role,
       )
       .slice(0, 8);
   }, [currentUser, notifications]);
 
-
   useEffect(() => {
-    if (!supabase || !currentUser || !activeRequest?.supabaseId) return undefined;
-    if (!["checking", "needs_info", "in_review", "not_supported"].includes(activeRequest.status)) return undefined;
+    if (!supabase || !currentUser || !activeRequest?.supabaseId)
+      return undefined;
+    if (
+      !["checking", "needs_info", "in_review", "not_supported"].includes(
+        activeRequest.status,
+      )
+    )
+      return undefined;
 
     let disposed = false;
     const refresh = async () => {
@@ -2140,42 +2562,134 @@ function App() {
       disposed = true;
       window.clearInterval(timer);
     };
-  }, [activeRequest?.id, activeRequest?.status, activeRequest?.supabaseId, currentUser?.id]);
-
-  const backendTableRows = useMemo(() => ([
-    { localKey: "easy-harness.authSession", futureTable: "auth_sessions", owner: "Identity service", count: authSession ? 1 : 0 },
-    { localKey: "easy-harness.users", futureTable: "profiles", owner: "Identity service", count: users.length },
-    { localKey: "easy-harness.requests", futureTable: databaseProviderStatus === "ready" ? "requests (Supabase live)" : "requests", owner: "Request service", count: requests.length },
-    { localKey: "easy-harness.requestMessages", futureTable: databaseProviderStatus === "ready" ? "request_messages (Supabase live)" : "request_messages", owner: "Request service", count: requestMessageRecords.length },
-    { localKey: "easy-harness.attachments", futureTable: databaseProviderStatus === "ready" ? "attachments (Supabase live metadata)" : "attachments", owner: "Storage service", count: attachmentRecords.length },
-    { localKey: "easy-harness.storageObjects", futureTable: "storage_objects", owner: "Storage service", count: storageObjectRecords.length },
-    { localKey: "easy-harness.quotes", futureTable: "quotes", owner: "Quote service", count: quoteRecords.length },
-    { localKey: "easy-harness.orders", futureTable: "orders", owner: "Order service", count: orders.length },
-    { localKey: "easy-harness.payments", futureTable: "payments / payment_sessions", owner: "Payment adapter", count: paymentRecords.length },
-    { localKey: "easy-harness.shipments", futureTable: "shipments / tracking_events", owner: "Shipping adapter", count: shipmentRecords.length },
-    { localKey: "easy-harness.orderMessages", futureTable: "order_messages", owner: "Order service", count: orderMessageRecords.length },
-    { localKey: "easy-harness.notifications", futureTable: "notifications", owner: "Notification router", count: notifications.length },
-    { localKey: "easy-harness.notificationDeliveries", futureTable: "notification_deliveries", owner: "Notification router", count: notificationDeliveryRecords.length },
-    { localKey: "easy-harness.auditLogs", futureTable: "audit_logs", owner: "Audit service", count: auditLogs.length },
-    { localKey: "easy-harness.serviceEvents", futureTable: "integration_events", owner: "Adapter layer", count: serviceEvents.length }
-  ]), [
-    authSession,
-    databaseProviderStatus,
-    users.length,
-    requests.length,
-    requestMessageRecords.length,
-    attachmentRecords.length,
-    storageObjectRecords.length,
-    quoteRecords.length,
-    orders.length,
-    paymentRecords.length,
-    shipmentRecords.length,
-    orderMessageRecords.length,
-    notifications.length,
-    notificationDeliveryRecords.length,
-    auditLogs.length,
-    serviceEvents.length
+  }, [
+    activeRequest?.id,
+    activeRequest?.status,
+    activeRequest?.supabaseId,
+    currentUser?.id,
   ]);
+
+  const backendTableRows = useMemo(
+    () => [
+      {
+        localKey: "easy-harness.authSession",
+        futureTable: "auth_sessions",
+        owner: "Identity service",
+        count: authSession ? 1 : 0,
+      },
+      {
+        localKey: "easy-harness.users",
+        futureTable: "profiles",
+        owner: "Identity service",
+        count: users.length,
+      },
+      {
+        localKey: "easy-harness.requests",
+        futureTable:
+          databaseProviderStatus === "ready"
+            ? "requests (Supabase live)"
+            : "requests",
+        owner: "Request service",
+        count: requests.length,
+      },
+      {
+        localKey: "easy-harness.requestMessages",
+        futureTable:
+          databaseProviderStatus === "ready"
+            ? "request_messages (Supabase live)"
+            : "request_messages",
+        owner: "Request service",
+        count: requestMessageRecords.length,
+      },
+      {
+        localKey: "easy-harness.attachments",
+        futureTable:
+          databaseProviderStatus === "ready"
+            ? "attachments (Supabase live metadata)"
+            : "attachments",
+        owner: "Storage service",
+        count: attachmentRecords.length,
+      },
+      {
+        localKey: "easy-harness.storageObjects",
+        futureTable: "storage_objects",
+        owner: "Storage service",
+        count: storageObjectRecords.length,
+      },
+      {
+        localKey: "easy-harness.quotes",
+        futureTable: "quotes",
+        owner: "Quote service",
+        count: quoteRecords.length,
+      },
+      {
+        localKey: "easy-harness.orders",
+        futureTable: "orders",
+        owner: "Order service",
+        count: orders.length,
+      },
+      {
+        localKey: "easy-harness.payments",
+        futureTable: "payments / payment_sessions",
+        owner: "Payment adapter",
+        count: paymentRecords.length,
+      },
+      {
+        localKey: "easy-harness.shipments",
+        futureTable: "shipments / tracking_events",
+        owner: "Shipping adapter",
+        count: shipmentRecords.length,
+      },
+      {
+        localKey: "easy-harness.orderMessages",
+        futureTable: "order_messages",
+        owner: "Order service",
+        count: orderMessageRecords.length,
+      },
+      {
+        localKey: "easy-harness.notifications",
+        futureTable: "notifications",
+        owner: "Notification router",
+        count: notifications.length,
+      },
+      {
+        localKey: "easy-harness.notificationDeliveries",
+        futureTable: "notification_deliveries",
+        owner: "Notification router",
+        count: notificationDeliveryRecords.length,
+      },
+      {
+        localKey: "easy-harness.auditLogs",
+        futureTable: "audit_logs",
+        owner: "Audit service",
+        count: auditLogs.length,
+      },
+      {
+        localKey: "easy-harness.serviceEvents",
+        futureTable: "integration_events",
+        owner: "Adapter layer",
+        count: serviceEvents.length,
+      },
+    ],
+    [
+      authSession,
+      databaseProviderStatus,
+      users.length,
+      requests.length,
+      requestMessageRecords.length,
+      attachmentRecords.length,
+      storageObjectRecords.length,
+      quoteRecords.length,
+      orders.length,
+      paymentRecords.length,
+      shipmentRecords.length,
+      orderMessageRecords.length,
+      notifications.length,
+      notificationDeliveryRecords.length,
+      auditLogs.length,
+      serviceEvents.length,
+    ],
+  );
 
   useEffect(() => {
     if (!currentUserId) {
@@ -2183,7 +2697,9 @@ function App() {
       return;
     }
     if (authSession?.userId === currentUserId) return;
-    const selected = users.find((user) => user.id === currentUserId && user.status !== "suspended");
+    const selected = users.find(
+      (user) => user.id === currentUserId && user.status !== "suspended",
+    );
     if (selected) setAuthSession(createLocalAuthSession(selected));
   }, [authSession, currentUserId, setAuthSession, users]);
 
@@ -2209,19 +2725,21 @@ function App() {
       setAuthProviderStatus("ready");
     };
 
-    const { data: listener } = supabase.auth.onAuthStateChange((event, session) => {
-      if (!session) {
-        if (event === "SIGNED_OUT") {
-          setCurrentUserId("");
-          setAuthSession(null);
+    const { data: listener } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (!session) {
+          if (event === "SIGNED_OUT") {
+            setCurrentUserId("");
+            setAuthSession(null);
+          }
+          setAuthProviderStatus("ready");
+          return;
         }
-        setAuthProviderStatus("ready");
-        return;
-      }
-      window.setTimeout(() => {
-        syncSupabaseSession(session, event.toLowerCase());
-      }, 0);
-    });
+        window.setTimeout(() => {
+          syncSupabaseSession(session, event.toLowerCase());
+        }, 0);
+      },
+    );
 
     restoreSession();
 
@@ -2233,7 +2751,9 @@ function App() {
 
   useEffect(() => {
     const records = requests.flatMap((request) =>
-      (request.messages || []).map((message) => requestMessageRecord(request, message))
+      (request.messages || []).map((message) =>
+        requestMessageRecord(request, message),
+      ),
     );
     setRequestMessageRecords((current) => mergeById(current, records));
   }, [requests, setRequestMessageRecords]);
@@ -2245,7 +2765,9 @@ function App() {
 
   useEffect(() => {
     const records = orders
-      .filter((order) => order.paymentStatus && order.paymentStatus !== "unpaid")
+      .filter(
+        (order) => order.paymentStatus && order.paymentStatus !== "unpaid",
+      )
       .map((order) => paymentLedgerRecord(order));
     setPaymentRecords((current) => mergeById(current, records));
   }, [orders, setPaymentRecords]);
@@ -2257,7 +2779,9 @@ function App() {
 
   useEffect(() => {
     const records = orders.flatMap((order) =>
-      (order.supportMessages || []).map((message) => orderMessageRecord(order, message))
+      (order.supportMessages || []).map((message) =>
+        orderMessageRecord(order, message),
+      ),
     );
     setOrderMessageRecords((current) => mergeById(current, records));
   }, [orders, setOrderMessageRecords]);
@@ -2270,13 +2794,17 @@ function App() {
   useEffect(() => {
     setRequests((current) => {
       const normalized = current.map(normalizeRequestShape);
-      return JSON.stringify(normalized) === JSON.stringify(current) ? current : normalized;
+      return JSON.stringify(normalized) === JSON.stringify(current)
+        ? current
+        : normalized;
     });
   }, [setRequests]);
 
   useEffect(() => {
     setAttachmentRecords((current) => {
-      const known = new Set(current.map((record) => `${record.requestId}:${record.name}`));
+      const known = new Set(
+        current.map((record) => `${record.requestId}:${record.name}`),
+      );
       const missing = requests.flatMap((request) =>
         collectRequestFileNames(request)
           .filter((name) => !known.has(`${request.id}:${name}`))
@@ -2292,9 +2820,9 @@ function App() {
               type: "legacy",
               storageObjectId: storageObjectId(id),
               objectPath: `requests/${request.id}/legacy-${name}`,
-              createdAt: request.updated || "Now"
+              createdAt: request.updated || "Now",
             };
-          })
+          }),
       );
       return missing.length ? [...missing, ...current] : current;
     });
@@ -2308,7 +2836,9 @@ function App() {
   useEffect(() => {
     setOrders((current) => {
       const normalized = current.map(normalizeOrderShape);
-      return JSON.stringify(normalized) === JSON.stringify(current) ? current : normalized;
+      return JSON.stringify(normalized) === JSON.stringify(current)
+        ? current
+        : normalized;
     });
   }, [setOrders]);
 
@@ -2318,7 +2848,9 @@ function App() {
 
   useEffect(() => {
     if (!currentUser || !visibleRequests.length) return;
-    const hasAccess = visibleRequests.some((request) => request.id === activeRequestId);
+    const hasAccess = visibleRequests.some(
+      (request) => request.id === activeRequestId,
+    );
     if (!hasAccess) setActiveRequestId(visibleRequests[0].id);
   }, [activeRequestId, currentUser, visibleRequests]);
 
@@ -2333,23 +2865,27 @@ function App() {
 
     setProcessingIndex(-1);
     const timers = processingSteps.map((_, index) =>
-      window.setTimeout(() => setProcessingIndex(index), 380 + index * 560)
+      window.setTimeout(() => setProcessingIndex(index), 380 + index * 560),
     );
 
     timers.push(
       window.setTimeout(() => {
-        const requestForCheck = requests.find((request) => request.id === processingRequestId);
+        const requestForCheck = requests.find(
+          (request) => request.id === processingRequestId,
+        );
         recordServiceEvent(
           platformAdapters.checking.id,
-          requestForCheck?.supabaseId ? "check_queued" : "check_waiting_for_staff",
+          requestForCheck?.supabaseId
+            ? "check_queued"
+            : "check_waiting_for_staff",
           "request",
           processingRequestId,
           requestForCheck?.supabaseId
             ? "Request is waiting for Easy Harness checking."
-            : "Request is saved without a live intake agent. Staff can review it manually."
+            : "Request is saved without a live intake agent. Staff can review it manually.",
         );
         setUserView("thread");
-      }, 1800)
+      }, 1800),
     );
 
     return () => timers.forEach(window.clearTimeout);
@@ -2357,20 +2893,22 @@ function App() {
 
   function updateRequest(requestId, updater) {
     setRequests((current) =>
-      current.map((request) => (request.id === requestId ? updater(request) : request))
+      current.map((request) =>
+        request.id === requestId ? updater(request) : request,
+      ),
     );
   }
 
   function updateOrder(orderId, updater) {
     setOrders((current) =>
-      current.map((order) => (order.id === orderId ? updater(order) : order))
+      current.map((order) => (order.id === orderId ? updater(order) : order)),
     );
   }
 
   function openOrder(orderId) {
     if (currentUser?.role === "customer") {
       const allowed = orders.some(
-        (order) => order.id === orderId && order.customerId === currentUser.id
+        (order) => order.id === orderId && order.customerId === currentUser.id,
       );
       if (!allowed) return;
     }
@@ -2388,12 +2926,18 @@ function App() {
     const order = createOrderFromRequest(request, currentUser);
     setOrders((current) => [order, ...current]);
     writeShipmentLedger(order);
-    recordAudit("order_created", "order", order.id, `${order.id} created from ${request.id}.`);
+    recordAudit(
+      "order_created",
+      "order",
+      order.id,
+      `${order.id} created from ${request.id}.`,
+    );
     return order;
   }
 
   async function confirmSupabaseRequestOrder(request, quote, order) {
-    if (!supabase || !request?.supabaseId || !isUuidLike(quote?.id)) return null;
+    if (!supabase || !request?.supabaseId || !isUuidLike(quote?.id))
+      return null;
     const shipping = selectedShipping(order);
     const { data, error } = await supabase.rpc("confirm_request_order", {
       p_request_id: request.supabaseId,
@@ -2407,28 +2951,41 @@ function App() {
       p_address: order.address || {},
       p_snapshot: {
         ...(order.snapshot || {}),
-        requestNumber: request.id
+        requestNumber: request.id,
       },
       p_package_estimate: order.packageEstimate || {},
       p_production_lead_time: order.productionLeadTime || "",
-      p_estimated_production_complete: order.estimatedProductionComplete || null
+      p_estimated_production_complete:
+        order.estimatedProductionComplete || null,
     });
 
     if (error) {
-      recordServiceEvent("supabase-database", "order_confirm_failed", "request", request.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "order_confirm_failed",
+        "request",
+        request.id,
+        error.message,
+      );
       return null;
     }
 
-    recordServiceEvent("supabase-database", "order_confirmed", "order", order.id, "Confirmed request and checkout order saved to Supabase.");
+    recordServiceEvent(
+      "supabase-database",
+      "order_confirmed",
+      "order",
+      order.id,
+      "Confirmed request and checkout order saved to Supabase.",
+    );
     return localOrderFromSupabase(
       {
         ...data,
         requests: {
           request_number: request.id,
-          customer_label: request.customer
-        }
+          customer_label: request.customer,
+        },
       },
-      currentUser
+      currentUser,
     );
   }
 
@@ -2443,26 +3000,49 @@ function App() {
       p_order_payment_status: patch.paymentStatus || order.paymentStatus,
       p_provider_session_id: session?.id || "",
       p_provider_reference: patch.paymentReference || "",
-      p_bank_reference: patch.paymentReference || order.bankTransferReference || "",
+      p_bank_reference:
+        patch.paymentReference || order.bankTransferReference || "",
       p_raw_payload: {
         provider: method.provider,
         methodId: method.id,
         session: session || {},
-        orderNumber: order.id
-      }
+        orderNumber: order.id,
+      },
     });
 
     if (error) {
-      recordServiceEvent("supabase-database", "payment_record_failed", "order", order.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "payment_record_failed",
+        "order",
+        order.id,
+        error.message,
+      );
       return null;
     }
 
-    recordServiceEvent("supabase-database", "payment_recorded", "order", order.id, `${method.provider} payment state saved to Supabase.`);
+    recordServiceEvent(
+      "supabase-database",
+      "payment_recorded",
+      "order",
+      order.id,
+      `${method.provider} payment state saved to Supabase.`,
+    );
     return data;
   }
 
-  async function persistSupabaseStaffOrderUpdate(order, nextOrder, patch, detail) {
-    if (!supabase || !order?.supabaseId || !["staff", "admin"].includes(currentUser?.role)) return;
+  async function persistSupabaseStaffOrderUpdate(
+    order,
+    nextOrder,
+    patch,
+    detail,
+  ) {
+    if (
+      !supabase ||
+      !order?.supabaseId ||
+      !["staff", "admin"].includes(currentUser?.role)
+    )
+      return;
     const shipping = selectedShipping(nextOrder);
     const { error } = await supabase
       .from("orders")
@@ -2476,12 +3056,19 @@ function App() {
         address: nextOrder.address || {},
         package_estimate: nextOrder.packageEstimate || {},
         production_lead_time: nextOrder.productionLeadTime || "",
-        estimated_production_complete: nextOrder.estimatedProductionComplete || null
+        estimated_production_complete:
+          nextOrder.estimatedProductionComplete || null,
       })
       .eq("id", order.supabaseId);
 
     if (error) {
-      recordServiceEvent("supabase-database", "staff_order_update_failed", "order", order.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "staff_order_update_failed",
+        "order",
+        order.id,
+        error.message,
+      );
       return;
     }
 
@@ -2499,14 +3086,20 @@ function App() {
           raw_payload: {
             source: nextOrder.trackingSource || "manual",
             orderNumber: order.id,
-            detail
-          }
+            detail,
+          },
         })
         .select("id")
         .single();
 
       if (shipmentError) {
-        recordServiceEvent("supabase-database", "shipment_insert_failed", "order", order.id, shipmentError.message);
+        recordServiceEvent(
+          "supabase-database",
+          "shipment_insert_failed",
+          "order",
+          order.id,
+          shipmentError.message,
+        );
       } else if (nextOrder.trackingEvents?.length) {
         const latestEvent = nextOrder.trackingEvents[0];
         const { error: eventError } = await supabase
@@ -2515,35 +3108,67 @@ function App() {
             shipment_id: shipment.id,
             order_id: order.supabaseId,
             carrier_code: "dhl_express",
-            status: latestEvent.status || nextOrder.fulfillmentStatus || "Updated",
+            status:
+              latestEvent.status || nextOrder.fulfillmentStatus || "Updated",
             description: latestEvent.detail || detail,
             occurred_at: new Date().toISOString(),
-            raw_payload: latestEvent
+            raw_payload: latestEvent,
           });
 
         if (eventError) {
-          recordServiceEvent("supabase-database", "tracking_event_insert_failed", "order", order.id, eventError.message);
+          recordServiceEvent(
+            "supabase-database",
+            "tracking_event_insert_failed",
+            "order",
+            order.id,
+            eventError.message,
+          );
         }
       }
     }
 
-    recordServiceEvent("supabase-database", "staff_order_updated", "order", order.id, "Staff order update saved to Supabase.");
+    recordServiceEvent(
+      "supabase-database",
+      "staff_order_updated",
+      "order",
+      order.id,
+      "Staff order update saved to Supabase.",
+    );
   }
 
   async function persistSupabaseOrderMessage(order, message) {
-    if (!supabase || !order?.supabaseId || !isUuidLike(currentUser?.id)) return null;
+    if (!supabase || !order?.supabaseId || !isUuidLike(currentUser?.id))
+      return null;
     const { data, error } = await supabase
       .from("order_messages")
-      .insert(supabaseOrderMessageInsertFromLocal(message, order.supabaseId, currentUser.id))
+      .insert(
+        supabaseOrderMessageInsertFromLocal(
+          message,
+          order.supabaseId,
+          currentUser.id,
+        ),
+      )
       .select("id,author_role,body,visibility,created_at")
       .single();
 
     if (error) {
-      recordServiceEvent("supabase-database", "order_message_insert_failed", "order", order.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "order_message_insert_failed",
+        "order",
+        order.id,
+        error.message,
+      );
       return null;
     }
 
-    recordServiceEvent("supabase-database", "order_message_inserted", "order", order.id, "Order message saved to Supabase.");
+    recordServiceEvent(
+      "supabase-database",
+      "order_message_inserted",
+      "order",
+      order.id,
+      "Order message saved to Supabase.",
+    );
     return localOrderMessageFromSupabase(data);
   }
 
@@ -2564,19 +3189,31 @@ function App() {
       p_request_id: request?.supabaseId || null,
       p_order_id: order?.supabaseId || null,
       p_title: payload.title || localNotification.title,
-      p_body: payload.body || localNotification.body
+      p_body: payload.body || localNotification.body,
     });
 
     if (error) {
-      recordServiceEvent("supabase-database", "notification_record_failed", "notification", localNotification.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "notification_record_failed",
+        "notification",
+        localNotification.id,
+        error.message,
+      );
       return null;
     }
 
-    recordServiceEvent("supabase-database", "notification_recorded", "notification", localNotification.id, "Notification and delivery queue saved to Supabase.");
+    recordServiceEvent(
+      "supabase-database",
+      "notification_recorded",
+      "notification",
+      localNotification.id,
+      "Notification and delivery queue saved to Supabase.",
+    );
     return localNotificationFromSupabase({
       ...data,
       requests: request ? { request_number: request.id } : null,
-      orders: order ? { order_number: order.id } : null
+      orders: order ? { order_number: order.id } : null,
     });
   }
 
@@ -2588,50 +3225,69 @@ function App() {
       p_target_id: log.targetId,
       p_detail: log.detail || "",
       p_metadata: {
-        localAuditId: log.id
-      }
+        localAuditId: log.id,
+      },
     });
 
     if (error) {
-      recordServiceEvent("supabase-database", "audit_record_failed", "audit", log.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "audit_record_failed",
+        "audit",
+        log.id,
+        error.message,
+      );
       return;
     }
 
-    recordServiceEvent("supabase-database", "audit_recorded", "audit", log.id, "Audit log saved to Supabase.");
+    recordServiceEvent(
+      "supabase-database",
+      "audit_recorded",
+      "audit",
+      log.id,
+      "Audit log saved to Supabase.",
+    );
   }
 
   async function updateOrderFromStaff(orderId, patch, detail) {
     const order = orders.find((item) => item.id === orderId);
-    const nextOrder = order ? { ...order, ...patch, updated: "Just now" } : null;
+    const nextOrder = order
+      ? { ...order, ...patch, updated: "Just now" }
+      : null;
     updateOrder(orderId, (current) => ({
       ...current,
       ...patch,
-      updated: "Just now"
+      updated: "Just now",
     }));
     if (nextOrder && "paymentStatus" in patch) {
       writePaymentLedger(nextOrder, {
-        confirmedAt: patch.paymentStatus === "paid" ? patch.paidAt || "Now" : ""
+        confirmedAt:
+          patch.paymentStatus === "paid" ? patch.paidAt || "Now" : "",
       });
     }
     if (
       nextOrder &&
-      (
-        "trackingNumber" in patch ||
+      ("trackingNumber" in patch ||
         "fulfillmentStatus" in patch ||
         "selectedShippingId" in patch ||
         "shippingOptions" in patch ||
-        "packageEstimate" in patch
-      )
+        "packageEstimate" in patch)
     ) {
       writeShipmentLedger(nextOrder);
-      recordServiceEvent(platformAdapters.shipping.id, "shipment_record_updated", "order", orderId, detail);
+      recordServiceEvent(
+        platformAdapters.shipping.id,
+        "shipment_record_updated",
+        "order",
+        orderId,
+        detail,
+      );
     }
     if (order) {
       addNotification({
         userId: order.customerId,
         requestId: order.requestId,
         title: "Order updated",
-        body: `${order.id}: ${detail}`
+        body: `${order.id}: ${detail}`,
       });
     }
     if (order && nextOrder) {
@@ -2640,12 +3296,21 @@ function App() {
     recordAudit("order_updated", "order", orderId, detail);
   }
 
-  function recordAudit(action, targetType, targetId, detail = "", actorOverride = currentUser) {
-    const log = makeAuditLog(action, actorOverride, targetType, targetId, detail);
-    setAuditLogs((current) => [
-      log,
-      ...current
-    ]);
+  function recordAudit(
+    action,
+    targetType,
+    targetId,
+    detail = "",
+    actorOverride = currentUser,
+  ) {
+    const log = makeAuditLog(
+      action,
+      actorOverride,
+      targetType,
+      targetId,
+      detail,
+    );
+    setAuditLogs((current) => [log, ...current]);
     if (actorOverride?.id === currentUser?.id && isUuidLike(currentUser?.id)) {
       persistSupabaseAudit(log);
     }
@@ -2654,29 +3319,46 @@ function App() {
   function addNotification(payload) {
     const routed = routeNotificationAdapter(payload);
     setNotifications((current) => [routed.notification, ...current]);
-    setNotificationDeliveryRecords((current) => mergeById(current, routed.deliveries));
+    setNotificationDeliveryRecords((current) =>
+      mergeById(current, routed.deliveries),
+    );
     setServiceEvents((current) => [routed.event, ...current]);
-    persistSupabaseNotification(payload, routed.notification).then((remoteNotification) => {
-      if (!remoteNotification) return;
-      setNotifications((current) => [
-        remoteNotification,
-        ...current.filter((notification) => notification.id !== routed.notification.id)
-      ]);
-      setNotificationDeliveryRecords((current) =>
-        mergeById(current, buildNotificationDeliveryRecords(remoteNotification))
-      );
-    });
+    persistSupabaseNotification(payload, routed.notification).then(
+      (remoteNotification) => {
+        if (!remoteNotification) return;
+        setNotifications((current) => [
+          remoteNotification,
+          ...current.filter(
+            (notification) => notification.id !== routed.notification.id,
+          ),
+        ]);
+        setNotificationDeliveryRecords((current) =>
+          mergeById(
+            current,
+            buildNotificationDeliveryRecords(remoteNotification),
+          ),
+        );
+      },
+    );
   }
 
-  function recordServiceEvent(adapter, action, targetType, targetId, detail = "") {
+  function recordServiceEvent(
+    adapter,
+    action,
+    targetType,
+    targetId,
+    detail = "",
+  ) {
     setServiceEvents((current) => [
       makeServiceEvent(adapter, action, targetType, targetId, detail),
-      ...current
+      ...current,
     ]);
   }
 
   function writeRequestMessageLedger(request, message) {
-    setRequestMessageRecords((current) => mergeById(current, [requestMessageRecord(request, message)]));
+    setRequestMessageRecords((current) =>
+      mergeById(current, [requestMessageRecord(request, message)]),
+    );
   }
 
   function writeQuoteLedger(quote) {
@@ -2684,19 +3366,27 @@ function App() {
   }
 
   function writePaymentLedger(order, override = {}) {
-    setPaymentRecords((current) => mergeById(current, [paymentLedgerRecord(order, override)]));
+    setPaymentRecords((current) =>
+      mergeById(current, [paymentLedgerRecord(order, override)]),
+    );
   }
 
   function writeShipmentLedger(order, override = {}) {
-    setShipmentRecords((current) => mergeById(current, [shipmentLedgerRecord(order, override)]));
+    setShipmentRecords((current) =>
+      mergeById(current, [shipmentLedgerRecord(order, override)]),
+    );
   }
 
   function writeOrderMessageLedger(order, message) {
-    setOrderMessageRecords((current) => mergeById(current, [orderMessageRecord(order, message)]));
+    setOrderMessageRecords((current) =>
+      mergeById(current, [orderMessageRecord(order, message)]),
+    );
   }
 
   function writeNotificationDeliveryLedger(notification) {
-    setNotificationDeliveryRecords((current) => mergeById(current, buildNotificationDeliveryRecords(notification)));
+    setNotificationDeliveryRecords((current) =>
+      mergeById(current, buildNotificationDeliveryRecords(notification)),
+    );
   }
 
   function markVisibleNotificationsRead() {
@@ -2704,29 +3394,47 @@ function App() {
     setNotifications((current) =>
       current.map((notification) => {
         const visible =
-          notification.userId === currentUser.id || notification.role === currentUser.role;
+          notification.userId === currentUser.id ||
+          notification.role === currentUser.role;
         return visible && !notification.readAt
           ? { ...notification, readAt: "Now" }
           : notification;
-      })
+      }),
     );
   }
 
-  function appendAttachmentRecords(files, requestId, messageIdValue, uploadedBy) {
+  function appendAttachmentRecords(
+    files,
+    requestId,
+    messageIdValue,
+    uploadedBy,
+  ) {
     if (!files.length) return;
-    const attachments = buildAttachmentRecords(files, requestId, messageIdValue, uploadedBy);
-    const uploadContract = createStorageUploadAdapter(attachments, requestId, messageIdValue, uploadedBy);
+    const attachments = buildAttachmentRecords(
+      files,
+      requestId,
+      messageIdValue,
+      uploadedBy,
+    );
+    const uploadContract = createStorageUploadAdapter(
+      attachments,
+      requestId,
+      messageIdValue,
+      uploadedBy,
+    );
     setAttachmentRecords((current) => [
       ...uploadContract.attachments,
-      ...current
+      ...current,
     ]);
-    setStorageObjectRecords((current) => mergeById(current, uploadContract.storageObjects));
+    setStorageObjectRecords((current) =>
+      mergeById(current, uploadContract.storageObjects),
+    );
     recordServiceEvent(
       uploadContract.adapter,
       uploadContract.eventAction,
       "request",
       requestId,
-      uploadContract.eventDetail
+      uploadContract.eventDetail,
     );
   }
 
@@ -2735,7 +3443,12 @@ function App() {
   }
 
   function closeAuthModal() {
-    setAuthModal((current) => ({ ...current, open: false, reason: "", after: "" }));
+    setAuthModal((current) => ({
+      ...current,
+      open: false,
+      reason: "",
+      after: "",
+    }));
   }
 
   function completeAuthFlow(user) {
@@ -2752,7 +3465,8 @@ function App() {
 
     const { data, error } = await supabase
       .from("requests")
-      .select(`
+      .select(
+        `
         id,
         request_number,
         customer_id,
@@ -2798,18 +3512,29 @@ function App() {
           released_at,
           valid_until
         )
-      `)
+      `,
+      )
       .order("updated_at", { ascending: false });
 
     if (error) {
       setDatabaseProviderStatus("error");
-      recordServiceEvent("supabase-database", "requests_load_failed", "user", user.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "requests_load_failed",
+        "user",
+        user.id,
+        error.message,
+      );
       return;
     }
 
-    const remoteRequests = dedupeRequestsByIdentity((data || []).map((row) => localRequestFromSupabase(row, user)));
+    const remoteRequests = dedupeRequestsByIdentity(
+      (data || []).map((row) => localRequestFromSupabase(row, user)),
+    );
     const remoteMessages = remoteRequests.flatMap((request) =>
-      (request.messages || []).map((message) => requestMessageRecord(request, message))
+      (request.messages || []).map((message) =>
+        requestMessageRecord(request, message),
+      ),
     );
     const remoteAttachments = (data || []).flatMap((row) =>
       (row.attachments || []).map((attachment) => ({
@@ -2823,15 +3548,16 @@ function App() {
         type: attachment.mime_type || "application/octet-stream",
         storageObjectId: "",
         objectPath: "",
-        createdAt: displayTime(attachment.created_at)
-      }))
+        createdAt: displayTime(attachment.created_at),
+      })),
     );
 
     setRequests(remoteRequests);
     setRequestMessageRecords(remoteMessages);
     setAttachmentRecords(remoteAttachments);
     setActiveRequestId((current) => {
-      if (current && remoteRequests.some((request) => request.id === current)) return current;
+      if (current && remoteRequests.some((request) => request.id === current))
+        return current;
       return remoteRequests[0]?.id || current;
     });
     setDatabaseProviderStatus("ready");
@@ -2840,7 +3566,7 @@ function App() {
       "requests_loaded",
       "user",
       user.id,
-      `${remoteRequests.length} request record(s) loaded from Supabase.`
+      `${remoteRequests.length} request record(s) loaded from Supabase.`,
     );
   }
 
@@ -2849,7 +3575,8 @@ function App() {
 
     const { data, error } = await supabase
       .from("orders")
-      .select(`
+      .select(
+        `
         id,
         order_number,
         request_id,
@@ -2884,15 +3611,24 @@ function App() {
           visibility,
           created_at
         )
-      `)
+      `,
+      )
       .order("updated_at", { ascending: false });
 
     if (error) {
-      recordServiceEvent("supabase-database", "orders_load_failed", "user", user.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "orders_load_failed",
+        "user",
+        user.id,
+        error.message,
+      );
       return;
     }
 
-    const remoteOrders = (data || []).map((row) => localOrderFromSupabase(row, user));
+    const remoteOrders = (data || []).map((row) =>
+      localOrderFromSupabase(row, user),
+    );
     setOrders(remoteOrders);
     if (remoteOrders[0]) setActiveOrderId(remoteOrders[0].id);
     recordServiceEvent(
@@ -2900,7 +3636,7 @@ function App() {
       "orders_loaded",
       "user",
       user.id,
-      `${remoteOrders.length} order record(s) loaded from Supabase.`
+      `${remoteOrders.length} order record(s) loaded from Supabase.`,
     );
   }
 
@@ -2909,7 +3645,8 @@ function App() {
 
     const { data, error } = await supabase
       .from("notifications")
-      .select(`
+      .select(
+        `
         id,
         user_id,
         role,
@@ -2923,28 +3660,42 @@ function App() {
         orders (
           order_number
         )
-      `)
+      `,
+      )
       .order("created_at", { ascending: false })
       .limit(50);
 
     if (error) {
-      recordServiceEvent("supabase-database", "notifications_load_failed", "user", user.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "notifications_load_failed",
+        "user",
+        user.id,
+        error.message,
+      );
       return;
     }
 
     const remoteNotifications = (data || []).map(localNotificationFromSupabase);
     setNotifications(remoteNotifications);
-    setNotificationDeliveryRecords(remoteNotifications.flatMap(buildNotificationDeliveryRecords));
+    setNotificationDeliveryRecords(
+      remoteNotifications.flatMap(buildNotificationDeliveryRecords),
+    );
     recordServiceEvent(
       "supabase-database",
       "notifications_loaded",
       "user",
       user.id,
-      `${remoteNotifications.length} notification record(s) loaded from Supabase.`
+      `${remoteNotifications.length} notification record(s) loaded from Supabase.`,
     );
   }
 
-  async function createSupabaseRequestBundle(request, firstMessage, uploadDrafts, actor) {
+  async function createSupabaseRequestBundle(
+    request,
+    firstMessage,
+    uploadDrafts,
+    actor,
+  ) {
     if (!supabase || !isUuidLike(actor?.id)) return null;
 
     const { data: requestRow, error: requestError } = await supabase
@@ -2954,18 +3705,32 @@ function App() {
       .single();
 
     if (requestError) {
-      recordServiceEvent("supabase-database", "request_insert_failed", "request", request.id, requestError.message);
+      recordServiceEvent(
+        "supabase-database",
+        "request_insert_failed",
+        "request",
+        request.id,
+        requestError.message,
+      );
       return null;
     }
 
     const { data: messageRow, error: messageError } = await supabase
       .from("request_messages")
-      .insert(supabaseMessageInsertFromLocal(firstMessage, requestRow.id, actor.id))
+      .insert(
+        supabaseMessageInsertFromLocal(firstMessage, requestRow.id, actor.id),
+      )
       .select("id,created_at")
       .single();
 
     if (messageError) {
-      recordServiceEvent("supabase-database", "request_message_insert_failed", "request", request.id, messageError.message);
+      recordServiceEvent(
+        "supabase-database",
+        "request_message_insert_failed",
+        "request",
+        request.id,
+        messageError.message,
+      );
       return { requestRow, messageRow: null, attachments: [] };
     }
 
@@ -2974,10 +3739,16 @@ function App() {
       request.id,
       requestRow.id,
       messageRow.id,
-      actor.id
+      actor.id,
     );
 
-    recordServiceEvent("supabase-database", "request_inserted", "request", request.id, "Request, first message, and attachment metadata saved to Supabase.");
+    recordServiceEvent(
+      "supabase-database",
+      "request_inserted",
+      "request",
+      request.id,
+      "Request, first message, and attachment metadata saved to Supabase.",
+    );
     return {
       requestRow,
       messageRow,
@@ -2992,14 +3763,25 @@ function App() {
         type: attachment.mime_type || "application/octet-stream",
         storageObjectId: attachment.storage_object_id || "",
         objectPath: attachment.object_path || "",
-        createdAt: displayTime(attachment.created_at)
-      }))
+        createdAt: displayTime(attachment.created_at),
+      })),
     };
   }
 
-  async function persistSupabaseAttachments(files, localRequestId, requestUuid, messageUuid, ownerId) {
+  async function persistSupabaseAttachments(
+    files,
+    localRequestId,
+    requestUuid,
+    messageUuid,
+    ownerId,
+  ) {
     if (!supabase || !files.length || !isUuidLike(ownerId)) return [];
-    const localAttachments = buildAttachmentRecords(files, localRequestId, messageUuid, ownerId);
+    const localAttachments = buildAttachmentRecords(
+      files,
+      localRequestId,
+      messageUuid,
+      ownerId,
+    );
     const saved = [];
 
     for (const attachment of localAttachments) {
@@ -3011,11 +3793,17 @@ function App() {
           .from("request-attachments")
           .upload(attachment.objectPath, attachment.sourceFile, {
             contentType: attachment.type || "application/octet-stream",
-            upsert: false
+            upsert: false,
           });
 
         if (uploadError) {
-          recordServiceEvent("supabase-storage", "file_upload_failed", "request", localRequestId, uploadError.message);
+          recordServiceEvent(
+            "supabase-storage",
+            "file_upload_failed",
+            "request",
+            localRequestId,
+            uploadError.message,
+          );
         } else {
           uploaded = true;
         }
@@ -3025,13 +3813,19 @@ function App() {
         .from("storage_objects")
         .insert({
           ...supabaseStorageObjectInsertFromAttachment(attachment),
-          status: uploaded ? "uploaded" : "pending_upload"
+          status: uploaded ? "uploaded" : "pending_upload",
         })
         .select("id,object_path,status")
         .single();
 
       if (storageError) {
-        recordServiceEvent("supabase-database", "storage_object_insert_failed", "request", localRequestId, storageError.message);
+        recordServiceEvent(
+          "supabase-database",
+          "storage_object_insert_failed",
+          "request",
+          localRequestId,
+          storageError.message,
+        );
       } else {
         storageObjectId = storageRow.id;
         setStorageObjectRecords((current) =>
@@ -3040,39 +3834,56 @@ function App() {
               { ...attachment, storageObjectId },
               {
                 status: uploaded ? "uploaded" : "pending_upload",
-                uploadMode: uploaded ? "supabase_storage" : "metadata_only"
-              }
-            )
-          ])
+                uploadMode: uploaded ? "supabase_storage" : "metadata_only",
+              },
+            ),
+          ]),
         );
       }
 
       const { data: attachmentRow, error: attachmentError } = await supabase
         .from("attachments")
-        .insert(supabaseAttachmentInsertFromLocal(
-          { ...attachment, storageObjectId },
-          requestUuid,
-          messageUuid,
-          ownerId
-        ))
+        .insert(
+          supabaseAttachmentInsertFromLocal(
+            { ...attachment, storageObjectId },
+            requestUuid,
+            messageUuid,
+            ownerId,
+          ),
+        )
         .select("id,name,mime_type,size_bytes,storage_object_id,created_at")
         .single();
 
       if (attachmentError) {
-        recordServiceEvent("supabase-database", "attachment_insert_failed", "request", localRequestId, attachmentError.message);
+        recordServiceEvent(
+          "supabase-database",
+          "attachment_insert_failed",
+          "request",
+          localRequestId,
+          attachmentError.message,
+        );
       } else {
         saved.push({ ...attachmentRow, object_path: attachment.objectPath });
       }
     }
 
     if (saved.length) {
-      recordServiceEvent("supabase-storage", "files_uploaded", "request", localRequestId, `${saved.length} file record(s) saved to Supabase Storage.`);
+      recordServiceEvent(
+        "supabase-storage",
+        "files_uploaded",
+        "request",
+        localRequestId,
+        `${saved.length} file record(s) saved to Supabase Storage.`,
+      );
     }
 
     return saved;
   }
 
-  async function updateSupabaseRequestFromLocal(request, generatedMessages = []) {
+  async function updateSupabaseRequestFromLocal(
+    request,
+    generatedMessages = [],
+  ) {
     if (!supabase || !request?.supabaseId) return;
     if (generatedMessages.length) {
       const { error } = await supabase.rpc("complete_request_check", {
@@ -3080,15 +3891,27 @@ function App() {
         p_status: request.status,
         p_check_status: checkStatusToSupabase(request.checkResult),
         p_check_result: request.checkResult || {},
-        p_messages: generatedMessages.map(supabaseSystemMessageFromLocal)
+        p_messages: generatedMessages.map(supabaseSystemMessageFromLocal),
       });
 
       if (error) {
-        recordServiceEvent("supabase-database", "request_check_complete_failed", "request", request.id, error.message);
+        recordServiceEvent(
+          "supabase-database",
+          "request_check_complete_failed",
+          "request",
+          request.id,
+          error.message,
+        );
         return;
       }
 
-      recordServiceEvent("supabase-database", "request_check_completed", "request", request.id, "Request check result and Easy Harness messages saved to Supabase.");
+      recordServiceEvent(
+        "supabase-database",
+        "request_check_completed",
+        "request",
+        request.id,
+        "Request check result and Easy Harness messages saved to Supabase.",
+      );
       return;
     }
 
@@ -3098,18 +3921,34 @@ function App() {
       .eq("id", request.supabaseId);
 
     if (error) {
-      recordServiceEvent("supabase-database", "request_update_failed", "request", request.id, error.message);
+      recordServiceEvent(
+        "supabase-database",
+        "request_update_failed",
+        "request",
+        request.id,
+        error.message,
+      );
       return;
     }
 
-    recordServiceEvent("supabase-database", "request_updated", "request", request.id, "Request status saved to Supabase.");
+    recordServiceEvent(
+      "supabase-database",
+      "request_updated",
+      "request",
+      request.id,
+      "Request status saved to Supabase.",
+    );
   }
 
   async function invokeSupabaseChecking(request, trigger = "manual") {
     if (!supabase || !request?.supabaseId || !currentUser) return null;
 
     const activityMode = trigger === "initial_request" ? "initial" : "followup";
-    setAgentActivity({ requestId: request.id, mode: activityMode, startedAt: Date.now() });
+    setAgentActivity({
+      requestId: request.id,
+      mode: activityMode,
+      startedAt: Date.now(),
+    });
 
     recordServiceEvent(
       platformAdapters.checking.id,
@@ -3118,15 +3957,15 @@ function App() {
       request.id,
       activityMode === "initial"
         ? "Easy Harness intake agent is analyzing the new request."
-        : "Easy Harness intake agent is thinking through the latest customer input."
+        : "Easy Harness intake agent is thinking through the latest customer input.",
     );
 
     try {
       const { data, error } = await supabase.functions.invoke("run-checking", {
         body: {
           requestId: request.supabaseId,
-          trigger
-        }
+          trigger,
+        },
       });
 
       if (error || !data?.ok) {
@@ -3135,7 +3974,10 @@ function App() {
           "remote_check_failed",
           "request",
           request.id,
-          error?.message || data?.message || data?.code || "Easy Harness intake agent did not finish."
+          error?.message ||
+            data?.message ||
+            data?.code ||
+            "Easy Harness intake agent did not finish.",
         );
         return null;
       }
@@ -3145,7 +3987,8 @@ function App() {
         `remote_check_${data.checkStatus || "completed"}`,
         "request",
         request.id,
-        data.readiness || "Easy Harness intake agent updated the request draft."
+        data.readiness ||
+          "Easy Harness intake agent updated the request draft.",
       );
 
       const aiMessage = data.message
@@ -3153,7 +3996,7 @@ function App() {
             id: `agent_${data.requestId || request.supabaseId}_${data.checkResult?.checkedAt || Date.now()}`,
             role: "easy",
             createdAt: data.checkResult?.checkedAt || new Date().toISOString(),
-            blocks: [{ type: "text", text: data.message }]
+            blocks: [{ type: "text", text: data.message }],
           }
         : null;
       const nextStatus = data.status || request.status;
@@ -3164,7 +4007,7 @@ function App() {
         status: nextStatus,
         checkResult: nextCheckResult,
         updated: "Just now",
-        messages: appendMessageIfMissing(current.messages || [], aiMessage)
+        messages: appendMessageIfMissing(current.messages || [], aiMessage),
       }));
 
       await loadSupabaseRequestData(currentUser);
@@ -3175,31 +4018,60 @@ function App() {
           status: nextStatus,
           checkResult: nextCheckResult,
           updated: "Just now",
-          messages: appendMessageIfMissing(current.messages || [], aiMessage)
+          messages: appendMessageIfMissing(current.messages || [], aiMessage),
         }));
       }
       if (data.requestNumber) setActiveRequestId(data.requestNumber);
       return data;
     } finally {
-      setAgentActivity((current) => current.requestId === request.id ? { requestId: "", mode: "", startedAt: 0 } : current);
+      setAgentActivity((current) =>
+        current.requestId === request.id
+          ? { requestId: "", mode: "", startedAt: 0 }
+          : current,
+      );
     }
   }
 
-  async function persistSupabaseStaffRequestUpdate(request, messages = [], quote = null) {
-    if (!supabase || !request?.supabaseId || !isUuidLike(currentUser?.id)) return null;
+  async function persistSupabaseStaffRequestUpdate(
+    request,
+    messages = [],
+    quote = null,
+  ) {
+    if (!supabase || !request?.supabaseId || !isUuidLike(currentUser?.id))
+      return null;
     const savedMessages = [];
 
     if (messages.length) {
       const { data, error } = await supabase
         .from("request_messages")
-        .insert(messages.map((message) => supabaseMessageInsertFromLocal(message, request.supabaseId, currentUser.id)))
+        .insert(
+          messages.map((message) =>
+            supabaseMessageInsertFromLocal(
+              message,
+              request.supabaseId,
+              currentUser.id,
+            ),
+          ),
+        )
         .select("id,created_at,blocks,body,author_role");
 
       if (error) {
-        recordServiceEvent("supabase-database", "staff_request_message_insert_failed", "request", request.id, error.message);
+        recordServiceEvent(
+          "supabase-database",
+          "staff_request_message_insert_failed",
+          "request",
+          request.id,
+          error.message,
+        );
       } else {
         savedMessages.push(...(data || []));
-        recordServiceEvent("supabase-database", "staff_request_message_inserted", "request", request.id, `${data?.length || 0} Easy Harness message(s) saved to Supabase.`);
+        recordServiceEvent(
+          "supabase-database",
+          "staff_request_message_inserted",
+          "request",
+          request.id,
+          `${data?.length || 0} Easy Harness message(s) saved to Supabase.`,
+        );
       }
     }
 
@@ -3207,20 +4079,43 @@ function App() {
     if (quote) {
       const { data: quoteRow, error: quoteError } = await supabase
         .from("quotes")
-        .insert(supabaseQuoteInsertFromLocal(quote, request.supabaseId, currentUser.id))
-        .select("id,request_id,version,amount,currency,basis_message_ids,status,released_by,released_at,valid_until")
+        .insert(
+          supabaseQuoteInsertFromLocal(
+            quote,
+            request.supabaseId,
+            currentUser.id,
+          ),
+        )
+        .select(
+          "id,request_id,version,amount,currency,basis_message_ids,status,released_by,released_at,valid_until",
+        )
         .single();
 
       if (quoteError) {
-        recordServiceEvent("supabase-database", "quote_insert_failed", "request", request.id, quoteError.message);
+        recordServiceEvent(
+          "supabase-database",
+          "quote_insert_failed",
+          "request",
+          request.id,
+          quoteError.message,
+        );
       } else {
         savedQuote = localQuoteFromSupabase(quoteRow);
       }
     }
 
-    const requestPatch = quote && savedQuote
-      ? { status: "ready_to_confirm", active_quote_id: savedQuote.id, updated_at: new Date().toISOString() }
-      : { status: request.status === "draft_saved" ? "in_review" : request.status, updated_at: new Date().toISOString() };
+    const requestPatch =
+      quote && savedQuote
+        ? {
+            status: "ready_to_confirm",
+            active_quote_id: savedQuote.id,
+            updated_at: new Date().toISOString(),
+          }
+        : {
+            status:
+              request.status === "draft_saved" ? "in_review" : request.status,
+            updated_at: new Date().toISOString(),
+          };
 
     const { error: requestError } = await supabase
       .from("requests")
@@ -3228,11 +4123,23 @@ function App() {
       .eq("id", request.supabaseId);
 
     if (requestError) {
-      recordServiceEvent("supabase-database", "staff_request_update_failed", "request", request.id, requestError.message);
+      recordServiceEvent(
+        "supabase-database",
+        "staff_request_update_failed",
+        "request",
+        request.id,
+        requestError.message,
+      );
       return { savedMessages, savedQuote };
     }
 
-    recordServiceEvent("supabase-database", "staff_request_updated", "request", request.id, "Easy Harness request update saved to Supabase.");
+    recordServiceEvent(
+      "supabase-database",
+      "staff_request_updated",
+      "request",
+      request.id,
+      "Easy Harness request update saved to Supabase.",
+    );
     return { savedMessages, savedQuote };
   }
 
@@ -3240,12 +4147,20 @@ function App() {
     if (!supabase || !authUser?.id) return null;
     const { data, error } = await supabase
       .from("profiles")
-      .select("id,email,display_name,role,status,verified,notification_preferences,last_active_at")
+      .select(
+        "id,email,display_name,role,status,verified,notification_preferences,last_active_at",
+      )
       .eq("id", authUser.id)
       .maybeSingle();
 
     if (error) {
-      recordServiceEvent("supabase-auth", "profile_load_failed", "user", authUser.id, error.message);
+      recordServiceEvent(
+        "supabase-auth",
+        "profile_load_failed",
+        "user",
+        authUser.id,
+        error.message,
+      );
       return null;
     }
     return data;
@@ -3264,7 +4179,9 @@ function App() {
     setUsers((current) => {
       const exists = current.some((item) => item.id === user.id);
       return exists
-        ? current.map((item) => (item.id === user.id ? { ...item, ...user } : item))
+        ? current.map((item) =>
+            item.id === user.id ? { ...item, ...user } : item,
+          )
         : [user, ...current];
     });
 
@@ -3272,7 +4189,13 @@ function App() {
     await loadSupabaseRequestData(user);
     await loadSupabaseOrderData(user);
     await loadSupabaseNotificationData(user);
-    recordServiceEvent("supabase-auth", action, "user", user.id, `${roleCopy[user.role]} session is active.`);
+    recordServiceEvent(
+      "supabase-auth",
+      action,
+      "user",
+      user.id,
+      `${roleCopy[user.role]} session is active.`,
+    );
     setAuthProviderStatus("ready");
     return user;
   }
@@ -3285,10 +4208,16 @@ function App() {
     setCurrentUserId(userId);
     setUsers((current) =>
       current.map((user) =>
-        user.id === userId ? { ...user, lastActive: "Just now" } : user
-      )
+        user.id === userId ? { ...user, lastActive: "Just now" } : user,
+      ),
     );
-    recordAudit("signed_in", "user", selected.id, `${roleCopy[selected.role]} workspace opened.`, selected);
+    recordAudit(
+      "signed_in",
+      "user",
+      selected.id,
+      `${roleCopy[selected.role]} workspace opened.`,
+      selected,
+    );
     if (isSwitchingUser) {
       setUserView("requests");
       setStaffView("queue");
@@ -3300,8 +4229,10 @@ function App() {
     if (!isEmailLike(normalized)) {
       return {
         ok: false,
-        adapter: supabaseConfigured ? "supabase-auth" : platformAdapters.auth.id,
-        error: "Enter a valid email address."
+        adapter: supabaseConfigured
+          ? "supabase-auth"
+          : platformAdapters.auth.id,
+        error: "Enter a valid email address.",
       };
     }
 
@@ -3310,25 +4241,37 @@ function App() {
         email: normalized,
         options: {
           shouldCreateUser: false,
-          emailRedirectTo: getAuthRedirectUrl()
-        }
+          emailRedirectTo: getAuthRedirectUrl(),
+        },
       });
 
       if (error) {
-        recordServiceEvent("supabase-auth", "sign_in_link_failed", "user", normalized, error.message);
+        recordServiceEvent(
+          "supabase-auth",
+          "sign_in_link_failed",
+          "user",
+          normalized,
+          error.message,
+        );
         return {
           ok: false,
           adapter: "supabase-auth",
-          error: "We could not send a sign-in link to this email."
+          error: "We could not send a sign-in link to this email.",
         };
       }
 
-      recordServiceEvent("supabase-auth", "sign_in_link_sent", "user", normalized, "Sign-in email sent.");
+      recordServiceEvent(
+        "supabase-auth",
+        "sign_in_link_sent",
+        "user",
+        normalized,
+        "Sign-in email sent.",
+      );
       return {
         ok: true,
         adapter: "supabase-auth",
         pending: true,
-        message: "Check your email to finish logging in."
+        message: "Check your email to finish logging in.",
       };
     }
 
@@ -3336,7 +4279,7 @@ function App() {
       return {
         ok: false,
         adapter: "hosted-auth-required",
-        error: "Account access is not available yet. Please try again later."
+        error: "Account access is not available yet. Please try again later.",
       };
     }
 
@@ -3352,33 +4295,47 @@ function App() {
     if (!supabase) {
       return {
         ok: false,
-        adapter: supabaseConfigured ? "supabase-auth" : platformAdapters.auth.id,
-        error: "Google sign-in is not available yet. Please use email for now."
+        adapter: supabaseConfigured
+          ? "supabase-auth"
+          : platformAdapters.auth.id,
+        error: "Google sign-in is not available yet. Please use email for now.",
       };
     }
 
     const { error } = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: getAuthRedirectUrl()
-      }
+        redirectTo: getAuthRedirectUrl(),
+      },
     });
 
     if (error) {
-      recordServiceEvent("supabase-auth", "google_sign_in_failed", "user", "google", error.message);
+      recordServiceEvent(
+        "supabase-auth",
+        "google_sign_in_failed",
+        "user",
+        "google",
+        error.message,
+      );
       return {
         ok: false,
         adapter: "supabase-auth",
-        error: "Google sign-in is not available yet. Please use email for now."
+        error: "Google sign-in is not available yet. Please use email for now.",
       };
     }
 
-    recordServiceEvent("supabase-auth", "google_sign_in_started", "user", "google", "Google sign-in started.");
+    recordServiceEvent(
+      "supabase-auth",
+      "google_sign_in_started",
+      "user",
+      "google",
+      "Google sign-in started.",
+    );
     return {
       ok: true,
       adapter: "supabase-auth",
       pending: true,
-      message: "Continue with Google to finish signing in."
+      message: "Continue with Google to finish signing in.",
     };
   }
 
@@ -3387,7 +4344,7 @@ function App() {
     if (!isEmailLike(normalized)) {
       return {
         ok: false,
-        error: "Enter a valid email address."
+        error: "Enter a valid email address.",
       };
     }
 
@@ -3399,26 +4356,38 @@ function App() {
           emailRedirectTo: getAuthRedirectUrl(),
           data: {
             nickname: form.nickname?.trim() || normalized.split("@")[0],
-            role: "customer"
-          }
-        }
+            role: "customer",
+          },
+        },
       });
 
       if (error) {
-        recordServiceEvent("supabase-auth", "customer_registration_link_failed", "user", normalized, error.message);
+        recordServiceEvent(
+          "supabase-auth",
+          "customer_registration_link_failed",
+          "user",
+          normalized,
+          error.message,
+        );
         return {
           ok: false,
           adapter: "supabase-auth",
-          error: "We could not send the account email. Please try again."
+          error: "We could not send the account email. Please try again.",
         };
       }
 
-      recordServiceEvent("supabase-auth", "customer_registration_link_sent", "user", normalized, "Customer account email sent.");
+      recordServiceEvent(
+        "supabase-auth",
+        "customer_registration_link_sent",
+        "user",
+        normalized,
+        "Customer account email sent.",
+      );
       return {
         ok: true,
         adapter: "supabase-auth",
         pending: true,
-        message: "Check your email to finish creating your account."
+        message: "Check your email to finish creating your account.",
       };
     }
 
@@ -3426,14 +4395,14 @@ function App() {
       return {
         ok: false,
         adapter: "hosted-auth-required",
-        error: "Account access is not available yet. Please try again later."
+        error: "Account access is not available yet. Please try again later.",
       };
     }
 
     if (users.some((user) => user.email.toLowerCase() === normalized)) {
       return {
         ok: false,
-        error: "An account already exists for this email. Log in instead."
+        error: "An account already exists for this email. Log in instead.",
       };
     }
     const authResult = createCustomerAccountAdapter(form);
@@ -3441,7 +4410,13 @@ function App() {
     setUsers((current) => [authResult.user, ...current]);
     signIn(authResult.user.id, authResult.session, authResult.user);
     setServiceEvents((current) => [authResult.event, ...current]);
-    recordAudit("customer_registered", "user", authResult.user.id, `${authResult.user.email} created an account.`, authResult.user);
+    recordAudit(
+      "customer_registered",
+      "user",
+      authResult.user.id,
+      `${authResult.user.email} created an account.`,
+      authResult.user,
+    );
     completeAuthFlow(authResult.user);
     return authResult;
   }
@@ -3472,7 +4447,8 @@ function App() {
   function openRequest(requestId, nextSurface = currentUser?.role) {
     if (currentUser?.role === "customer") {
       const allowed = requests.some(
-        (request) => request.id === requestId && request.customerId === currentUser.id
+        (request) =>
+          request.id === requestId && request.customerId === currentUser.id,
       );
       if (!allowed) return;
     }
@@ -3488,11 +4464,14 @@ function App() {
 
   function handleUpload(event, target = "start") {
     const selectedFiles = Array.from(event.target.files || []);
-    const oversized = selectedFiles.filter((file) => file.size > maxFileSizeBytes);
+    const oversized = selectedFiles.filter(
+      (file) => file.size > maxFileSizeBytes,
+    );
     const accepted = selectedFiles
       .filter((file) => file.size <= maxFileSizeBytes)
       .map(draftFileFromBrowser);
-    const currentFiles = target === "composer" ? userComposerFiles : uploadFiles;
+    const currentFiles =
+      target === "composer" ? userComposerFiles : uploadFiles;
     const slots = Math.max(maxFilesPerUpload - currentFiles.length, 0);
     const nextFiles = accepted.slice(0, slots);
 
@@ -3518,7 +4497,7 @@ function App() {
 
   function fillSampleRequest() {
     setDescription(
-      "I need a harness to connect a controller to two sensors. I have connector photos and an old harness sample."
+      "I need a harness to connect a controller to two sensors. I have connector photos and an old harness sample.",
     );
     setUploadFiles(sampleFiles.map(sampleFileDraft));
     setFileError("");
@@ -3532,117 +4511,158 @@ function App() {
     }
     if (!currentUser) {
       if (!termsChecked) {
-        setTermsError("Please accept the upload and request terms before submitting.");
+        setTermsError(
+          "Please accept the upload and request terms before submitting.",
+        );
         return;
       }
-      openAuthModal("register", "Sign in or create an account to submit this request.", "submit_request");
+      openAuthModal(
+        "register",
+        "Sign in or create an account to submit this request.",
+        "submit_request",
+      );
       return;
     }
     submitRequestForUser(currentUser);
   }
 
   async function submitRequestForUser(actor) {
-    if (!actor || actor.role !== "customer" || submittingRequestRef.current) return;
+    if (!actor || actor.role !== "customer" || submittingRequestRef.current)
+      return;
     submittingRequestRef.current = true;
     setSubmittingRequest(true);
     try {
       if (!uploadFiles.length) {
-      setFileError("Please upload at least one design file before submitting.");
-      return;
-    }
-    if (!actor.termsAccepted && !termsChecked) {
-      setTermsError("Please accept the upload and request terms before submitting.");
-      return;
-    }
-    if (!actor.termsAccepted && termsChecked) {
-      updateUser(actor.id, {
-        termsAccepted: true,
-        termsAcceptedAt: todayLabel()
-      }, "upload_terms_accepted");
-      setTermsError("");
-    }
-    const text =
-      description.trim() ||
-      "I need a harness made from the uploaded design files.";
-    const uploadDrafts = [...uploadFiles];
-    const files = uploadDrafts.map(fileName);
-    setDescription("");
-    setUploadFiles([]);
-    setFileError("");
-    const nextId = makeRequestId(requests.length);
-    const firstMessage = customerMessage(text, files);
-    const nextRequest = {
-      id: nextId,
-      customerId: actor.id,
-      customer: actor.name,
-      title: inferTitle(text),
-      status: "checking",
-      checkResult: {
-        status: "queued",
-        adapter: platformAdapters.checking.id,
-        reason: "Request is queued for intake checking.",
-        missing: [],
-        checkedAt: ""
-      },
-      quotes: [],
-      activeQuoteId: "",
-      confirmedQuoteId: "",
-      price: "",
-      files,
-      updated: "Just now",
-      messages: [firstMessage]
-    };
+        setFileError(
+          "Please upload at least one design file before submitting.",
+        );
+        return;
+      }
+      if (!actor.termsAccepted && !termsChecked) {
+        setTermsError(
+          "Please accept the upload and request terms before submitting.",
+        );
+        return;
+      }
+      if (!actor.termsAccepted && termsChecked) {
+        updateUser(
+          actor.id,
+          {
+            termsAccepted: true,
+            termsAcceptedAt: todayLabel(),
+          },
+          "upload_terms_accepted",
+        );
+        setTermsError("");
+      }
+      const text =
+        description.trim() ||
+        "I need a harness made from the uploaded design files.";
+      const uploadDrafts = [...uploadFiles];
+      const files = uploadDrafts.map(fileName);
+      setDescription("");
+      setUploadFiles([]);
+      setFileError("");
+      const nextId = makeRequestId(requests.length);
+      const firstMessage = customerMessage(text, files);
+      const nextRequest = {
+        id: nextId,
+        customerId: actor.id,
+        customer: actor.name,
+        title: inferTitle(text),
+        status: "checking",
+        checkResult: {
+          status: "queued",
+          adapter: platformAdapters.checking.id,
+          reason: "Request is queued for intake checking.",
+          missing: [],
+          checkedAt: "",
+        },
+        quotes: [],
+        activeQuoteId: "",
+        confirmedQuoteId: "",
+        price: "",
+        files,
+        updated: "Just now",
+        messages: [firstMessage],
+      };
 
-    const savedBundle = await createSupabaseRequestBundle(nextRequest, firstMessage, uploadDrafts, actor);
-    const savedRequest = savedBundle?.requestRow
-      ? {
-          ...nextRequest,
-          supabaseId: savedBundle.requestRow.id,
-          updated: displayTime(savedBundle.requestRow.updated_at || savedBundle.requestRow.created_at),
-          messages: savedBundle.messageRow
-            ? [{
-                ...firstMessage,
-                id: savedBundle.messageRow.id,
-                createdAt: displayTime(savedBundle.messageRow.created_at)
-              }]
-            : nextRequest.messages
-        }
-      : nextRequest;
-
-    setRequests((current) => dedupeRequestsByIdentity([savedRequest, ...current]));
-    writeRequestMessageLedger(savedRequest, savedRequest.messages[0]);
-    if (savedBundle?.attachments?.length) {
-      setAttachmentRecords((current) => [...savedBundle.attachments, ...current]);
-    } else {
-      appendAttachmentRecords(uploadDrafts, nextId, firstMessage.id, actor.id);
-    }
-    addNotification({
-      role: "staff",
-      requestId: nextId,
-      title: "New request",
-      body: `${nextId} is ready for review.`
-    });
-    recordAudit("request_created", "request", nextId, `${actor.email} created ${nextRequest.title}.`, actor);
-    setActiveRequestId(savedRequest.id);
-    setDescription("");
-    setUploadFiles([]);
-    setFileError("");
-    setTermsChecked(false);
-    if (savedRequest.supabaseId) {
-      setProcessingRequestId("");
-      setUserView("thread");
-      recordServiceEvent(
-        platformAdapters.checking.id,
-        "check_queued",
-        "request",
-        savedRequest.id,
-        "Request is waiting for Easy Harness checking."
+      const savedBundle = await createSupabaseRequestBundle(
+        nextRequest,
+        firstMessage,
+        uploadDrafts,
+        actor,
       );
-      await invokeSupabaseChecking(savedRequest, "initial_request");
-    } else {
-      setProcessingRequestId(savedRequest.id);
-      setUserView("processing");
-    }
+      const savedRequest = savedBundle?.requestRow
+        ? {
+            ...nextRequest,
+            supabaseId: savedBundle.requestRow.id,
+            updated: displayTime(
+              savedBundle.requestRow.updated_at ||
+                savedBundle.requestRow.created_at,
+            ),
+            messages: savedBundle.messageRow
+              ? [
+                  {
+                    ...firstMessage,
+                    id: savedBundle.messageRow.id,
+                    createdAt: displayTime(savedBundle.messageRow.created_at),
+                  },
+                ]
+              : nextRequest.messages,
+          }
+        : nextRequest;
+
+      setRequests((current) =>
+        dedupeRequestsByIdentity([savedRequest, ...current]),
+      );
+      writeRequestMessageLedger(savedRequest, savedRequest.messages[0]);
+      if (savedBundle?.attachments?.length) {
+        setAttachmentRecords((current) => [
+          ...savedBundle.attachments,
+          ...current,
+        ]);
+      } else {
+        appendAttachmentRecords(
+          uploadDrafts,
+          nextId,
+          firstMessage.id,
+          actor.id,
+        );
+      }
+      addNotification({
+        role: "staff",
+        requestId: nextId,
+        title: "New request",
+        body: `${nextId} is ready for review.`,
+      });
+      recordAudit(
+        "request_created",
+        "request",
+        nextId,
+        `${actor.email} created ${nextRequest.title}.`,
+        actor,
+      );
+      setActiveRequestId(savedRequest.id);
+      setDescription("");
+      setUploadFiles([]);
+      setFileError("");
+      setTermsChecked(false);
+      if (savedRequest.supabaseId) {
+        setProcessingRequestId("");
+        setUserView("thread");
+        recordServiceEvent(
+          platformAdapters.checking.id,
+          "check_queued",
+          "request",
+          savedRequest.id,
+          "Request is waiting for Easy Harness checking.",
+        );
+        await invokeSupabaseChecking(savedRequest, "initial_request");
+      } else {
+        setProcessingRequestId(savedRequest.id);
+        setUserView("processing");
+      }
     } finally {
       submittingRequestRef.current = false;
       setSubmittingRequest(false);
@@ -3660,10 +4680,14 @@ function App() {
     setUserComposer("");
     setUserComposerFiles([]);
     setFileError("");
-    const remoteThread = Boolean(supabase && activeRequest.supabaseId && isUuidLike(currentUser?.id));
+    const remoteThread = Boolean(
+      supabase && activeRequest.supabaseId && isUuidLike(currentUser?.id),
+    );
     const shouldRunRemoteChecking =
       remoteThread &&
-      ["checking", "needs_info", "not_supported", "draft_saved"].includes(activeRequest.status);
+      ["checking", "needs_info", "not_supported", "draft_saved"].includes(
+        activeRequest.status,
+      );
     const message = {
       id: messageId(),
       role: "customer",
@@ -3672,111 +4696,166 @@ function App() {
         ...(text ? [{ type: "text", text }] : []),
         ...(attachedNames.length
           ? [{ type: "attachments", files: attachedNames }]
-          : [])
-      ]
+          : []),
+      ],
     };
 
     try {
-    updateRequest(activeRequest.id, (request) => {
-      const baseMessages = [...request.messages, message];
-      const nextFiles = [...new Set([...(request.files || []), ...attachedNames])];
-      if (remoteThread) {
+      updateRequest(activeRequest.id, (request) => {
+        const baseMessages = [...request.messages, message];
+        const nextFiles = [
+          ...new Set([...(request.files || []), ...attachedNames]),
+        ];
+        if (remoteThread) {
+          return {
+            ...request,
+            files: nextFiles,
+            status: ["needs_info", "not_supported"].includes(request.status)
+              ? "checking"
+              : request.status,
+            checkResult: ["needs_info", "not_supported"].includes(
+              request.status,
+            )
+              ? {
+                  status: "queued",
+                  adapter: platformAdapters.checking.id,
+                  reason:
+                    "Customer added details. Easy Harness will continue checking the request.",
+                  missing: [],
+                  checkedAt: "",
+                }
+              : request.checkResult,
+            updated: "Just now",
+            messages: baseMessages,
+          };
+        }
         return {
           ...request,
           files: nextFiles,
-          status: ["needs_info", "not_supported"].includes(request.status) ? "checking" : request.status,
-          checkResult: ["needs_info", "not_supported"].includes(request.status)
-            ? {
-                status: "queued",
-                adapter: platformAdapters.checking.id,
-                reason: "Customer added details. Easy Harness will continue checking the request.",
-                missing: [],
-                checkedAt: ""
-              }
-            : request.checkResult,
+          status:
+            request.status === "draft_saved" ? "checking" : request.status,
+          checkResult: request.checkResult,
           updated: "Just now",
-          messages: baseMessages
+          messages: baseMessages,
         };
-      }
-      return {
-        ...request,
-        files: nextFiles,
-        status: request.status === "draft_saved" ? "checking" : request.status,
-        checkResult: request.checkResult,
-        updated: "Just now",
-        messages: baseMessages
-      };
-    });
+      });
 
-    if (remoteThread) {
-      const { data: messageRow, error: messageError } = await supabase
-        .from("request_messages")
-        .insert(supabaseMessageInsertFromLocal(message, activeRequest.supabaseId, currentUser.id))
-        .select("id,created_at")
-        .single();
-
-      if (messageError) {
-        recordServiceEvent("supabase-database", "request_message_insert_failed", "request", activeRequest.id, messageError.message);
-      } else {
-        updateRequest(activeRequest.id, (request) => ({
-          ...request,
-          messages: request.messages.map((item) =>
-            item.id === message.id
-              ? { ...item, id: messageRow.id, createdAt: displayTime(messageRow.created_at) }
-              : item
+      if (remoteThread) {
+        const { data: messageRow, error: messageError } = await supabase
+          .from("request_messages")
+          .insert(
+            supabaseMessageInsertFromLocal(
+              message,
+              activeRequest.supabaseId,
+              currentUser.id,
+            ),
           )
-        }));
+          .select("id,created_at")
+          .single();
 
-        const savedAttachments = await persistSupabaseAttachments(
+        if (messageError) {
+          recordServiceEvent(
+            "supabase-database",
+            "request_message_insert_failed",
+            "request",
+            activeRequest.id,
+            messageError.message,
+          );
+        } else {
+          updateRequest(activeRequest.id, (request) => ({
+            ...request,
+            messages: request.messages.map((item) =>
+              item.id === message.id
+                ? {
+                    ...item,
+                    id: messageRow.id,
+                    createdAt: displayTime(messageRow.created_at),
+                  }
+                : item,
+            ),
+          }));
+
+          const savedAttachments = await persistSupabaseAttachments(
+            filesToSend,
+            activeRequest.id,
+            activeRequest.supabaseId,
+            messageRow.id,
+            currentUser.id,
+          );
+
+          if (!savedAttachments.length && filesToSend.length) {
+            appendAttachmentRecords(
+              filesToSend,
+              activeRequest.id,
+              messageRow.id,
+              currentUser.id,
+            );
+          } else if (savedAttachments?.length) {
+            setAttachmentRecords((current) => [
+              ...savedAttachments.map((attachment) => ({
+                id: attachment.id,
+                requestId: activeRequest.id,
+                supabaseRequestId: activeRequest.supabaseId,
+                messageId: messageRow.id,
+                uploadedBy: currentUser.id,
+                name: attachment.name,
+                size: attachment.size_bytes || 0,
+                type: attachment.mime_type || "application/octet-stream",
+                storageObjectId: attachment.storage_object_id || "",
+                objectPath: attachment.object_path || "",
+                createdAt: displayTime(attachment.created_at),
+              })),
+              ...current,
+            ]);
+          }
+          recordServiceEvent(
+            "supabase-database",
+            "request_message_inserted",
+            "request",
+            activeRequest.id,
+            "Customer update saved to Supabase.",
+          );
+          if (shouldRunRemoteChecking) {
+            await invokeSupabaseChecking(activeRequest, "customer_followup");
+          }
+        }
+      } else {
+        appendAttachmentRecords(
           filesToSend,
           activeRequest.id,
-          activeRequest.supabaseId,
-          messageRow.id,
-          currentUser.id
+          message.id,
+          currentUser.id,
         );
-
-        if (!savedAttachments.length && filesToSend.length) {
-          appendAttachmentRecords(filesToSend, activeRequest.id, messageRow.id, currentUser.id);
-        } else if (savedAttachments?.length) {
-          setAttachmentRecords((current) => [
-            ...savedAttachments.map((attachment) => ({
-              id: attachment.id,
-              requestId: activeRequest.id,
-              supabaseRequestId: activeRequest.supabaseId,
-              messageId: messageRow.id,
-              uploadedBy: currentUser.id,
-              name: attachment.name,
-              size: attachment.size_bytes || 0,
-              type: attachment.mime_type || "application/octet-stream",
-              storageObjectId: attachment.storage_object_id || "",
-              objectPath: attachment.object_path || "",
-              createdAt: displayTime(attachment.created_at)
-            })),
-            ...current
-          ]);
-        }
-        recordServiceEvent("supabase-database", "request_message_inserted", "request", activeRequest.id, "Customer update saved to Supabase.");
-        if (shouldRunRemoteChecking) {
-          await invokeSupabaseChecking(activeRequest, "customer_followup");
-        }
       }
-    } else {
-      appendAttachmentRecords(filesToSend, activeRequest.id, message.id, currentUser.id);
-    }
-    writeRequestMessageLedger(activeRequest, message);
-    addNotification({
-      role: "staff",
-      requestId: activeRequest.id,
-      title: "Customer update",
-      body: `${activeRequest.id} has new details.`
-    });
-    recordAudit("customer_message_added", "request", activeRequest.id, text || `${attachedNames.length} file(s) attached.`);
-    if (["needs_info", "not_supported", "checking"].includes(activeRequest.status)) {
-      recordServiceEvent(platformAdapters.checking.id, "check_reopened", "request", activeRequest.id, "Customer added details after intake checking.");
-    }
-    setUserComposer("");
-    setUserComposerFiles([]);
-    setFileError("");
+      writeRequestMessageLedger(activeRequest, message);
+      addNotification({
+        role: "staff",
+        requestId: activeRequest.id,
+        title: "Customer update",
+        body: `${activeRequest.id} has new details.`,
+      });
+      recordAudit(
+        "customer_message_added",
+        "request",
+        activeRequest.id,
+        text || `${attachedNames.length} file(s) attached.`,
+      );
+      if (
+        ["needs_info", "not_supported", "checking"].includes(
+          activeRequest.status,
+        )
+      ) {
+        recordServiceEvent(
+          platformAdapters.checking.id,
+          "check_reopened",
+          "request",
+          activeRequest.id,
+          "Customer added details after intake checking.",
+        );
+      }
+      setUserComposer("");
+      setUserComposerFiles([]);
+      setFileError("");
     } finally {
       sendingUserMessageRef.current = false;
       setSendingUserMessage(false);
@@ -3788,9 +4867,14 @@ function App() {
     const attachmentFiles = staffAttachment;
     const attachmentNames = attachmentFiles.map(fileName);
     const price = staffPrice.trim();
-    const hasContent = text || attachmentNames.length || includePreview || includeTable;
+    const hasContent =
+      text || attachmentNames.length || includePreview || includeTable;
     const numericPrice = Number(price);
-    const hasPrice = price.length > 0 && Number.isFinite(numericPrice) && numericPrice > 0 && price !== activeRequest.price;
+    const hasPrice =
+      price.length > 0 &&
+      Number.isFinite(numericPrice) &&
+      numericPrice > 0 &&
+      price !== activeRequest.price;
     if (!hasContent && !hasPrice) return;
     let staffMessageId = "";
     let staffMessage = null;
@@ -3799,7 +4883,9 @@ function App() {
 
     updateRequest(activeRequest.id, (request) => {
       const messages = [...request.messages];
-      const quote = hasPrice ? createQuoteRecord(request, price, currentUser) : null;
+      const quote = hasPrice
+        ? createQuoteRecord(request, price, currentUser)
+        : null;
       if (quote) releasedQuote = quote;
 
       if (hasContent) {
@@ -3812,8 +4898,10 @@ function App() {
             ...(text ? [{ type: "text", text }] : []),
             ...(includeTable ? [{ type: "table" }] : []),
             ...(includePreview ? [{ type: "preview" }] : []),
-            ...(attachmentNames.length ? [{ type: "attachments", files: attachmentNames }] : [])
-          ]
+            ...(attachmentNames.length
+              ? [{ type: "attachments", files: attachmentNames }]
+              : []),
+          ],
         };
         messages.push(staffMessage);
       }
@@ -3826,16 +4914,27 @@ function App() {
       return {
         ...request,
         price: hasPrice ? price : request.price,
-        quotes: hasPrice ? [...(request.quotes || []), quote] : request.quotes || [],
+        quotes: hasPrice
+          ? [...(request.quotes || []), quote]
+          : request.quotes || [],
         activeQuoteId: hasPrice ? quote.id : request.activeQuoteId || "",
-        status: hasPrice ? "ready_to_confirm" : request.status === "draft_saved" ? "in_review" : request.status,
+        status: hasPrice
+          ? "ready_to_confirm"
+          : request.status === "draft_saved"
+            ? "in_review"
+            : request.status,
         updated: "Just now",
-        messages
+        messages,
       };
     });
 
     if (attachmentFiles.length) {
-      appendAttachmentRecords(attachmentFiles, activeRequest.id, staffMessageId, currentUser.id);
+      appendAttachmentRecords(
+        attachmentFiles,
+        activeRequest.id,
+        staffMessageId,
+        currentUser.id,
+      );
     }
     if (staffMessage) {
       writeRequestMessageLedger(activeRequest, staffMessage);
@@ -3845,26 +4944,42 @@ function App() {
         userId: activeRequest.customerId,
         requestId: activeRequest.id,
         title: "Request updated",
-        body: `${activeRequest.id} has a new Easy Harness update.`
+        body: `${activeRequest.id} has a new Easy Harness update.`,
       });
-      recordAudit("staff_message_added", "request", activeRequest.id, text || "Media update added.");
+      recordAudit(
+        "staff_message_added",
+        "request",
+        activeRequest.id,
+        text || "Media update added.",
+      );
     }
     if (hasPrice) {
       addNotification({
         userId: activeRequest.customerId,
         requestId: activeRequest.id,
         title: "Price ready",
-        body: `${activeRequest.id} is ready for confirmation at $${price}.`
+        body: `${activeRequest.id} is ready for confirmation at $${price}.`,
       });
-      recordAudit("price_updated", "request", activeRequest.id, `Harness price set to $${price}.`);
+      recordAudit(
+        "price_updated",
+        "request",
+        activeRequest.id,
+        `Harness price set to $${price}.`,
+      );
       if (releasedQuote) writeQuoteLedger(releasedQuote);
-      recordServiceEvent(platformAdapters.checking.id, "quote_released", "request", activeRequest.id, "Harness quote released from current thread basis.");
+      recordServiceEvent(
+        platformAdapters.checking.id,
+        "quote_released",
+        "request",
+        activeRequest.id,
+        "Harness quote released from current thread basis.",
+      );
     }
     if (activeRequest.supabaseId) {
       const saved = await persistSupabaseStaffRequestUpdate(
         activeRequest,
         [staffMessage, priceMessage].filter(Boolean),
-        releasedQuote
+        releasedQuote,
       );
       if (saved?.savedQuote) {
         updateRequest(activeRequest.id, (request) => ({
@@ -3872,8 +4987,8 @@ function App() {
           price: String(saved.savedQuote.amount),
           activeQuoteId: saved.savedQuote.id,
           quotes: (request.quotes || []).map((quote) =>
-            quote.id === releasedQuote.id ? saved.savedQuote : quote
-          )
+            quote.id === releasedQuote.id ? saved.savedQuote : quote,
+          ),
         }));
         writeQuoteLedger(saved.savedQuote);
       }
@@ -3889,12 +5004,22 @@ function App() {
     if (activeRequest.status !== "ready_to_confirm") return;
     const quote = activeQuoteForRequest(activeRequest);
     const localOrder = createOrderFromRequest(activeRequest, currentUser);
-    const remoteOrder = quote ? await confirmSupabaseRequestOrder(activeRequest, quote, localOrder) : null;
+    const remoteOrder = quote
+      ? await confirmSupabaseRequestOrder(activeRequest, quote, localOrder)
+      : null;
     const nextOrder = remoteOrder || ensureOrderForRequest(activeRequest);
     if (remoteOrder) {
-      setOrders((current) => [remoteOrder, ...current.filter((order) => order.id !== remoteOrder.id)]);
+      setOrders((current) => [
+        remoteOrder,
+        ...current.filter((order) => order.id !== remoteOrder.id),
+      ]);
       writeShipmentLedger(remoteOrder);
-      recordAudit("order_created", "order", remoteOrder.id, `${remoteOrder.id} created from ${activeRequest.id}.`);
+      recordAudit(
+        "order_created",
+        "order",
+        remoteOrder.id,
+        `${remoteOrder.id} created from ${activeRequest.id}.`,
+      );
     }
     updateRequest(activeRequest.id, (request) => ({
       ...request,
@@ -3903,22 +5028,30 @@ function App() {
       quotes: (request.quotes || []).map((item) =>
         item.id === (quote?.id || request.activeQuoteId)
           ? { ...item, status: "confirmed", confirmedAt: "Now" }
-          : item
+          : item,
       ),
       updated: "Just now",
       messages: [
         ...request.messages,
-        eventMessage("Confirmed", "You confirmed the current draft and harness price.")
-      ]
+        eventMessage(
+          "Confirmed",
+          "You confirmed the current draft and harness price.",
+        ),
+      ],
     }));
     setActiveOrderId(nextOrder.id);
     addNotification({
       role: "staff",
       requestId: activeRequest.id,
       title: "Request confirmed",
-      body: `${activeRequest.id} has been confirmed and converted to ${nextOrder.id}.`
+      body: `${activeRequest.id} has been confirmed and converted to ${nextOrder.id}.`,
     });
-    recordAudit("request_confirmed", "request", activeRequest.id, `Customer confirmed quote ${quote?.id || activeRequest.activeQuoteId || "current"} and ${nextOrder.id} is open for checkout.`);
+    recordAudit(
+      "request_confirmed",
+      "request",
+      activeRequest.id,
+      `Customer confirmed quote ${quote?.id || activeRequest.activeQuoteId || "current"} and ${nextOrder.id} is open for checkout.`,
+    );
     if (quote) {
       writeQuoteLedger({ ...quote, status: "confirmed", confirmedAt: "Now" });
     }
@@ -3934,34 +5067,63 @@ function App() {
     if (methodId === "bank_transfer") {
       updateOrder(activeOrder.id, (order) => ({
         ...order,
-        ...sessionResult.orderPatch
+        ...sessionResult.orderPatch,
       }));
       writePaymentLedger({
         ...activeOrder,
-        ...sessionResult.orderPatch
+        ...sessionResult.orderPatch,
       });
       addNotification({
         role: "staff",
         requestId: activeOrder.requestId,
         title: "Bank transfer selected",
-        body: `${activeOrder.id} is waiting for bank transfer receipt.`
+        body: `${activeOrder.id} is waiting for bank transfer receipt.`,
       });
-      recordAudit("bank_transfer_started", "order", activeOrder.id, `${method.provider} selected for checkout.`);
-      recordServiceEvent(sessionResult.adapter, sessionResult.eventAction, "order", activeOrder.id, sessionResult.eventDetail);
-      await persistSupabasePayment(activeOrder, method, sessionResult.session, sessionResult.orderPatch, "pending");
+      recordAudit(
+        "bank_transfer_started",
+        "order",
+        activeOrder.id,
+        `${method.provider} selected for checkout.`,
+      );
+      recordServiceEvent(
+        sessionResult.adapter,
+        sessionResult.eventAction,
+        "order",
+        activeOrder.id,
+        sessionResult.eventDetail,
+      );
+      await persistSupabasePayment(
+        activeOrder,
+        method,
+        sessionResult.session,
+        sessionResult.orderPatch,
+        "pending",
+      );
       return;
     }
 
     updateOrder(activeOrder.id, (order) => ({
       ...order,
-      ...sessionResult.orderPatch
+      ...sessionResult.orderPatch,
     }));
     writePaymentLedger({
       ...activeOrder,
-      ...sessionResult.orderPatch
+      ...sessionResult.orderPatch,
     });
-    recordServiceEvent(sessionResult.adapter, sessionResult.eventAction, "order", activeOrder.id, sessionResult.eventDetail);
-    await persistSupabasePayment(activeOrder, method, sessionResult.session, sessionResult.orderPatch, "pending");
+    recordServiceEvent(
+      sessionResult.adapter,
+      sessionResult.eventAction,
+      "order",
+      activeOrder.id,
+      sessionResult.eventDetail,
+    );
+    await persistSupabasePayment(
+      activeOrder,
+      method,
+      sessionResult.session,
+      sessionResult.orderPatch,
+      "pending",
+    );
     setShowPayment(true);
   }
 
@@ -3971,34 +5133,59 @@ function App() {
     const callbackResult = confirmPaymentCallbackAdapter(activeOrder, method);
     updateOrder(activeOrder.id, (order) => ({
       ...order,
-      ...callbackResult.orderPatch
+      ...callbackResult.orderPatch,
     }));
     writePaymentLedger({
       ...activeOrder,
-      ...callbackResult.orderPatch
+      ...callbackResult.orderPatch,
     });
     updateRequest(activeOrder.requestId, (request) => ({
       ...request,
-      status: request.status === "ready_to_confirm" ? "confirmed" : request.status,
+      status:
+        request.status === "ready_to_confirm" ? "confirmed" : request.status,
       updated: "Just now",
       messages: [
         ...request.messages,
-        eventMessage("Order payment received", `${activeOrder.id} is paid and ready for production scheduling.`)
-      ]
+        eventMessage(
+          "Order payment received",
+          `${activeOrder.id} is paid and ready for production scheduling.`,
+        ),
+      ],
     }));
     addNotification({
       role: "staff",
       requestId: activeOrder.requestId,
       title: "Payment activity",
-      body: `${activeOrder.id} has been paid by ${method.provider} and is ready for production scheduling.`
+      body: `${activeOrder.id} has been paid by ${method.provider} and is ready for production scheduling.`,
     });
-    recordAudit("payment_confirmed", "order", activeOrder.id, `${method.provider} checkout completed.`);
-    recordServiceEvent(callbackResult.adapter, callbackResult.eventAction, "order", activeOrder.id, callbackResult.eventDetail);
-    await persistSupabasePayment(activeOrder, method, callbackResult.session, callbackResult.orderPatch, "paid");
+    recordAudit(
+      "payment_confirmed",
+      "order",
+      activeOrder.id,
+      `${method.provider} checkout completed.`,
+    );
+    recordServiceEvent(
+      callbackResult.adapter,
+      callbackResult.eventAction,
+      "order",
+      activeOrder.id,
+      callbackResult.eventDetail,
+    );
+    await persistSupabasePayment(
+      activeOrder,
+      method,
+      callbackResult.session,
+      callbackResult.orderPatch,
+      "paid",
+    );
     setShowPayment(false);
   }
 
-  async function sendOrderMessage(orderId, body, authorRole = currentUser?.role) {
+  async function sendOrderMessage(
+    orderId,
+    body,
+    authorRole = currentUser?.role,
+  ) {
     const text = body.trim();
     if (!text) return;
     const order = orders.find((item) => item.id === orderId);
@@ -4006,12 +5193,12 @@ function App() {
     const message = makeSupportMessage({
       authorRole,
       authorName: currentUser?.name || "Easy Harness",
-      body: text
+      body: text,
     });
     updateOrder(orderId, (current) => ({
       ...current,
       supportMessages: [...(current.supportMessages || []), message],
-      updated: "Just now"
+      updated: "Just now",
     }));
     writeOrderMessageLedger(order, message);
     const remoteMessage = await persistSupabaseOrderMessage(order, message);
@@ -4019,8 +5206,8 @@ function App() {
       updateOrder(orderId, (current) => ({
         ...current,
         supportMessages: (current.supportMessages || []).map((item) =>
-          item.id === message.id ? remoteMessage : item
-        )
+          item.id === message.id ? remoteMessage : item,
+        ),
       }));
       writeOrderMessageLedger(order, remoteMessage);
     }
@@ -4028,15 +5215,18 @@ function App() {
       userId: authorRole === "customer" ? "" : order.customerId,
       role: authorRole === "customer" ? "staff" : "",
       requestId: order.requestId,
-      title: authorRole === "customer" ? "Order message" : "Easy Harness replied",
-      body: `${order.id} has a new order message.`
+      title:
+        authorRole === "customer" ? "Order message" : "Easy Harness replied",
+      body: `${order.id} has a new order message.`,
     });
     recordAudit("order_message_added", "order", orderId, text);
   }
 
   function updateUser(userId, patch, action = "user_updated") {
     setUsers((current) =>
-      current.map((user) => (user.id === userId ? { ...user, ...patch } : user))
+      current.map((user) =>
+        user.id === userId ? { ...user, ...patch } : user,
+      ),
     );
     recordAudit(action, "user", userId, Object.keys(patch).join(", "));
   }
@@ -4055,10 +5245,15 @@ function App() {
       phone: "",
       termsAccepted: false,
       termsAcceptedAt: "",
-      lastActive: "Pending"
+      lastActive: "Pending",
     };
     setUsers((current) => [newUser, ...current]);
-    recordAudit("user_invited", "user", newUser.id, `${newUser.email} invited as ${roleCopy[role]}.`);
+    recordAudit(
+      "user_invited",
+      "user",
+      newUser.id,
+      `${newUser.email} invited as ${roleCopy[role]}.`,
+    );
   }
 
   if (currentUser?.role === "admin") {
@@ -4123,7 +5318,9 @@ function App() {
         openRequest={openRequest}
         openOrder={openOrder}
         currentUser={currentUser}
-        requireAuth={(reason, after = "") => openAuthModal("login", reason, after)}
+        requireAuth={(reason, after = "") =>
+          openAuthModal("login", reason, after)
+        }
       />
 
       <main className={`workspace workspace-${userView}`}>
@@ -4138,7 +5335,9 @@ function App() {
           openOrders={() => setUserView("orders")}
           notifications={visibleNotifications}
           markNotificationsRead={markVisibleNotificationsRead}
-          openNotification={(requestId) => requestId && openRequest(requestId, "user")}
+          openNotification={(requestId) =>
+            requestId && openRequest(requestId, "user")
+          }
         />
 
         {userView === "start" && (
@@ -4174,8 +5373,8 @@ function App() {
           <OrdersList orders={visibleOrders} openOrder={openOrder} />
         )}
 
-        {userView === "account" && (
-          currentUser ? (
+        {userView === "account" &&
+          (currentUser ? (
             <AccountScreen
               user={currentUser}
               updateUser={(patch, action = "profile_updated") =>
@@ -4197,8 +5396,7 @@ function App() {
               termsError={termsError}
               fileError={fileError}
             />
-          )
-        )}
+          ))}
 
         {userView === "thread" && activeRequest && (
           <RequestWorkspace
@@ -4215,14 +5413,18 @@ function App() {
             confirmRequest={confirmRequest}
             fileError={fileError}
             openOrder={openOrder}
-            linkedOrder={orders.find((order) => order.requestId === activeRequest.id)}
+            linkedOrder={orders.find(
+              (order) => order.requestId === activeRequest.id,
+            )}
           />
         )}
 
         {userView === "order" && activeOrder && (
           <OrderWorkspace
             order={activeOrder}
-            request={requests.find((request) => request.id === activeOrder.requestId)}
+            request={requests.find(
+              (request) => request.id === activeOrder.requestId,
+            )}
             updateOrder={(updater) => updateOrder(activeOrder.id, updater)}
             startPayment={startPayment}
             sendOrderMessage={sendOrderMessage}
@@ -4233,7 +5435,11 @@ function App() {
       {showPayment && (
         <PaymentModal
           price={activeOrder ? orderTotal(activeOrder) : activeRequest.price}
-          total={activeOrder ? orderTotal(activeOrder) : Number(activeRequest.price || 0)}
+          total={
+            activeOrder
+              ? orderTotal(activeOrder)
+              : Number(activeRequest.price || 0)
+          }
           method={paymentMethodById(paymentMethodId)}
           close={() => setShowPayment(false)}
           markPaid={markPaid}
@@ -4250,7 +5456,9 @@ function App() {
           registerCustomer={registerCustomer}
           authUsesSupabase={supabaseConfigured}
           authProviderStatus={authProviderStatus}
-          switchMode={(mode) => setAuthModal((current) => ({ ...current, mode }))}
+          switchMode={(mode) =>
+            setAuthModal((current) => ({ ...current, mode }))
+          }
         />
       )}
     </div>
@@ -4266,7 +5474,7 @@ function AuthModal({
   registerCustomer,
   authUsesSupabase,
   authProviderStatus,
-  switchMode
+  switchMode,
 }) {
   const [loginEmail, setLoginEmail] = useState("");
   const [registerForm, setRegisterForm] = useState({
@@ -4300,7 +5508,7 @@ function AuthModal({
       setNotice({
         email: loginEmail.trim().toLowerCase(),
         message: authResult.message,
-        type: "login"
+        type: "login",
       });
       return;
     }
@@ -4321,7 +5529,7 @@ function AuthModal({
       setNotice({
         email: "Google",
         message: authResult.message,
-        type: "google"
+        type: "google",
       });
     }
   };
@@ -4340,7 +5548,7 @@ function AuthModal({
       setNotice({
         email: registerForm.email.trim().toLowerCase(),
         message: authResult.message,
-        type: "register"
+        type: "register",
       });
       return;
     }
@@ -4352,8 +5560,16 @@ function AuthModal({
 
   return (
     <div className="modal-backdrop auth-backdrop">
-      <section className="payment-modal auth-modal" role="dialog" aria-modal="true">
-        <button className="modal-close" onClick={close} aria-label="Close sign-in">
+      <section
+        className="payment-modal auth-modal"
+        role="dialog"
+        aria-modal="true"
+      >
+        <button
+          className="modal-close"
+          onClick={close}
+          aria-label="Close sign-in"
+        >
           x
         </button>
         <div className="brand-row">
@@ -4361,15 +5577,23 @@ function AuthModal({
           <span>Easy Harness</span>
         </div>
 
-        <h2>{isRegister ? "Create your Easy Harness account" : "Log in to Easy Harness"}</h2>
+        <h2>
+          {isRegister
+            ? "Create your Easy Harness account"
+            : "Log in to Easy Harness"}
+        </h2>
         <p>
-          {reason || (isRegister
-            ? "Use an email address to save requests, quotes, and orders."
-            : "Access saved requests, orders, and account details.")}
+          {reason ||
+            (isRegister
+              ? "Use an email address to save requests, quotes, and orders."
+              : "Access saved requests, orders, and account details.")}
         </p>
 
         {!notice && (
-          <div className="auth-provider-list streamlined" aria-label="Additional sign-in options">
+          <div
+            className="auth-provider-list streamlined"
+            aria-label="Additional sign-in options"
+          >
             <button
               type="button"
               className="auth-provider-button primary-provider"
@@ -4377,7 +5601,9 @@ function AuthModal({
               disabled={loading || !authUsesSupabase || authUnavailable}
             >
               <span>
-                <strong>{loading ? "Opening Google sign-in…" : "Continue with Google"}</strong>
+                <strong>
+                  {loading ? "Opening Google sign-in…" : "Continue with Google"}
+                </strong>
                 <small>Secure account sign-in</small>
               </span>
             </button>
@@ -4390,28 +5616,43 @@ function AuthModal({
               ? "Checking your saved session..."
               : authProviderStatus === "unavailable"
                 ? "Account access is temporarily unavailable. Please try again later."
-              : "Use the email where you want to receive request and order updates."}
+                : "Use the email where you want to receive request and order updates."}
           </p>
         )}
-        {!notice && !authUsesSupabase && authProviderStatus === "unavailable" && (
-          <p className="auth-disclaimer">
-            Account access is temporarily unavailable. Please try again later.
-          </p>
-        )}
+        {!notice &&
+          !authUsesSupabase &&
+          authProviderStatus === "unavailable" && (
+            <p className="auth-disclaimer">
+              Account access is temporarily unavailable. Please try again later.
+            </p>
+          )}
 
         {notice ? (
           <div className="auth-check-email">
-            <div className={`auth-check-icon ${notice.type === "google" ? "loading" : ""}`}>
-              {notice.type === "google" ? <span className="loading-ring" /> : <MailCheck size={30} />}
+            <div
+              className={`auth-check-icon ${notice.type === "google" ? "loading" : ""}`}
+            >
+              {notice.type === "google" ? (
+                <span className="loading-ring" />
+              ) : (
+                <MailCheck size={30} />
+              )}
             </div>
-            <h3>{notice.type === "google" ? "Opening Google sign-in…" : "Check your email"}</h3>
+            <h3>
+              {notice.type === "google"
+                ? "Opening Google sign-in…"
+                : "Check your email"}
+            </h3>
             <p>
               {notice.type === "google" ? (
                 "A secure Google sign-in window should open. Complete sign-in there and return to Easy Harness."
               ) : (
                 <>
-                  We sent a secure link to <strong>{notice.email}</strong>. Open the link to finish
-                  {notice.type === "register" ? " creating your account." : " logging in."}
+                  We sent a secure link to <strong>{notice.email}</strong>. Open
+                  the link to finish
+                  {notice.type === "register"
+                    ? " creating your account."
+                    : " logging in."}
                 </>
               )}
             </p>
@@ -4423,8 +5664,8 @@ function AuthModal({
             )}
             {notice.type !== "google" && (
               <p className="auth-disclaimer">
-                The email can take a minute to arrive. If it does not show up, check spam or use a
-                different email address.
+                The email can take a minute to arrive. If it does not show up,
+                check spam or use a different email address.
               </p>
             )}
             <div className="auth-action-row">
@@ -4457,11 +5698,22 @@ function AuthModal({
               />
             </label>
             {error && <div className="form-error">{error}</div>}
-            <button className="publish-button" onClick={submitLogin} disabled={loading}>
-              {loading ? "Sending..." : authUsesSupabase ? "Send sign-in link" : "Continue with email"}
+            <button
+              className="publish-button"
+              onClick={submitLogin}
+              disabled={loading}
+            >
+              {loading
+                ? "Sending..."
+                : authUsesSupabase
+                  ? "Send sign-in link"
+                  : "Continue with email"}
               <ArrowRight size={18} />
             </button>
-            <button className="text-button" onClick={() => switchMode("register")}>
+            <button
+              className="text-button"
+              onClick={() => switchMode("register")}
+            >
               New to Easy Harness? Create an account
             </button>
           </div>
@@ -4472,7 +5724,9 @@ function AuthModal({
                 <span>Email</span>
                 <input
                   value={registerForm.email}
-                  onChange={(event) => updateRegisterField("email", event.target.value)}
+                  onChange={(event) =>
+                    updateRegisterField("email", event.target.value)
+                  }
                   onKeyDown={(event) => {
                     if (event.key === "Enter") submitRegister();
                   }}
@@ -4483,7 +5737,9 @@ function AuthModal({
                 <span>Nickname</span>
                 <input
                   value={registerForm.nickname}
-                  onChange={(event) => updateRegisterField("nickname", event.target.value)}
+                  onChange={(event) =>
+                    updateRegisterField("nickname", event.target.value)
+                  }
                   onKeyDown={(event) => {
                     if (event.key === "Enter") submitRegister();
                   }}
@@ -4492,11 +5748,20 @@ function AuthModal({
               </label>
             </div>
             <p className="auth-disclaimer">
-              By creating an account, you can save requests and return to orders.
+              By creating an account, you can save requests and return to
+              orders.
             </p>
             {error && <div className="form-error">{error}</div>}
-            <button className="publish-button" onClick={submitRegister} disabled={loading}>
-              {loading ? "Sending..." : authUsesSupabase ? "Send account link" : "Create account"}
+            <button
+              className="publish-button"
+              onClick={submitRegister}
+              disabled={loading}
+            >
+              {loading
+                ? "Sending..."
+                : authUsesSupabase
+                  ? "Send account link"
+                  : "Create account"}
               <ArrowRight size={18} />
             </button>
             <button className="text-button" onClick={() => switchMode("login")}>
@@ -4521,7 +5786,7 @@ function UserSidebar({
   openRequest,
   openOrder,
   currentUser,
-  requireAuth
+  requireAuth,
 }) {
   const showPrivateNav = !!currentUser;
 
@@ -4534,7 +5799,10 @@ function UserSidebar({
   };
 
   return (
-    <aside className={`sidebar ${sidebarOpen ? "open" : "collapsed"}`} aria-label="Navigation">
+    <aside
+      className={`sidebar ${sidebarOpen ? "open" : "collapsed"}`}
+      aria-label="Navigation"
+    >
       <div className="rail-top">
         <button className="logo-button" aria-label="Easy Harness">
           <Cable size={22} />
@@ -4545,7 +5813,11 @@ function UserSidebar({
           aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
           onClick={() => setSidebarOpen((open) => !open)}
         >
-          {sidebarOpen ? <PanelLeftClose size={19} /> : <PanelLeftOpen size={19} />}
+          {sidebarOpen ? (
+            <PanelLeftClose size={19} />
+          ) : (
+            <PanelLeftOpen size={19} />
+          )}
         </button>
       </div>
 
@@ -4580,17 +5852,19 @@ function UserSidebar({
       {sidebarOpen && showPrivateNav && (requests.length || orders.length) ? (
         <div className="draft-list">
           <div className="sidebar-section-title">Recent requests</div>
-          {dedupeRequestsByIdentity(requests).slice(0, 6).map((request) => (
-            <button
-              className={`draft-list-item ${request.id === activeRequest?.id ? "active" : ""}`}
-              key={request.id}
-              onClick={() => openRequest(request.id, "user")}
-            >
-              <strong>{request.id}</strong>
-              <span>{request.title}</span>
-              <small>{statusCopy[request.status]}</small>
-            </button>
-          ))}
+          {dedupeRequestsByIdentity(requests)
+            .slice(0, 6)
+            .map((request) => (
+              <button
+                className={`draft-list-item ${request.id === activeRequest?.id ? "active" : ""}`}
+                key={request.id}
+                onClick={() => openRequest(request.id, "user")}
+              >
+                <strong>{request.id}</strong>
+                <span>{request.title}</span>
+                <small>{statusCopy[request.status]}</small>
+              </button>
+            ))}
           {!!orders.length && (
             <>
               <div className="sidebar-section-title">Recent orders</div>
@@ -4619,7 +5893,11 @@ function UserSidebar({
         ) : (
           <button
             className="rail-user rail-user-button"
-            onClick={() => requireAuth("Log in or create an account to save requests and orders.")}
+            onClick={() =>
+              requireAuth(
+                "Log in or create an account to save requests and orders.",
+              )
+            }
           >
             <UserCircle size={22} />
             {sidebarOpen && <span>Log in</span>}
@@ -4640,11 +5918,13 @@ function TopAccount({
   openOrders,
   notifications,
   markNotificationsRead,
-  openNotification
+  openNotification,
 }) {
   const [notificationsOpen, setNotificationsOpen] = useState(false);
   const [accountOpen, setAccountOpen] = useState(false);
-  const unreadCount = notifications.filter((notification) => !notification.readAt).length;
+  const unreadCount = notifications.filter(
+    (notification) => !notification.readAt,
+  ).length;
 
   const toggleNotifications = () => {
     setNotificationsOpen((current) => !current);
@@ -4677,20 +5957,38 @@ function TopAccount({
 
   return (
     <div className="top-account">
-      <button className="account-icon notification-button" aria-label="Open notifications" onClick={toggleNotifications}>
+      <button
+        className="account-icon notification-button"
+        aria-label="Open notifications"
+        onClick={toggleNotifications}
+      >
         <Bell size={18} />
         {!!unreadCount && <span>{unreadCount}</span>}
       </button>
-      <button className="account-icon" aria-label="Open account menu" onClick={toggleAccount}>
+      <button
+        className="account-icon"
+        aria-label="Open account menu"
+        onClick={toggleAccount}
+      >
         <UserCircle size={20} />
       </button>
-      <button className="signin-button" onClick={toggleAccount}>{user.name}</button>
+      <button className="signin-button" onClick={toggleAccount}>
+        {user.name}
+      </button>
       {accountOpen && (
         <div className="account-menu">
-          <button onClick={() => chooseAccountItem(openAccount)}>Account</button>
-          <button onClick={() => chooseAccountItem(openRequests)}>My requests</button>
-          <button onClick={() => chooseAccountItem(openOrders)}>My orders</button>
-          <button className="danger" onClick={() => chooseAccountItem(signOut)}>Sign out</button>
+          <button onClick={() => chooseAccountItem(openAccount)}>
+            Account
+          </button>
+          <button onClick={() => chooseAccountItem(openRequests)}>
+            My requests
+          </button>
+          <button onClick={() => chooseAccountItem(openOrders)}>
+            My orders
+          </button>
+          <button className="danger" onClick={() => chooseAccountItem(signOut)}>
+            Sign out
+          </button>
         </div>
       )}
       {notificationsOpen && (
@@ -4726,7 +6024,9 @@ function NotificationChannels({ notification }) {
   return (
     <div className="notification-channels">
       {notification.channels.slice(0, 3).map((item) => (
-        <small key={item.channel}>{item.channel}: {item.status}</small>
+        <small key={item.channel}>
+          {item.channel}: {item.status}
+        </small>
       ))}
     </div>
   );
@@ -4762,7 +6062,7 @@ function StartScreen({
   termsChecked,
   setTermsChecked,
   termsError,
-  fileError
+  fileError,
 }) {
   return (
     <section className="start-screen">
@@ -4771,7 +6071,10 @@ function StartScreen({
       </div>
 
       <div className="upload-composer">
-        <button className="attach-button" onClick={() => uploadRef.current?.click()}>
+        <button
+          className="attach-button"
+          onClick={() => uploadRef.current?.click()}
+        >
           <Plus size={21} />
         </button>
         <textarea
@@ -4780,19 +6083,35 @@ function StartScreen({
           placeholder="Describe the connection you need, or upload the files you already have..."
           rows={1}
         />
-        <input ref={uploadRef} type="file" multiple hidden onChange={handleUpload} />
-        <button className="send-button" onClick={startRequest} aria-label="Start request" disabled={submittingRequest}>
+        <input
+          ref={uploadRef}
+          type="file"
+          multiple
+          hidden
+          onChange={handleUpload}
+        />
+        <button
+          className="send-button"
+          onClick={startRequest}
+          aria-label="Start request"
+          disabled={submittingRequest}
+        >
           {submittingRequest ? <Clock3 size={21} /> : <ArrowRight size={21} />}
         </button>
       </div>
 
       <div className="start-actions">
-        <button className="soft-chip" onClick={() => uploadRef.current?.click()}>
+        <button
+          className="soft-chip"
+          onClick={() => uploadRef.current?.click()}
+        >
           <Upload size={16} />
           Upload files
         </button>
         <span className="file-count">
-          {files.length ? `${files.length} file${files.length > 1 ? "s" : ""} attached` : "No files attached"}
+          {files.length
+            ? `${files.length} file${files.length > 1 ? "s" : ""} attached`
+            : "No files attached"}
         </span>
       </div>
 
@@ -4833,7 +6152,10 @@ function ProcessingScreen({ request, progressIndex }) {
             <Sparkles size={25} />
           </div>
           <h1>We're preparing your request</h1>
-          <p>Your upload is in. Easy Harness is organizing the details into a request thread.</p>
+          <p>
+            Your upload is in. Easy Harness is organizing the details into a
+            request thread.
+          </p>
         </div>
 
         <div className="progress-track" aria-label="Processing progress">
@@ -4846,7 +6168,11 @@ function ProcessingScreen({ request, progressIndex }) {
                 key={step}
               >
                 <span className="step-dot">
-                  {done ? <Check size={15} /> : current ? <Clock3 size={15} /> : null}
+                  {done ? (
+                    <Check size={15} />
+                  ) : current ? (
+                    <Clock3 size={15} />
+                  ) : null}
                 </span>
                 <span>{step}</span>
               </div>
@@ -4900,10 +6226,10 @@ function RequestsList({ requests, openRequest }) {
 function OrdersList({ orders, openOrder }) {
   const toPay = orders.filter((order) => order.paymentStatus !== "paid");
   const active = orders.filter(
-    (order) => order.paymentStatus === "paid" && order.status !== "delivered"
+    (order) => order.paymentStatus === "paid" && order.status !== "delivered",
   );
   const completed = orders.filter(
-    (order) => order.paymentStatus === "paid" && order.status === "delivered"
+    (order) => order.paymentStatus === "paid" && order.status === "delivered",
   );
 
   return (
@@ -4917,9 +6243,21 @@ function OrdersList({ orders, openOrder }) {
       <div className="order-list-groups">
         {orders.length ? (
           <>
-            <OrderListGroup title="To pay" orders={toPay} openOrder={openOrder} />
-            <OrderListGroup title="Active orders" orders={active} openOrder={openOrder} />
-            <OrderListGroup title="Completed" orders={completed} openOrder={openOrder} />
+            <OrderListGroup
+              title="To pay"
+              orders={toPay}
+              openOrder={openOrder}
+            />
+            <OrderListGroup
+              title="Active orders"
+              orders={active}
+              openOrder={openOrder}
+            />
+            <OrderListGroup
+              title="Completed"
+              orders={completed}
+              openOrder={openOrder}
+            />
           </>
         ) : (
           <div className="empty-state">
@@ -4954,7 +6292,8 @@ function OrderListGroup({ title, orders, openOrder }) {
                 <small>
                   {order.paymentStatus === "paid"
                     ? `${orderStatusCopy[order.status]} - ${shipping?.carrier || "Shipping pending"}`
-                    : paymentStatusCopy[order.paymentStatus] || orderStatusCopy[order.status]}
+                    : paymentStatusCopy[order.paymentStatus] ||
+                      orderStatusCopy[order.status]}
                 </small>
               </div>
               <div className="request-row-meta">
@@ -4975,7 +6314,7 @@ function AccountScreen({ user, updateUser }) {
     name: user.name || "",
     notifyEmail: preferences.email !== false,
     notifyWhatsapp: !!preferences.whatsapp,
-    notifyInApp: preferences.inApp !== false
+    notifyInApp: preferences.inApp !== false,
   });
   const [saved, setSaved] = useState(false);
 
@@ -4985,7 +6324,7 @@ function AccountScreen({ user, updateUser }) {
       name: user.name || "",
       notifyEmail: nextPreferences.email !== false,
       notifyWhatsapp: !!nextPreferences.whatsapp,
-      notifyInApp: nextPreferences.inApp !== false
+      notifyInApp: nextPreferences.inApp !== false,
     });
     setSaved(false);
   }, [user.id]);
@@ -5001,17 +6340,20 @@ function AccountScreen({ user, updateUser }) {
       notificationPreferences: {
         email: form.notifyEmail,
         whatsapp: form.notifyWhatsapp,
-        inApp: form.notifyInApp
-      }
+        inApp: form.notifyInApp,
+      },
     });
     setSaved(true);
   };
 
   const acceptTerms = () => {
-    updateUser({
-      termsAccepted: true,
-      termsAcceptedAt: todayLabel()
-    }, "upload_terms_accepted");
+    updateUser(
+      {
+        termsAccepted: true,
+        termsAcceptedAt: todayLabel(),
+      },
+      "upload_terms_accepted",
+    );
   };
 
   return (
@@ -5025,7 +6367,9 @@ function AccountScreen({ user, updateUser }) {
       <div className="account-grid">
         <div className="admin-card profile-card">
           <div className="profile-header">
-            <div className="profile-avatar">{initials(form.name || user.email)}</div>
+            <div className="profile-avatar">
+              {initials(form.name || user.email)}
+            </div>
             <div>
               <h2>{form.name || user.email}</h2>
               <p>{user.email}</p>
@@ -5043,11 +6387,7 @@ function AccountScreen({ user, updateUser }) {
             </label>
             <label className="field">
               <span>Email</span>
-              <input
-                value={user.email}
-                disabled
-                readOnly
-              />
+              <input value={user.email} disabled readOnly />
             </label>
           </div>
 
@@ -5058,7 +6398,9 @@ function AccountScreen({ user, updateUser }) {
                 <input
                   type="checkbox"
                   checked={form.notifyEmail}
-                  onChange={(event) => updateField("notifyEmail", event.target.checked)}
+                  onChange={(event) =>
+                    updateField("notifyEmail", event.target.checked)
+                  }
                 />
                 <span>Email updates</span>
               </label>
@@ -5066,7 +6408,9 @@ function AccountScreen({ user, updateUser }) {
                 <input
                   type="checkbox"
                   checked={form.notifyWhatsapp}
-                  onChange={(event) => updateField("notifyWhatsapp", event.target.checked)}
+                  onChange={(event) =>
+                    updateField("notifyWhatsapp", event.target.checked)
+                  }
                 />
                 <span>WhatsApp updates</span>
               </label>
@@ -5074,7 +6418,9 @@ function AccountScreen({ user, updateUser }) {
                 <input
                   type="checkbox"
                   checked={form.notifyInApp}
-                  onChange={(event) => updateField("notifyInApp", event.target.checked)}
+                  onChange={(event) =>
+                    updateField("notifyInApp", event.target.checked)
+                  }
                 />
                 <span>In-app updates</span>
               </label>
@@ -5114,9 +6460,7 @@ function AccountScreen({ user, updateUser }) {
 
           <div className="side-card">
             <h2>Upload terms</h2>
-            <p>
-              Required before submitting files or written request details.
-            </p>
+            <p>Required before submitting files or written request details.</p>
             {user.termsAccepted ? (
               <div className="event-note">
                 <Check size={16} />
@@ -5138,12 +6482,14 @@ function AccountScreen({ user, updateUser }) {
 }
 
 function initials(value) {
-  return value
-    .split(/\s+/)
-    .filter(Boolean)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase())
-    .join("") || "U";
+  return (
+    value
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase())
+      .join("") || "U"
+  );
 }
 
 function RequestWorkspace({
@@ -5160,9 +6506,13 @@ function RequestWorkspace({
   confirmRequest,
   fileError,
   openOrder,
-  linkedOrder
+  linkedOrder,
 }) {
-  const missingItems = request.checkResult?.missing || [];
+  const missingItems =
+    request.checkResult?.user_facing_summary?.needed_next ||
+    request.checkResult?.missing ||
+    request.checkResult?.missing_information ||
+    [];
   const agentActive = agentActivity?.requestId === request.id;
   const shouldShowMissingInfo =
     perspective === "user" &&
@@ -5174,9 +6524,19 @@ function RequestWorkspace({
       <div className="thread-layout">
         <div className="thread-main">
           <ThreadHeader request={request} />
-          {shouldShowMissingInfo && <MissingInfoPrompt items={missingItems} checkResult={request.checkResult} />}
+          {shouldShowMissingInfo && (
+            <MissingInfoPrompt
+              items={missingItems}
+              checkResult={request.checkResult}
+            />
+          )}
           <MessageList request={request} perspective={perspective} />
-          {agentActive && <AgentActivityCard mode={agentActivity.mode} startedAt={agentActivity.startedAt} />}
+          {agentActive && (
+            <AgentActivityCard
+              mode={agentActivity.mode}
+              startedAt={agentActivity.startedAt}
+            />
+          )}
           <UserComposer
             value={composerValue}
             setValue={setComposerValue}
@@ -5201,11 +6561,18 @@ function RequestWorkspace({
 }
 
 function MissingInfoPrompt({ items, checkResult }) {
-  const canPrepareDraft = checkResult?.can_prepare_draft !== false;
-  const title = canPrepareDraft ? "Details Easy Harness still needs" : "Harness details needed";
-  const intro = canPrepareDraft
-    ? "Reply in the thread with what you know. If one detail is uncertain, say that and Easy Harness can help narrow it down."
-    : "Easy Harness needs harness-specific information before preparing a draft. A connector photo, old harness sample, simple sketch, or device models will help.";
+  const draftStatus =
+    checkResult?.draft_meta?.draft_status || checkResult?.intake_stage;
+  const waitingForContext =
+    draftStatus === "needs_harness_context" ||
+    draftStatus === "not_harness_related" ||
+    checkResult?.can_prepare_draft === false;
+  const title = waitingForContext
+    ? "Harness connection details needed"
+    : "A few details would help";
+  const intro = waitingForContext
+    ? "Start with what should connect to what. Connector photos, port photos, an old harness sample, or a simple sketch can help."
+    : "Reply with what you know. Unknown items can be reviewed later by Easy Harness.";
 
   return (
     <section className="missing-info-prompt">
@@ -5215,11 +6582,13 @@ function MissingInfoPrompt({ items, checkResult }) {
       <div>
         <h2>{title}</h2>
         <p>{intro}</p>
-        <div className="missing-info-list">
-          {items.map((item) => (
-            <span key={item}>{formatMissingInfoItem(item)}</span>
-          ))}
-        </div>
+        {!!items.length && (
+          <div className="missing-info-list">
+            {items.slice(0, 3).map((item) => (
+              <span key={item}>{formatMissingInfoItem(item)}</span>
+            ))}
+          </div>
+        )}
       </div>
     </section>
   );
@@ -5238,10 +6607,24 @@ function AgentActivityCard({ mode, startedAt }) {
           <time>{displayTime(startedAt || new Date().toISOString())}</time>
         </div>
         <div className="agent-thinking">
-          <strong>{isInitial ? "Easy Harness is analyzing your request…" : "Easy Harness is thinking through your update…"}</strong>
-          <p>{isInitial ? "Reading your description and uploaded files, then preparing the next intake result." : "Reviewing the new details and updating the intake draft."}</p>
-          <div className="thinking-dots" aria-label="Agent is working"><span></span><span></span><span></span></div>
-          <small>This can take up to 1–2 minutes with the high-reasoning model.</small>
+          <strong>
+            {isInitial
+              ? "Easy Harness is analyzing your request…"
+              : "Easy Harness is thinking through your update…"}
+          </strong>
+          <p>
+            {isInitial
+              ? "Reading your description and uploaded files, then preparing the next intake result."
+              : "Reviewing the new details and updating the intake draft."}
+          </p>
+          <div className="thinking-dots" aria-label="Agent is working">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+          <small>
+            This can take up to 1–2 minutes with the high-reasoning model.
+          </small>
         </div>
       </div>
     </article>
@@ -5252,7 +6635,7 @@ function formatMissingInfoItem(item) {
   const copy = {
     "target quantity": "Target quantity",
     "approximate length": "Approximate length",
-    "electrical rating": "Voltage or current rating"
+    "electrical rating": "Voltage or current rating",
   };
 
   return copy[item] || item;
@@ -5315,7 +6698,11 @@ function MessageCard({ message, perspective, request }) {
     return (
       <article className="thread-event">
         {message.blocks.map((block, index) => (
-          <ContentBlock block={block} request={request} key={`${message.id}-${index}`} />
+          <ContentBlock
+            block={block}
+            request={request}
+            key={`${message.id}-${index}`}
+          />
         ))}
       </article>
     );
@@ -5327,12 +6714,21 @@ function MessageCard({ message, perspective, request }) {
         ? request.customer
         : "You"
       : "Easy Harness";
-  const tone = message.role === "customer" ? "user" : message.tone === "draft" ? "draft" : "easy";
+  const tone =
+    message.role === "customer"
+      ? "user"
+      : message.tone === "draft"
+        ? "draft"
+        : "easy";
 
   return (
     <article className={`message message-${tone}`}>
       <div className="message-avatar">
-        {message.role === "customer" ? <UserCircle size={18} /> : <Cable size={18} />}
+        {message.role === "customer" ? (
+          <UserCircle size={18} />
+        ) : (
+          <Cable size={18} />
+        )}
       </div>
       <div className="message-body">
         <div className="message-meta">
@@ -5340,7 +6736,11 @@ function MessageCard({ message, perspective, request }) {
           <time>{displayTime(message.createdAt)}</time>
         </div>
         {message.blocks.map((block, index) => (
-          <ContentBlock block={block} request={request} key={`${message.id}-${index}`} />
+          <ContentBlock
+            block={block}
+            request={request}
+            key={`${message.id}-${index}`}
+          />
         ))}
       </div>
     </article>
@@ -5348,7 +6748,10 @@ function MessageCard({ message, perspective, request }) {
 }
 
 function formatTextSections(text = "") {
-  const lines = String(text || "").split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
   const sections = [];
   let pendingList = [];
   const flushList = () => {
@@ -5380,7 +6783,9 @@ function FormattedTextBlock({ text }) {
         if (section.type === "list") {
           return (
             <ol key={`list-${index}`}>
-              {section.items.map((item, itemIndex) => <li key={`${index}-${itemIndex}`}>{item}</li>)}
+              {section.items.map((item, itemIndex) => (
+                <li key={`${index}-${itemIndex}`}>{item}</li>
+              ))}
             </ol>
           );
         }
@@ -5415,8 +6820,8 @@ function ContentBlock({ block, request }) {
           <span className="draft-state">{statusCopy[request.status]}</span>
         </div>
         <p>
-          Easy Harness has organized your request into a preliminary draft. It is
-          now in review before release.
+          Easy Harness has organized your request into a preliminary draft. It
+          is now in review before release.
         </p>
       </div>
     );
@@ -5459,7 +6864,7 @@ function UserComposer({
   handleUpload,
   sendMessage,
   sending = false,
-  fileError
+  fileError,
 }) {
   return (
     <div className="composer-shell">
@@ -5472,10 +6877,20 @@ function UserComposer({
       )}
       {fileError && <div className="composer-error">{fileError}</div>}
       <div className="thread-composer">
-        <button className="attach-button" onClick={() => uploadRef.current?.click()} disabled={sending}>
+        <button
+          className="attach-button"
+          onClick={() => uploadRef.current?.click()}
+          disabled={sending}
+        >
           <Plus size={19} />
         </button>
-        <input ref={uploadRef} type="file" multiple hidden onChange={handleUpload} />
+        <input
+          ref={uploadRef}
+          type="file"
+          multiple
+          hidden
+          onChange={handleUpload}
+        />
         <input
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -5486,12 +6901,26 @@ function UserComposer({
             }
           }}
           disabled={sending}
-          placeholder={sending ? "Easy Harness is updating..." : "Add details or upload more files..."}
+          placeholder={
+            sending
+              ? "Easy Harness is updating..."
+              : "Add details or upload more files..."
+          }
         />
-        <button className="composer-tool" onClick={() => uploadRef.current?.click()} aria-label="Attach file" disabled={sending}>
+        <button
+          className="composer-tool"
+          onClick={() => uploadRef.current?.click()}
+          aria-label="Attach file"
+          disabled={sending}
+        >
           <FileText size={18} />
         </button>
-        <button className="send-button small" onClick={sendMessage} aria-label="Send" disabled={sending}>
+        <button
+          className="send-button small"
+          onClick={sendMessage}
+          aria-label="Send"
+          disabled={sending}
+        >
           {sending ? <Clock3 size={17} /> : <Send size={17} />}
         </button>
       </div>
@@ -5499,107 +6928,315 @@ function UserComposer({
   );
 }
 
+function isDraftV01(checkResult) {
+  return checkResult?.schema_version === "easy_harness_draft_v0_1";
+}
+
+function normalizeDraftForView(checkResult = {}, request = {}) {
+  if (isDraftV01(checkResult)) return checkResult;
+  const draft = checkResult?.factory_draft || {};
+  const missing =
+    checkResult?.missing || checkResult?.missing_information || [];
+  const questions =
+    checkResult?.questions || checkResult?.questions_for_user || [];
+  const facts = checkResult?.confirmed_facts || [];
+  const readyForReview =
+    checkResult?.readiness === "ready_for_admin_review" ||
+    checkResult?.status === "accepted" ||
+    request.status === "in_review";
+  const canPrepareDraft = checkResult?.can_prepare_draft !== false;
+  const status = readyForReview
+    ? "ready_for_easy_harness_review"
+    : canPrepareDraft
+      ? "needs_key_clarification"
+      : "needs_harness_context";
+
+  return {
+    schema_version: "legacy_intake_view",
+    draft_meta: {
+      draft_status: status,
+      draft_maturity_level: readyForReview ? 3 : canPrepareDraft ? 2 : 1,
+    },
+    user_intent: {
+      connection_goal:
+        draft.connection_goal || checkResult?.customer_summary || "",
+      intent_type: "unknown",
+      from_side: "unknown",
+      to_side: [],
+    },
+    provided_evidence: [],
+    known_requirements: {},
+    captured_professional_details: {},
+    ai_interpretation: {
+      short_understanding:
+        checkResult?.customer_summary || draft.connection_goal || "",
+    },
+    unknowns: {
+      ask_user_now: [],
+      ask_user_if_likely_known: missing.map((item) => ({
+        field: item,
+        reason: item,
+        question: item,
+      })),
+      easy_harness_review: [],
+      later_supplier_or_engineering_confirmation: [],
+    },
+    risk_flags: [],
+    user_facing_summary: {
+      request_line:
+        draft.connection_goal ||
+        checkResult?.customer_summary ||
+        "Harness request",
+      compact_details: [
+        draft.quantity,
+        draft.estimated_length,
+        draft.environment,
+      ].filter(Boolean),
+      what_we_have: facts.length
+        ? facts.slice(0, 4)
+        : [
+            draft.connection_goal,
+            draft.quantity,
+            draft.estimated_length,
+            draft.environment,
+          ]
+            .filter(Boolean)
+            .slice(0, 4),
+      needed_next: (questions.length ? questions : missing)
+        .slice(0, 3)
+        .map(formatMissingInfoItem),
+      next_step: readyForReview
+        ? "Easy Harness will review the files and remaining technical details."
+        : "Reply with what you know. Unknown items can be reviewed later.",
+    },
+    draft_closure: {
+      can_close_user_draft: readyForReview,
+      closure_status: status,
+      questions_to_ask: (questions.length ? questions : missing).slice(0, 3),
+      customer_message_type: readyForReview
+        ? "ready_for_review"
+        : "ask_key_details",
+    },
+  };
+}
+
+function draftStatusTitle(status, requestStatus) {
+  const copy = {
+    not_harness_related: "Needs harness-related information",
+    needs_harness_context: "Waiting for connection details",
+    needs_key_clarification: "A few details needed",
+    ready_for_easy_harness_review: "Ready for Easy Harness review",
+    closed_for_easy_harness_review: "In review",
+  };
+  return copy[status] || statusCopy[requestStatus] || "Request received";
+}
+
+function draftStatusTone(status) {
+  if (
+    status === "ready_for_easy_harness_review" ||
+    status === "closed_for_easy_harness_review"
+  )
+    return "ready";
+  if (status === "not_harness_related" || status === "needs_harness_context")
+    return "waiting";
+  return "needs-details";
+}
+
+function unknownItemLabel(item) {
+  if (typeof item === "string") return formatMissingInfoItem(item);
+  return formatMissingInfoItem(
+    item?.question || item?.field || item?.reason || "Review item",
+  );
+}
+
+function detailValueLabel(value) {
+  if (!value) return "";
+  if (typeof value === "string") return value;
+  if (typeof value === "object")
+    return value.value && value.value !== "unknown" ? value.value : "";
+  return String(value);
+}
+
+function knownRequirementItems(knownRequirements = {}) {
+  return Object.entries(knownRequirements)
+    .map(([key, value]) => {
+      const label = detailValueLabel(value);
+      if (!label) return null;
+      return `${key.replaceAll("_", " ")}: ${label}`;
+    })
+    .filter(Boolean)
+    .slice(0, 6);
+}
+
+function unknownsByOwner(draft) {
+  const unknowns = draft?.unknowns || {};
+  return [
+    ["Ask user now", unknowns.ask_user_now || []],
+    ["Ask if known", unknowns.ask_user_if_likely_known || []],
+    ["Easy Harness review", unknowns.easy_harness_review || []],
+    [
+      "Later engineering",
+      unknowns.later_supplier_or_engineering_confirmation || [],
+    ],
+  ].filter(([, items]) => Array.isArray(items) && items.length);
+}
+
 function IntakeDraftCard({ checkResult, request }) {
-  const hasDraft =
+  const hasDraft = Boolean(
+    checkResult?.schema_version ||
     checkResult?.adapter === "ai-intake-agent-v1" ||
     checkResult?.adapter === "deepseek-intake-agent-v1" ||
+    checkResult?.adapter === "deepseek-draft-closing-agent-v0-1" ||
     checkResult?.factory_draft ||
     checkResult?.customer_summary ||
     checkResult?.confirmed_facts?.length ||
-    checkResult?.missing?.length;
+    checkResult?.missing?.length,
+  );
 
   if (!hasDraft) {
     return (
       <div className="side-card request-summary-card quiet">
         <span className="summary-kicker">Current status</span>
         <h2>{statusCopy[request.status] || "Request received"}</h2>
-        <p>Easy Harness will show the request summary here after the intake check finishes.</p>
+        <p>
+          Easy Harness will show the request summary here after the intake check
+          finishes.
+        </p>
       </div>
     );
   }
 
-  const missing = checkResult?.missing || checkResult?.missing_information || [];
-  const questions = checkResult?.questions || checkResult?.questions_for_user || [];
-  const facts = checkResult?.confirmed_facts || [];
-  const draft = checkResult?.factory_draft || {};
-  const canPrepareDraft = checkResult?.can_prepare_draft !== false;
-  const readyForReview = checkResult?.readiness === "ready_for_admin_review" || checkResult?.status === "accepted" || request.status === "in_review";
-  const title = readyForReview
-    ? "Ready for Easy Harness review"
-    : canPrepareDraft
-      ? "Details needed"
-      : "Waiting for harness details";
-  const nextAction = readyForReview
-    ? "Easy Harness will prepare the next confirmation step."
-    : missing.length
-      ? "Reply in the thread with the missing details you know."
-      : "Add the connection goal, connector photos, or an old harness sample.";
-  const knownItems = facts.length ? facts.slice(0, 3) : [draft.connection_goal, draft.quantity, draft.estimated_length].filter(Boolean).slice(0, 3);
-  const missingItems = missing.slice(0, 3).map(formatMissingInfoItem);
-  const extraMissingCount = Math.max(0, missing.length - missingItems.length);
-  const extraQuestionCount = Math.max(0, questions.length - 3);
+  const draft = normalizeDraftForView(checkResult, request);
+  const status = draft.draft_meta?.draft_status || "needs_key_clarification";
+  const summary = draft.user_facing_summary || {};
+  const requestLine =
+    summary.request_line ||
+    draft.user_intent?.connection_goal ||
+    draft.ai_interpretation?.short_understanding ||
+    "Harness request";
+  const compactDetails = summary.compact_details || [];
+  const whatWeHave = (
+    summary.what_we_have?.length
+      ? summary.what_we_have
+      : knownRequirementItems(draft.known_requirements)
+  ).slice(0, 4);
+  const neededNext = (summary.needed_next || []).slice(0, 3);
+  const evidence = draft.provided_evidence || [];
+  const riskFlags = draft.risk_flags || [];
+  const fullUnknowns = unknownsByOwner(draft);
 
   return (
-    <div className="side-card request-summary-card">
+    <div
+      className={`side-card request-summary-card draft-status-${draftStatusTone(status)}`}
+    >
       <span className="summary-kicker">Current status</span>
-      <h2>{title}</h2>
-      <p className="summary-next-action">{nextAction}</p>
-
-      {checkResult?.customer_summary && (
-        <div className="summary-section">
-          <span>Summary</span>
-          <p>{checkResult.customer_summary}</p>
-        </div>
+      <h2>{draftStatusTitle(status, request.status)}</h2>
+      {summary.next_step && (
+        <p className="summary-next-action">{summary.next_step}</p>
       )}
 
-      {draft.connection_goal && (
-        <div className="summary-section compact-meta">
-          <span>Goal</span>
-          <strong>{draft.connection_goal}</strong>
-        </div>
-      )}
+      <div className="summary-section compact-meta">
+        <span>Request</span>
+        <strong>{requestLine}</strong>
+        {!!compactDetails.length && (
+          <div className="summary-chips">
+            {compactDetails.slice(0, 5).map((item) => (
+              <em key={item}>{item}</em>
+            ))}
+          </div>
+        )}
+      </div>
 
-      {!!knownItems.length && (
+      {!!whatWeHave.length && (
         <div className="summary-section">
-          <span>Known so far</span>
+          <span>What we have</span>
           <ul>
-            {knownItems.map((item) => <li key={item}>{item}</li>)}
+            {whatWeHave.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
           </ul>
         </div>
       )}
 
-      {!!missingItems.length && (
+      {!!neededNext.length && (
         <div className="summary-section warning">
           <span>Needed next</span>
           <ul>
-            {missingItems.map((item) => <li key={item}>{item}</li>)}
+            {neededNext.map((item) => (
+              <li key={item}>{formatMissingInfoItem(item)}</li>
+            ))}
           </ul>
-          {extraMissingCount > 0 && <small>+{extraMissingCount} more detail{extraMissingCount > 1 ? "s" : ""} in the full draft.</small>}
         </div>
       )}
 
-      {(!!questions.length || !!missing.length || !!facts.length) && (
-        <details className="full-draft-details">
-          <summary>View full intake details</summary>
-          <div className="full-draft-content">
-            {draft.quantity && <p><strong>Quantity:</strong> {draft.quantity}</p>}
-            {draft.estimated_length && <p><strong>Length:</strong> {draft.estimated_length}</p>}
-            {!!missing.length && (
-              <div>
-                <strong>Still needed</strong>
-                <ul>{missing.map((item) => <li key={item}>{formatMissingInfoItem(item)}</li>)}</ul>
-              </div>
-            )}
-            {!!questions.length && (
-              <div>
-                <strong>Questions asked</strong>
-                <ul>{questions.slice(0, 8).map((item) => <li key={item}>{item}</li>)}</ul>
-                {extraQuestionCount > 0 && <small>Additional questions are kept in the thread.</small>}
-              </div>
-            )}
-          </div>
-        </details>
+      {!!evidence.length && (
+        <div className="summary-section">
+          <span>Files received</span>
+          <ul>
+            {evidence.slice(0, 4).map((item, index) => (
+              <li key={`${item.filename || item.type}-${index}`}>
+                {item.filename || item.content_summary || item.type}
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
+
+      <details className="full-draft-details">
+        <summary>View full request details</summary>
+        <div className="full-draft-content">
+          <div className="full-detail-section">
+            <strong>Intent</strong>
+            <p>
+              {draft.user_intent?.desired_outcome ||
+                draft.ai_interpretation?.short_understanding ||
+                requestLine}
+            </p>
+          </div>
+
+          {!!knownRequirementItems(draft.known_requirements).length && (
+            <div className="full-detail-section">
+              <strong>Known details</strong>
+              <ul>
+                {knownRequirementItems(draft.known_requirements).map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {!!fullUnknowns.length && (
+            <div className="full-detail-section unknowns-by-owner">
+              <strong>Open items by owner</strong>
+              {fullUnknowns.map(([label, items]) => (
+                <div key={label} className="unknown-owner-group">
+                  <span>{label}</span>
+                  <ul>
+                    {items.slice(0, 6).map((item, index) => (
+                      <li key={`${label}-${index}`}>
+                        {unknownItemLabel(item)}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {!!riskFlags.length && (
+            <div className="full-detail-section">
+              <strong>Review flags</strong>
+              <ul>
+                {riskFlags.slice(0, 6).map((item, index) => (
+                  <li key={`${item.type || "risk"}-${index}`}>
+                    {item.description || item.type}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      </details>
     </div>
   );
 }
@@ -5619,7 +7256,11 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
         <div className="side-card price-card compact-price-card">
           <div className="price-header">
             <span>Harness price</span>
-            {request.price ? <CircleDollarSign size={19} /> : <Clock3 size={19} />}
+            {request.price ? (
+              <CircleDollarSign size={19} />
+            ) : (
+              <Clock3 size={19} />
+            )}
           </div>
           <div className={`price-value ${request.price ? "ready" : ""}`}>
             {request.price ? `$${request.price}` : "In review"}
@@ -5632,7 +7273,10 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
           {quote && (
             <div className="quote-basis">
               <span>Quote v{quote.version}</span>
-              <p>Harness assembly only. Shipping and import charges are handled on the order page.</p>
+              <p>
+                Harness assembly only. Shipping and import charges are handled
+                on the order page.
+              </p>
               <small>Valid until {quote.validUntil}</small>
             </div>
           )}
@@ -5648,7 +7292,11 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
             }}
           >
             {ready || hasOrder ? <Check size={17} /> : <Lock size={17} />}
-            {linkedOrder ? "Open order" : ready ? "Confirm draft" : "Confirm locked"}
+            {linkedOrder
+              ? "Open order"
+              : ready
+                ? "Confirm draft"
+                : "Confirm locked"}
           </button>
         </div>
       )}
@@ -5656,7 +7304,13 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
   );
 }
 
-function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMessage }) {
+function OrderWorkspace({
+  order,
+  request,
+  updateOrder,
+  startPayment,
+  sendOrderMessage,
+}) {
   const shipping = selectedShipping(order);
   const completeAddress = isAddressComplete(order.address);
   const total = orderTotal(order);
@@ -5665,7 +7319,7 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
   const providerPending = order.paymentStatus === "payment_pending";
   const canPay = completeAddress && shipping && !isPaid;
   const [showBusinessFields, setShowBusinessFields] = useState(
-    Boolean(order.address.company || order.address.taxId)
+    Boolean(order.address.company || order.address.taxId),
   );
 
   useEffect(() => {
@@ -5675,7 +7329,13 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
   }, [order.id, order.address.company, order.address.taxId]);
 
   if (isPaid) {
-    return <PaidOrderStatusView order={order} request={request} sendOrderMessage={sendOrderMessage} />;
+    return (
+      <PaidOrderStatusView
+        order={order}
+        request={request}
+        sendOrderMessage={sendOrderMessage}
+      />
+    );
   }
 
   const updateAddress = (field, value) => {
@@ -5683,9 +7343,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
       ...current,
       address: {
         ...current.address,
-        [field]: value
+        [field]: value,
       },
-      updated: "Just now"
+      updated: "Just now",
     }));
   };
 
@@ -5693,7 +7353,7 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
     updateOrder((current) => ({
       ...current,
       selectedShippingId: shippingId,
-      updated: "Just now"
+      updated: "Just now",
     }));
   };
 
@@ -5706,7 +7366,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
               <div>
                 <span className="eyebrow">{isPaid ? "Order" : "Checkout"}</span>
                 <h1>{isPaid ? "Order details" : "Complete your order"}</h1>
-                <p>{order.id} from {order.requestId}</p>
+                <p>
+                  {order.id} from {order.requestId}
+                </p>
               </div>
               <StatusBadge status={order.status} />
             </div>
@@ -5758,7 +7420,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>Email</span>
                 <input
                   value={order.address.email}
-                  onChange={(event) => updateAddress("email", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("email", event.target.value)
+                  }
                   placeholder="email@example.com"
                   disabled={isPaid}
                 />
@@ -5767,7 +7431,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>Recipient</span>
                 <input
                   value={order.address.name}
-                  onChange={(event) => updateAddress("name", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("name", event.target.value)
+                  }
                   placeholder="Full name"
                   disabled={isPaid}
                 />
@@ -5776,12 +7442,16 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>Country / region</span>
                 <select
                   value={order.address.country}
-                  onChange={(event) => updateAddress("country", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("country", event.target.value)
+                  }
                   disabled={isPaid}
                 >
                   <option value="">Select country</option>
                   {checkoutCountries.map((country) => (
-                    <option value={country} key={country}>{country}</option>
+                    <option value={country} key={country}>
+                      {country}
+                    </option>
                   ))}
                 </select>
               </label>
@@ -5789,7 +7459,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>Address line 1</span>
                 <input
                   value={order.address.line1}
-                  onChange={(event) => updateAddress("line1", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("line1", event.target.value)
+                  }
                   placeholder="Street address"
                   disabled={isPaid}
                 />
@@ -5798,7 +7470,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>Address line 2</span>
                 <input
                   value={order.address.line2 || ""}
-                  onChange={(event) => updateAddress("line2", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("line2", event.target.value)
+                  }
                   placeholder="Apartment, suite, building, floor"
                   disabled={isPaid}
                 />
@@ -5807,7 +7481,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>City</span>
                 <input
                   value={order.address.city}
-                  onChange={(event) => updateAddress("city", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("city", event.target.value)
+                  }
                   placeholder="City"
                   disabled={isPaid}
                 />
@@ -5816,7 +7492,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>State / region</span>
                 <input
                   value={order.address.region}
-                  onChange={(event) => updateAddress("region", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("region", event.target.value)
+                  }
                   placeholder="State or region"
                   disabled={isPaid}
                 />
@@ -5825,7 +7503,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>Postal code</span>
                 <input
                   value={order.address.postalCode}
-                  onChange={(event) => updateAddress("postalCode", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("postalCode", event.target.value)
+                  }
                   placeholder="Postal code"
                   disabled={isPaid}
                 />
@@ -5834,7 +7514,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <span>Phone</span>
                 <input
                   value={order.address.phone}
-                  onChange={(event) => updateAddress("phone", event.target.value)}
+                  onChange={(event) =>
+                    updateAddress("phone", event.target.value)
+                  }
                   placeholder="Phone number"
                   disabled={isPaid}
                 />
@@ -5846,9 +7528,14 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                   onClick={() => setShowBusinessFields((current) => !current)}
                   disabled={isPaid}
                 >
-                  {showBusinessFields ? "Hide business import details" : "Add business import details"}
+                  {showBusinessFields
+                    ? "Hide business import details"
+                    : "Add business import details"}
                 </button>
-                <span>Only needed if the carrier or customs asks for a company or tax number.</span>
+                <span>
+                  Only needed if the carrier or customs asks for a company or
+                  tax number.
+                </span>
               </div>
               {showBusinessFields && (
                 <>
@@ -5856,7 +7543,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                     <span>Company (optional)</span>
                     <input
                       value={order.address.company}
-                      onChange={(event) => updateAddress("company", event.target.value)}
+                      onChange={(event) =>
+                        updateAddress("company", event.target.value)
+                      }
                       placeholder="Company name"
                       disabled={isPaid}
                     />
@@ -5865,7 +7554,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                     <span>Tax ID (optional)</span>
                     <input
                       value={order.address.taxId || ""}
-                      onChange={(event) => updateAddress("taxId", event.target.value)}
+                      onChange={(event) =>
+                        updateAddress("taxId", event.target.value)
+                      }
                       placeholder="VAT, EORI, or local tax number"
                       disabled={isPaid}
                     />
@@ -5881,9 +7572,14 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
               <h2>Shipping method</h2>
             </div>
             <div className="origin-row">
-              <span>Ships from {order.origin.city}, {order.origin.country}</span>
               <span>
-                Estimated package: {order.packageEstimate.weightKg} kg, {order.packageEstimate.lengthCm} x {order.packageEstimate.widthCm} x {order.packageEstimate.heightCm} cm
+                Ships from {order.origin.city}, {order.origin.country}
+              </span>
+              <span>
+                Estimated package: {order.packageEstimate.weightKg} kg,{" "}
+                {order.packageEstimate.lengthCm} x{" "}
+                {order.packageEstimate.widthCm} x{" "}
+                {order.packageEstimate.heightCm} cm
               </span>
             </div>
             <div className="shipping-options">
@@ -5897,7 +7593,9 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                   <span className="radio-dot" aria-hidden="true" />
                   <span>
                     <strong>{option.level}</strong>
-                    <small>{option.carrier} - {option.service}</small>
+                    <small>
+                      {option.carrier} - {option.service}
+                    </small>
                     <small>{option.source}</small>
                   </span>
                   <span>
@@ -5908,11 +7606,13 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
               ))}
             </div>
             <div className="duties-note">
-              <strong>Import duties / taxes are not collected at checkout</strong>
+              <strong>
+                Import duties / taxes are not collected at checkout
+              </strong>
               <p>
                 Ships under DAP from Shenzhen, China. Customs, VAT, duties, or
-                carrier brokerage may be collected by the carrier or local authority
-                before delivery.
+                carrier brokerage may be collected by the carrier or local
+                authority before delivery.
               </p>
             </div>
           </section>
@@ -5923,10 +7623,26 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
               <h2>Before you pay</h2>
             </div>
             <div className="policy-list">
-              <p><strong>Final confirmation:</strong> Payment confirms the harness request, latest Easy Harness update, delivery address, selected shipping method, and DAP import-tax boundary.</p>
-              <p><strong>Address changes:</strong> Ask Easy Harness in the order messages before production starts if the delivery address needs to change.</p>
-              <p><strong>Payment timing:</strong> Card and wallet orders move forward after provider confirmation. Bank transfer orders move forward after receipt is confirmed.</p>
-              <p><strong>Cancellation:</strong> You can ask to cancel before production starts. Once production starts, the harness is made to the confirmed request.</p>
+              <p>
+                <strong>Final confirmation:</strong> Payment confirms the
+                harness request, latest Easy Harness update, delivery address,
+                selected shipping method, and DAP import-tax boundary.
+              </p>
+              <p>
+                <strong>Address changes:</strong> Ask Easy Harness in the order
+                messages before production starts if the delivery address needs
+                to change.
+              </p>
+              <p>
+                <strong>Payment timing:</strong> Card and wallet orders move
+                forward after provider confirmation. Bank transfer orders move
+                forward after receipt is confirmed.
+              </p>
+              <p>
+                <strong>Cancellation:</strong> You can ask to cancel before
+                production starts. Once production starts, the harness is made
+                to the confirmed request.
+              </p>
             </div>
           </section>
 
@@ -5936,10 +7652,26 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
               <h2>After-sales policy</h2>
             </div>
             <div className="policy-list">
-              <p><strong>Before production:</strong> You can request small corrections after payment before the order enters production.</p>
-              <p><strong>Custom-made item:</strong> Change-of-mind returns are not available once production starts because the harness is made to the confirmed request.</p>
-              <p><strong>Quality support:</strong> Report manufacturing defects, wrong assembly, or shipping damage within 7 days of delivery with photos or video.</p>
-              <p><strong>Resolution:</strong> Confirmed Easy Harness production faults are eligible for repair, remake, or replacement shipment. Customer-supplied specification errors are handled as paid revisions.</p>
+              <p>
+                <strong>Before production:</strong> You can request small
+                corrections after payment before the order enters production.
+              </p>
+              <p>
+                <strong>Custom-made item:</strong> Change-of-mind returns are
+                not available once production starts because the harness is made
+                to the confirmed request.
+              </p>
+              <p>
+                <strong>Quality support:</strong> Report manufacturing defects,
+                wrong assembly, or shipping damage within 7 days of delivery
+                with photos or video.
+              </p>
+              <p>
+                <strong>Resolution:</strong> Confirmed Easy Harness production
+                faults are eligible for repair, remake, or replacement shipment.
+                Customer-supplied specification errors are handled as paid
+                revisions.
+              </p>
             </div>
           </section>
 
@@ -5960,14 +7692,20 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
             <div className="summary-product">
               <strong>{order.title}</strong>
               <small>Production lead time: {order.productionLeadTime}</small>
-              <small>Estimated completion: {order.estimatedProductionComplete}</small>
+              <small>
+                Estimated completion: {order.estimatedProductionComplete}
+              </small>
             </div>
             <PriceLine label="Harness" value={order.harnessPrice} />
             <PriceLine
               label={shipping ? `${shipping.level} shipping` : "Shipping"}
               value={shipping?.price || 0}
             />
-            <PriceLine label="Import duties / taxes" value="Not collected" muted />
+            <PriceLine
+              label="Import duties / taxes"
+              value="Not collected"
+              muted
+            />
             <div className="total-line">
               <span>Total due</span>
               <strong>${total}</strong>
@@ -5977,20 +7715,24 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
                 <BadgeCheck size={18} />
                 <div>
                   <strong>Payment received</strong>
-                  <span>{order.paymentProvider || "Payment provider"} - {order.paidAt || "Confirmed"}</span>
+                  <span>
+                    {order.paymentProvider || "Payment provider"} -{" "}
+                    {order.paidAt || "Confirmed"}
+                  </span>
                 </div>
               </div>
             ) : (
               <>
-                {transferPending && (
-                  <BankTransferInstructions order={order} />
-                )}
+                {transferPending && <BankTransferInstructions order={order} />}
                 {providerPending && (
                   <div className="payment-state">
                     <Clock3 size={18} />
                     <div>
                       <strong>Payment session open</strong>
-                      <span>Complete the hosted {order.paymentProvider} checkout to continue.</span>
+                      <span>
+                        Complete the hosted {order.paymentProvider} checkout to
+                        continue.
+                      </span>
                     </div>
                   </div>
                 )}
@@ -6019,7 +7761,14 @@ function OrderWorkspace({ order, request, updateOrder, startPayment, sendOrderMe
 }
 
 function isAddressComplete(address) {
-  return Boolean(address.name && address.email && address.line1 && address.city && address.country && address.postalCode);
+  return Boolean(
+    address.name &&
+    address.email &&
+    address.line1 &&
+    address.city &&
+    address.country &&
+    address.postalCode,
+  );
 }
 
 function OrderMessagePanel({
@@ -6027,7 +7776,7 @@ function OrderMessagePanel({
   sendOrderMessage,
   authorRole = "customer",
   title = "Order messages",
-  prompt = "Ask Easy Harness about this order..."
+  prompt = "Ask Easy Harness about this order...",
 }) {
   const [draft, setDraft] = useState("");
   const messages = order.supportMessages || [];
@@ -6046,8 +7795,13 @@ function OrderMessagePanel({
       <div className="order-message-list">
         {messages.length ? (
           messages.map((message) => (
-            <div className={`order-message ${message.authorRole}`} key={message.id}>
-              <strong>{message.authorRole === "customer" ? "You" : "Easy Harness"}</strong>
+            <div
+              className={`order-message ${message.authorRole}`}
+              key={message.id}
+            >
+              <strong>
+                {message.authorRole === "customer" ? "You" : "Easy Harness"}
+              </strong>
               <p>{message.body}</p>
               <small>{message.createdAt}</small>
             </div>
@@ -6067,7 +7821,12 @@ function OrderMessagePanel({
           }}
           placeholder={prompt}
         />
-        <button className="send-button small" type="button" onClick={submit} aria-label="Send order message">
+        <button
+          className="send-button small"
+          type="button"
+          onClick={submit}
+          aria-label="Send order message"
+        >
           <Send size={17} />
         </button>
       </div>
@@ -6138,20 +7897,40 @@ function PaidOrderStatusView({ order, request, sendOrderMessage }) {
             <div className="tracking-summary">
               <div>
                 <span className="eyebrow">Shipping method</span>
-                <strong>{shipping ? `${shipping.level} - ${shipping.carrier}` : "Not selected"}</strong>
-                <p>{shipping ? `${shipping.service}, ${shipping.days}` : "Shipping service will appear here."}</p>
+                <strong>
+                  {shipping
+                    ? `${shipping.level} - ${shipping.carrier}`
+                    : "Not selected"}
+                </strong>
+                <p>
+                  {shipping
+                    ? `${shipping.service}, ${shipping.days}`
+                    : "Shipping service will appear here."}
+                </p>
               </div>
               <div>
                 <span className="eyebrow">Tracking</span>
                 <strong>{order.trackingNumber || logistics.title}</strong>
-                <p>{order.trackingNumber ? logistics.body : "Tracking number appears after handoff to carrier."}</p>
+                <p>
+                  {order.trackingNumber
+                    ? logistics.body
+                    : "Tracking number appears after handoff to carrier."}
+                </p>
               </div>
             </div>
             {order.trackingNumber && (
               <div className="tracking-link-row">
-                <span>{order.trackingSource === "api" ? "API tracking linked" : "Manual carrier link"}</span>
+                <span>
+                  {order.trackingSource === "api"
+                    ? "API tracking linked"
+                    : "Manual carrier link"}
+                </span>
                 {order.carrierTrackingUrl ? (
-                  <a href={order.carrierTrackingUrl} target="_blank" rel="noreferrer">
+                  <a
+                    href={order.carrierTrackingUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
                     Open carrier tracking
                   </a>
                 ) : (
@@ -6206,10 +7985,17 @@ function PaidOrderStatusView({ order, request, sendOrderMessage }) {
             <div className="readout-grid">
               <Readout label="Recipient" value={order.address.name} />
               <Readout label="Email" value={order.address.email} />
-              <Readout label="Phone" value={order.address.phone || "Not provided"} />
+              <Readout
+                label="Phone"
+                value={order.address.phone || "Not provided"}
+              />
               <Readout label="Address" value={addressLines.join(", ")} wide />
-              {order.address.company && <Readout label="Company" value={order.address.company} />}
-              {order.address.taxId && <Readout label="Import tax ID" value={order.address.taxId} />}
+              {order.address.company && (
+                <Readout label="Company" value={order.address.company} />
+              )}
+              {order.address.taxId && (
+                <Readout label="Import tax ID" value={order.address.taxId} />
+              )}
               <Readout label="Incoterm" value={order.incoterm} />
             </div>
           </section>
@@ -6230,7 +8016,9 @@ function PaidOrderStatusView({ order, request, sendOrderMessage }) {
             </div>
             <div className="summary-product">
               <strong>{order.title}</strong>
-              <small>Paid by {order.paymentProvider || "payment provider"}</small>
+              <small>
+                Paid by {order.paymentProvider || "payment provider"}
+              </small>
               <small>{order.paidAt || "Payment confirmed"}</small>
             </div>
             <PriceLine label="Harness" value={order.harnessPrice} />
@@ -6238,7 +8026,11 @@ function PaidOrderStatusView({ order, request, sendOrderMessage }) {
               label={shipping ? `${shipping.level} shipping` : "Shipping"}
               value={shipping?.price || 0}
             />
-            <PriceLine label="Import duties / taxes" value="Not collected" muted />
+            <PriceLine
+              label="Import duties / taxes"
+              value="Not collected"
+              muted
+            />
             <div className="total-line">
               <span>Paid total</span>
               <strong>${total}</strong>
@@ -6255,8 +8047,8 @@ function PaidOrderStatusView({ order, request, sendOrderMessage }) {
           <div className="side-card">
             <h2>Need help?</h2>
             <p className="checkout-note">
-              Use this order ID when contacting Easy Harness about address changes,
-              production timing, or delivery support.
+              Use this order ID when contacting Easy Harness about address
+              changes, production timing, or delivery support.
             </p>
             <a
               className="secondary-action support-link"
@@ -6285,18 +8077,18 @@ function productionStages() {
     {
       id: "scheduled",
       label: "Scheduled",
-      detail: "Order is queued for production."
+      detail: "Order is queued for production.",
     },
     {
       id: "in_production",
       label: "In production",
-      detail: "Harness assembly is underway."
+      detail: "Harness assembly is underway.",
     },
     {
       id: "ready_to_ship",
       label: "Ready to ship",
-      detail: "Production is complete and waiting for carrier handoff."
-    }
+      detail: "Production is complete and waiting for carrier handoff.",
+    },
   ];
 }
 
@@ -6304,40 +8096,55 @@ function productionStatusInfo(order) {
   if (order.status === "delivered") {
     return {
       title: "Delivered",
-      body: "The shipment has been delivered."
+      body: "The shipment has been delivered.",
     };
   }
   if (order.status === "shipped") {
     return {
       title: "Handed to carrier",
-      body: "Production is complete. Follow the carrier tracking updates below."
+      body: "Production is complete. Follow the carrier tracking updates below.",
     };
   }
   if (order.status === "ready_to_ship") {
     return {
       title: "Ready to ship",
-      body: "The harness is finished and waiting for carrier handoff."
+      body: "The harness is finished and waiting for carrier handoff.",
     };
   }
   if (order.status === "in_production") {
     return {
       title: "In production",
-      body: "Your harness is being made according to the confirmed request."
+      body: "Your harness is being made according to the confirmed request.",
     };
   }
   return {
     title: "Scheduled",
-    body: "Payment has been received and the order is queued for production."
+    body: "Payment has been received and the order is queued for production.",
   };
 }
 
 function productionStageState(status, stageId) {
-  const order = ["scheduled", "in_production", "ready_to_ship", "shipped", "delivered"];
+  const order = [
+    "scheduled",
+    "in_production",
+    "ready_to_ship",
+    "shipped",
+    "delivered",
+  ];
   const stageOrder = ["scheduled", "in_production", "ready_to_ship"];
   const statusIndex = order.indexOf(status);
   const stageIndex = stageOrder.indexOf(stageId);
-  if (statusIndex > stageIndex || status === "shipped" || status === "delivered") return "done";
-  if (statusIndex === stageIndex || (statusIndex < 0 && stageId === "scheduled")) return "current";
+  if (
+    statusIndex > stageIndex ||
+    status === "shipped" ||
+    status === "delivered"
+  )
+    return "done";
+  if (
+    statusIndex === stageIndex ||
+    (statusIndex < 0 && stageId === "scheduled")
+  )
+    return "current";
   return "pending";
 }
 
@@ -6345,18 +8152,18 @@ function logisticsStatusInfo(order) {
   if (order.status === "delivered") {
     return {
       title: "Delivered",
-      body: "Carrier delivery is complete."
+      body: "Carrier delivery is complete.",
     };
   }
   if (order.status === "shipped") {
     return {
       title: "In transit",
-      body: "The shipment is with the carrier."
+      body: "The shipment is with the carrier.",
     };
   }
   return {
     title: "Not shipped yet",
-    body: "Tracking will start after carrier handoff."
+    body: "Tracking will start after carrier handoff.",
   };
 }
 
@@ -6364,23 +8171,43 @@ function trackingEventsForOrder(order) {
   if (order.trackingEvents?.length) return order.trackingEvents;
   if (order.status === "delivered") {
     return [
-      { status: "Delivered", time: "Latest", detail: "Shipment delivered by carrier." },
-      { status: "In transit", time: "Earlier", detail: "Shipment moved through the carrier network." },
-      { status: "Label created", time: "Earlier", detail: "Tracking number was created." }
+      {
+        status: "Delivered",
+        time: "Latest",
+        detail: "Shipment delivered by carrier.",
+      },
+      {
+        status: "In transit",
+        time: "Earlier",
+        detail: "Shipment moved through the carrier network.",
+      },
+      {
+        status: "Label created",
+        time: "Earlier",
+        detail: "Tracking number was created.",
+      },
     ];
   }
   if (order.status === "shipped") {
     return [
-      { status: "In transit", time: "Latest", detail: "Carrier tracking is active." },
-      { status: "Label created", time: "Earlier", detail: "Tracking number was created." }
+      {
+        status: "In transit",
+        time: "Latest",
+        detail: "Carrier tracking is active.",
+      },
+      {
+        status: "Label created",
+        time: "Earlier",
+        detail: "Tracking number was created.",
+      },
     ];
   }
   return [
     {
       status: "Awaiting carrier handoff",
       time: "Pending",
-      detail: "Carrier tracking will appear after the order ships."
-    }
+      detail: "Carrier tracking will appear after the order ships.",
+    },
   ];
 }
 
@@ -6409,7 +8236,7 @@ function formatAddressLines(address) {
     address.city,
     address.region,
     address.postalCode,
-    address.country
+    address.country,
   ].filter(Boolean);
 }
 
@@ -6423,11 +8250,12 @@ function PriceLine({ label, value, muted = false }) {
 }
 
 function PaymentMethodButton({ method, disabled, onClick }) {
-  const Icon = method.id === "bank_transfer"
-    ? ReceiptText
-    : method.id === "paypal"
-      ? CircleDollarSign
-      : CreditCard;
+  const Icon =
+    method.id === "bank_transfer"
+      ? ReceiptText
+      : method.id === "paypal"
+        ? CircleDollarSign
+        : CreditCard;
 
   return (
     <button
@@ -6461,7 +8289,9 @@ function BankTransferInstructions({ order }) {
         <span>Reference</span>
         <b>{order.paymentReference || order.bankTransferReference}</b>
       </div>
-      <p>{bankTransferDetails.memo} {bankTransferDetails.note}</p>
+      <p>
+        {bankTransferDetails.memo} {bankTransferDetails.note}
+      </p>
     </div>
   );
 }
@@ -6476,11 +8306,14 @@ function OrderProgress({ status, vertical = false }) {
     qc: 3,
     ready_to_ship: 4,
     shipped: 4,
-    delivered: 5
+    delivered: 5,
   };
   const currentIndex = indexByStatus[status] ?? 0;
   return (
-    <div className={`mini-progress order-progress ${vertical ? "vertical" : ""}`} aria-label="Order progress">
+    <div
+      className={`mini-progress order-progress ${vertical ? "vertical" : ""}`}
+      aria-label="Order progress"
+    >
       {productionSteps.map((step, index) => {
         const done = index < currentIndex;
         const current = index === currentIndex;
@@ -6509,7 +8342,7 @@ function AdminApp({
   currentUser,
   signOut,
   updateUser,
-  inviteUser
+  inviteUser,
 }) {
   const [adminView, setAdminView] = useState("dashboard");
   const [selectedUserId, setSelectedUserId] = useState("all");
@@ -6521,14 +8354,14 @@ function AdminApp({
     customers: users.filter((user) => user.role === "customer").length,
     staff: users.filter((user) => user.role === "staff").length,
     admins: users.filter((user) => user.role === "admin").length,
-    active: users.filter((user) => user.status === "active").length
+    active: users.filter((user) => user.status === "active").length,
   };
 
   const submitInvite = () => {
     inviteUser({
       name: inviteName,
       email: inviteEmail,
-      role: inviteRole
+      role: inviteRole,
     });
     setInviteName("");
     setInviteEmail("");
@@ -6599,9 +8432,14 @@ function AdminApp({
           <div>
             <span className="eyebrow">Admin console</span>
             <h1>{adminTitle(adminView)}</h1>
-            <p>Review account access, request activity, order state, and service handoffs.</p>
+            <p>
+              Review account access, request activity, order state, and service
+              handoffs.
+            </p>
           </div>
-          <button className="drawer-close" onClick={signOut}>Sign out</button>
+          <button className="drawer-close" onClick={signOut}>
+            Sign out
+          </button>
         </header>
 
         <section className="admin-stats">
@@ -6651,10 +8489,7 @@ function AdminApp({
         )}
 
         {adminView === "orders" && (
-          <AdminOrdersView
-            users={users}
-            orders={orders}
-          />
+          <AdminOrdersView users={users} orders={orders} />
         )}
 
         {adminView === "audit" && (
@@ -6683,30 +8518,47 @@ function adminTitle(view) {
   return "User management";
 }
 
-function AdminDashboardView({ users, requests, orders, auditLogs, serviceEvents }) {
-  const activeCustomers = users.filter((user) => user.role === "customer" && user.status === "active");
+function AdminDashboardView({
+  users,
+  requests,
+  orders,
+  auditLogs,
+  serviceEvents,
+}) {
+  const activeCustomers = users.filter(
+    (user) => user.role === "customer" && user.status === "active",
+  );
   const requestsNeedingWork = requests.filter((request) =>
-    ["needs_info", "in_review"].includes(request.status)
+    ["needs_info", "in_review"].includes(request.status),
   );
-  const readyRequests = requests.filter((request) => request.status === "ready_to_confirm");
-  const checkoutOrders = orders.filter((order) => order.paymentStatus !== "paid");
-  const productionOrders = orders.filter((order) =>
-    order.paymentStatus === "paid" && !["shipped", "delivered"].includes(order.status)
+  const readyRequests = requests.filter(
+    (request) => request.status === "ready_to_confirm",
   );
-  const shippedOrders = orders.filter((order) => ["shipped", "delivered"].includes(order.status));
+  const checkoutOrders = orders.filter(
+    (order) => order.paymentStatus !== "paid",
+  );
+  const productionOrders = orders.filter(
+    (order) =>
+      order.paymentStatus === "paid" &&
+      !["shipped", "delivered"].includes(order.status),
+  );
+  const shippedOrders = orders.filter((order) =>
+    ["shipped", "delivered"].includes(order.status),
+  );
   const attentionItems = [
     ...requestsNeedingWork.slice(0, 3).map((request) => ({
       id: request.id,
       title: request.title,
       body: requestNextAction(request),
-      state: statusCopy[request.status]
+      state: statusCopy[request.status],
     })),
     ...checkoutOrders.slice(0, 3).map((order) => ({
       id: order.id,
       title: order.title,
       body: orderNextAction(order),
-      state: paymentStatusCopy[order.paymentStatus] || orderStatusCopy[order.status]
-    }))
+      state:
+        paymentStatusCopy[order.paymentStatus] || orderStatusCopy[order.status],
+    })),
   ].slice(0, 5);
 
   return (
@@ -6716,16 +8568,28 @@ function AdminDashboardView({ users, requests, orders, auditLogs, serviceEvents 
           <div className="admin-card-header">
             <div>
               <h2>Business overview</h2>
-              <p>Operational counts for customer activity, quote readiness, checkout, and fulfillment.</p>
+              <p>
+                Operational counts for customer activity, quote readiness,
+                checkout, and fulfillment.
+              </p>
             </div>
           </div>
           <div className="business-metric-grid">
             <StatCard label="Active customers" value={activeCustomers.length} />
-            <StatCard label="Requests to work" value={requestsNeedingWork.length} />
-            <StatCard label="Awaiting confirmation" value={readyRequests.length} />
+            <StatCard
+              label="Requests to work"
+              value={requestsNeedingWork.length}
+            />
+            <StatCard
+              label="Awaiting confirmation"
+              value={readyRequests.length}
+            />
             <StatCard label="Checkout orders" value={checkoutOrders.length} />
             <StatCard label="In production" value={productionOrders.length} />
-            <StatCard label="Shipped / delivered" value={shippedOrders.length} />
+            <StatCard
+              label="Shipped / delivered"
+              value={shippedOrders.length}
+            />
           </div>
         </div>
 
@@ -6742,7 +8606,9 @@ function AdminDashboardView({ users, requests, orders, auditLogs, serviceEvents 
                 <div className="attention-row" key={item.id}>
                   <strong>{item.id}</strong>
                   <span>{item.title}</span>
-                  <small>{item.state} - {item.body}</small>
+                  <small>
+                    {item.state} - {item.body}
+                  </small>
                 </div>
               ))
             ) : (
@@ -6762,7 +8628,10 @@ function AdminDashboardView({ users, requests, orders, auditLogs, serviceEvents 
         <div className="admin-card-header">
           <div>
             <h2>Backend readiness</h2>
-            <p>Stage 2A is prepared for Supabase, hosted payments, DHL Express, private storage, and provider callbacks.</p>
+            <p>
+              Stage 2A is prepared for Supabase, hosted payments, DHL Express,
+              private storage, and provider callbacks.
+            </p>
           </div>
         </div>
         <div className="stack-decision-grid">
@@ -6804,7 +8673,7 @@ function AdminUsersView({
   setInviteEmail,
   inviteRole,
   setInviteRole,
-  submitInvite
+  submitInvite,
 }) {
   return (
     <section className="admin-grid">
@@ -6812,7 +8681,9 @@ function AdminUsersView({
         <div className="admin-card-header">
           <div>
             <h2>Accounts</h2>
-            <p>Role and status here decide which product surface the user enters.</p>
+            <p>
+              Role and status here decide which product surface the user enters.
+            </p>
           </div>
         </div>
 
@@ -6826,7 +8697,7 @@ function AdminUsersView({
           </div>
           {users.map((user) => {
             const requestCount = requests.filter(
-              (request) => request.customerId === user.id
+              (request) => request.customerId === user.id,
             ).length;
             return (
               <div className="user-row" key={user.id}>
@@ -6837,7 +8708,11 @@ function AdminUsersView({
                 <select
                   value={user.role}
                   onChange={(event) =>
-                    updateUser(user.id, { role: event.target.value }, "role_changed")
+                    updateUser(
+                      user.id,
+                      { role: event.target.value },
+                      "role_changed",
+                    )
                   }
                 >
                   <option value="customer">Customer</option>
@@ -6848,7 +8723,11 @@ function AdminUsersView({
                   value={user.status}
                   disabled={user.id === currentUser.id}
                   onChange={(event) =>
-                    updateUser(user.id, { status: event.target.value }, "account_status_changed")
+                    updateUser(
+                      user.id,
+                      { status: event.target.value },
+                      "account_status_changed",
+                    )
                   }
                 >
                   <option value="active">Active</option>
@@ -6900,7 +8779,9 @@ function AdminUsersView({
             <option value="admin">Admin</option>
           </select>
         </label>
-        <button className="pay-button" onClick={submitInvite}>Create invited account</button>
+        <button className="pay-button" onClick={submitInvite}>
+          Create invited account
+        </button>
         <p>Invited users appear here until they complete sign-in.</p>
       </aside>
     </section>
@@ -6942,7 +8823,7 @@ function AdminRequestsView({
   requests,
   attachmentRecords,
   selectedUserId,
-  setSelectedUserId
+  setSelectedUserId,
 }) {
   const filteredRequests =
     selectedUserId === "all"
@@ -6968,7 +8849,9 @@ function AdminRequestsView({
             {users
               .filter((user) => user.role === "customer")
               .map((user) => (
-                <option value={user.id} key={user.id}>{user.name}</option>
+                <option value={user.id} key={user.id}>
+                  {user.name}
+                </option>
               ))}
           </select>
         </label>
@@ -6978,7 +8861,7 @@ function AdminRequestsView({
         {filteredRequests.map((request) => {
           const owner = userById.get(request.customerId);
           const attachmentCount = attachmentRecords.filter(
-            (record) => record.requestId === request.id
+            (record) => record.requestId === request.id,
           ).length;
           return (
             <div className="admin-request-row" key={request.id}>
@@ -7065,7 +8948,10 @@ function AdminAuditView({ auditLogs, serviceEvents }) {
         <div className="admin-card-header">
           <div>
             <h2>Activity trail</h2>
-            <p>Role changes, request updates, price changes, and payment activity are recorded here.</p>
+            <p>
+              Role changes, request updates, price changes, and payment activity
+              are recorded here.
+            </p>
           </div>
         </div>
 
@@ -7076,7 +8962,9 @@ function AdminAuditView({ auditLogs, serviceEvents }) {
                 <ShieldCheck size={17} />
                 <div>
                   <strong>{formatActionLabel(log.action)}</strong>
-                  <span>{log.detail || `${log.targetType} ${log.targetId}`}</span>
+                  <span>
+                    {log.detail || `${log.targetType} ${log.targetId}`}
+                  </span>
                 </div>
                 <small>{log.actorEmail}</small>
                 <small>{log.createdAt}</small>
@@ -7094,7 +8982,10 @@ function AdminAuditView({ auditLogs, serviceEvents }) {
         <div className="admin-card-header">
           <div>
             <h2>Integration events</h2>
-            <p>Local adapters record the same handoff points that future APIs will own.</p>
+            <p>
+              Local adapters record the same handoff points that future APIs
+              will own.
+            </p>
           </div>
         </div>
         <div className="service-event-list">
@@ -7103,7 +8994,9 @@ function AdminAuditView({ auditLogs, serviceEvents }) {
               <ClipboardCheck size={16} />
               <div>
                 <strong>{event.adapter}</strong>
-                <span>{event.action} - {event.targetId}</span>
+                <span>
+                  {event.action} - {event.targetId}
+                </span>
                 <small>{event.detail}</small>
               </div>
             </div>
@@ -7121,7 +9014,10 @@ function AdminDataModelView({ rows, replacementRows, schemaRows }) {
         <div className="admin-card-header">
           <div>
             <h2>Backend-shaped local tables</h2>
-            <p>These local ledgers mark where server tables and service adapters should replace browser storage.</p>
+            <p>
+              These local ledgers mark where server tables and service adapters
+              should replace browser storage.
+            </p>
           </div>
         </div>
 
@@ -7147,7 +9043,10 @@ function AdminDataModelView({ rows, replacementRows, schemaRows }) {
         <div className="admin-card-header">
           <div>
             <h2>Database schema blueprint</h2>
-            <p>These are the first server tables the local ledgers are already shaped to become.</p>
+            <p>
+              These are the first server tables the local ledgers are already
+              shaped to become.
+            </p>
           </div>
         </div>
 
@@ -7168,7 +9067,10 @@ function AdminDataModelView({ rows, replacementRows, schemaRows }) {
         <div className="admin-card-header">
           <div>
             <h2>API replacement map</h2>
-            <p>Replace these local functions with server/API calls while preserving the surrounding flow.</p>
+            <p>
+              Replace these local functions with server/API calls while
+              preserving the surrounding flow.
+            </p>
           </div>
         </div>
 
@@ -7179,9 +9081,15 @@ function AdminDataModelView({ rows, replacementRows, schemaRows }) {
                 <strong>{row.adapter}</strong>
                 <code>{row.replace}</code>
               </div>
-              <p><b>Input:</b> {row.input}</p>
-              <p><b>Output:</b> {row.output}</p>
-              <p><b>Writes:</b> {row.writes}</p>
+              <p>
+                <b>Input:</b> {row.input}
+              </p>
+              <p>
+                <b>Output:</b> {row.output}
+              </p>
+              <p>
+                <b>Writes:</b> {row.writes}
+              </p>
             </div>
           ))}
         </div>
@@ -7229,7 +9137,7 @@ function StaffApp({
   setIncludePreview,
   includeTable,
   setIncludeTable,
-  sendStaffUpdate
+  sendStaffUpdate,
 }) {
   return (
     <div className="staff-shell">
@@ -7336,23 +9244,31 @@ function staffRequestBuckets(requests) {
     {
       title: "Needs customer details",
       description: "Intake could not start review yet.",
-      requests: requests.filter((request) => ["needs_info", "not_supported"].includes(request.status))
+      requests: requests.filter((request) =>
+        ["needs_info", "not_supported"].includes(request.status),
+      ),
     },
     {
       title: "Ready for quote work",
       description: "Review is open and no harness price has been released.",
-      requests: requests.filter((request) => request.status === "in_review" && !request.price)
+      requests: requests.filter(
+        (request) => request.status === "in_review" && !request.price,
+      ),
     },
     {
       title: "Waiting for customer confirmation",
       description: "Harness price is released.",
-      requests: requests.filter((request) => request.status === "ready_to_confirm")
+      requests: requests.filter(
+        (request) => request.status === "ready_to_confirm",
+      ),
     },
     {
       title: "Converted or closed",
       description: "Request has been confirmed or is connected to an order.",
-      requests: requests.filter((request) => ["confirmed", "paid"].includes(request.status))
-    }
+      requests: requests.filter((request) =>
+        ["confirmed", "paid"].includes(request.status),
+      ),
+    },
   ];
 }
 
@@ -7361,20 +9277,26 @@ function staffOrderBuckets(orders) {
     {
       title: "Checkout and payment",
       description: "Customer needs to finish checkout or transfer.",
-      orders: orders.filter((order) => order.paymentStatus !== "paid")
+      orders: orders.filter((order) => order.paymentStatus !== "paid"),
     },
     {
       title: "Production",
       description: "Paid orders before carrier handoff.",
-      orders: orders.filter((order) =>
-        order.paymentStatus === "paid" && ["scheduled", "in_production", "ready_to_ship"].includes(order.status)
-      )
+      orders: orders.filter(
+        (order) =>
+          order.paymentStatus === "paid" &&
+          ["scheduled", "in_production", "ready_to_ship"].includes(
+            order.status,
+          ),
+      ),
     },
     {
       title: "Shipping and delivery",
       description: "Carrier tracking is active or delivery is complete.",
-      orders: orders.filter((order) => ["shipped", "delivered"].includes(order.status))
-    }
+      orders: orders.filter((order) =>
+        ["shipped", "delivered"].includes(order.status),
+      ),
+    },
   ];
 }
 
@@ -7385,19 +9307,26 @@ function requestNextAction(request) {
       ? `Ask customer for ${missing.join(", ")}`
       : "Ask customer for the missing request details";
   }
-  if (request.status === "in_review" && request.price) return "Send final confirmation note";
-  if (request.status === "in_review") return "Review files, prepare draft, and set harness price";
-  if (request.status === "ready_to_confirm") return "Wait for customer confirmation";
+  if (request.status === "in_review" && request.price)
+    return "Send final confirmation note";
+  if (request.status === "in_review")
+    return "Review files, prepare draft, and set harness price";
+  if (request.status === "ready_to_confirm")
+    return "Wait for customer confirmation";
   if (request.status === "confirmed") return "Watch checkout and payment";
   if (request.status === "paid") return "Continue in order console";
   return "Review latest customer activity";
 }
 
 function orderNextAction(order) {
-  if (order.paymentStatus === "bank_transfer_pending") return "Confirm transfer receipt or message customer";
-  if (order.paymentStatus !== "paid") return "Wait for checkout or help with payment questions";
-  if (order.status === "scheduled") return "Start production when materials are ready";
-  if (order.status === "in_production") return "Update ready-to-ship when finished";
+  if (order.paymentStatus === "bank_transfer_pending")
+    return "Confirm transfer receipt or message customer";
+  if (order.paymentStatus !== "paid")
+    return "Wait for checkout or help with payment questions";
+  if (order.status === "scheduled")
+    return "Start production when materials are ready";
+  if (order.status === "in_production")
+    return "Update ready-to-ship when finished";
   if (order.status === "ready_to_ship") return "Add carrier tracking";
   if (order.status === "shipped") return "Monitor tracking until delivery";
   if (order.status === "delivered") return "Watch for after-sales messages";
@@ -7413,9 +9342,14 @@ function StaffQueue({ requests, openRequest, currentUser, signOut }) {
         <div>
           <span className="eyebrow">Ops console</span>
           <h1>Request queue</h1>
-          <p>Work requests by intake state, quote readiness, and customer confirmation.</p>
+          <p>
+            Work requests by intake state, quote readiness, and customer
+            confirmation.
+          </p>
         </div>
-        <button className="drawer-close" onClick={signOut}>Sign out</button>
+        <button className="drawer-close" onClick={signOut}>
+          Sign out
+        </button>
       </header>
 
       <div className="staff-queue-groups">
@@ -7440,9 +9374,13 @@ function StaffQueue({ requests, openRequest, currentUser, signOut }) {
                       <strong>{request.id}</strong>
                       <span>{request.title}</span>
                       {request.checkResult?.missing?.length ? (
-                        <small>Missing: {request.checkResult.missing.join(", ")}</small>
+                        <small>
+                          Missing: {request.checkResult.missing.join(", ")}
+                        </small>
                       ) : null}
-                      <small className="next-action">Next: {requestNextAction(request)}</small>
+                      <small className="next-action">
+                        Next: {requestNextAction(request)}
+                      </small>
                     </div>
                     <StatusBadge status={request.status} />
                     <small>{request.updated}</small>
@@ -7470,9 +9408,14 @@ function StaffOrders({ orders, openOrder, signOut }) {
         <div>
           <span className="eyebrow">Ops console</span>
           <h1>Order queue</h1>
-          <p>Track checkout, production, shipping, and delivery after a request is confirmed.</p>
+          <p>
+            Track checkout, production, shipping, and delivery after a request
+            is confirmed.
+          </p>
         </div>
-        <button className="drawer-close" onClick={signOut}>Sign out</button>
+        <button className="drawer-close" onClick={signOut}>
+          Sign out
+        </button>
       </header>
 
       <div className="staff-queue-groups">
@@ -7497,8 +9440,13 @@ function StaffOrders({ orders, openOrder, signOut }) {
                       <div>
                         <strong>{order.id}</strong>
                         <span>{order.title}</span>
-                        <small>{paymentStatusCopy[order.paymentStatus] || orderStatusCopy[order.status]}</small>
-                        <small className="next-action">Next: {orderNextAction(order)}</small>
+                        <small>
+                          {paymentStatusCopy[order.paymentStatus] ||
+                            orderStatusCopy[order.status]}
+                        </small>
+                        <small className="next-action">
+                          Next: {orderNextAction(order)}
+                        </small>
                       </div>
                       <StatusBadge status={order.status} />
                       <small>{order.updated}</small>
@@ -7522,28 +9470,66 @@ function StaffOrders({ orders, openOrder, signOut }) {
   );
 }
 
-function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signOut }) {
+function StaffOrderDetail({
+  order,
+  updateOrderFromStaff,
+  sendOrderMessage,
+  signOut,
+}) {
   const [productionStatus, setProductionStatus] = useState(
-    ["scheduled", "in_production", "ready_to_ship"].includes(order?.status) ? order.status : "scheduled"
+    ["scheduled", "in_production", "ready_to_ship"].includes(order?.status)
+      ? order.status
+      : "scheduled",
   );
-  const [estimatedProductionComplete, setEstimatedProductionComplete] = useState(order?.estimatedProductionComplete || "");
-  const [trackingNumber, setTrackingNumber] = useState(order?.trackingNumber || "");
-  const [carrierTrackingUrl, setCarrierTrackingUrl] = useState(order?.carrierTrackingUrl || "");
-  const [trackingSource, setTrackingSource] = useState(order?.trackingSource || "manual");
-  const [shipmentStatus, setShipmentStatus] = useState(order?.status === "delivered" ? "delivered" : order?.status === "shipped" ? "shipped" : "not_shipped");
-  const [paymentStatus, setPaymentStatus] = useState(order?.paymentStatus || "unpaid");
+  const [estimatedProductionComplete, setEstimatedProductionComplete] =
+    useState(order?.estimatedProductionComplete || "");
+  const [trackingNumber, setTrackingNumber] = useState(
+    order?.trackingNumber || "",
+  );
+  const [carrierTrackingUrl, setCarrierTrackingUrl] = useState(
+    order?.carrierTrackingUrl || "",
+  );
+  const [trackingSource, setTrackingSource] = useState(
+    order?.trackingSource || "manual",
+  );
+  const [shipmentStatus, setShipmentStatus] = useState(
+    order?.status === "delivered"
+      ? "delivered"
+      : order?.status === "shipped"
+        ? "shipped"
+        : "not_shipped",
+  );
+  const [paymentStatus, setPaymentStatus] = useState(
+    order?.paymentStatus || "unpaid",
+  );
   const [addressDraft, setAddressDraft] = useState(order?.address || {});
-  const [packageDraft, setPackageDraft] = useState(order?.packageEstimate || {});
-  const [selectedShippingId, setSelectedShippingId] = useState(order?.selectedShippingId || "");
-  const [internalNotes, setInternalNotes] = useState(order?.internalNotes || "");
+  const [packageDraft, setPackageDraft] = useState(
+    order?.packageEstimate || {},
+  );
+  const [selectedShippingId, setSelectedShippingId] = useState(
+    order?.selectedShippingId || "",
+  );
+  const [internalNotes, setInternalNotes] = useState(
+    order?.internalNotes || "",
+  );
 
   useEffect(() => {
-    setProductionStatus(["scheduled", "in_production", "ready_to_ship"].includes(order?.status) ? order.status : "scheduled");
+    setProductionStatus(
+      ["scheduled", "in_production", "ready_to_ship"].includes(order?.status)
+        ? order.status
+        : "scheduled",
+    );
     setEstimatedProductionComplete(order?.estimatedProductionComplete || "");
     setTrackingNumber(order?.trackingNumber || "");
     setCarrierTrackingUrl(order?.carrierTrackingUrl || "");
     setTrackingSource(order?.trackingSource || "manual");
-    setShipmentStatus(order?.status === "delivered" ? "delivered" : order?.status === "shipped" ? "shipped" : "not_shipped");
+    setShipmentStatus(
+      order?.status === "delivered"
+        ? "delivered"
+        : order?.status === "shipped"
+          ? "shipped"
+          : "not_shipped",
+    );
     setPaymentStatus(order?.paymentStatus || "unpaid");
     setAddressDraft(order?.address || {});
     setPackageDraft(order?.packageEstimate || {});
@@ -7570,10 +9556,12 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
       weightKg: packageNumber("weightKg", order.packageEstimate.weightKg),
       lengthCm: packageNumber("lengthCm", order.packageEstimate.lengthCm),
       widthCm: packageNumber("widthCm", order.packageEstimate.widthCm),
-      heightCm: packageNumber("heightCm", order.packageEstimate.heightCm)
+      heightCm: packageNumber("heightCm", order.packageEstimate.heightCm),
     };
     const nextShippingOptions = getShippingOptions(nextPackage);
-    const nextSelectedShippingId = nextShippingOptions.some((option) => option.id === selectedShippingId)
+    const nextSelectedShippingId = nextShippingOptions.some(
+      (option) => option.id === selectedShippingId,
+    )
       ? selectedShippingId
       : nextShippingOptions[0]?.id || "";
     updateOrderFromStaff(
@@ -7583,17 +9571,25 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
         packageEstimate: nextPackage,
         shippingOptions: nextShippingOptions,
         selectedShippingId: nextSelectedShippingId,
-        internalNotes
+        internalNotes,
       },
-      "Delivery, package, or shipping details updated."
+      "Delivery, package, or shipping details updated.",
     );
   };
 
   const savePayment = () => {
-    const orderAlreadyInProgress = ["scheduled", "in_production", "ready_to_ship", "shipped", "delivered"].includes(order.status);
+    const orderAlreadyInProgress = [
+      "scheduled",
+      "in_production",
+      "ready_to_ship",
+      "shipped",
+      "delivered",
+    ].includes(order.status);
     const nextStatus =
       paymentStatus === "paid"
-        ? (orderAlreadyInProgress ? order.status : "scheduled")
+        ? orderAlreadyInProgress
+          ? order.status
+          : "scheduled"
         : paymentStatus === "bank_transfer_pending"
           ? "awaiting_bank_transfer"
           : "checkout";
@@ -7603,9 +9599,12 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
         status: nextStatus,
         paymentStatus,
         paidAt: paymentStatus === "paid" ? order.paidAt || "Now" : "",
-        paymentProvider: paymentStatus === "bank_transfer_pending" ? "Bank transfer" : order.paymentProvider
+        paymentProvider:
+          paymentStatus === "bank_transfer_pending"
+            ? "Bank transfer"
+            : order.paymentProvider,
       },
-      `Payment state changed to ${paymentStatusCopy[paymentStatus]}.`
+      `Payment state changed to ${paymentStatusCopy[paymentStatus]}.`,
     );
   };
 
@@ -7615,9 +9614,9 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
       {
         status: productionStatus,
         productionStatus,
-        estimatedProductionComplete
+        estimatedProductionComplete,
       },
-      `Production status changed to ${orderStatusCopy[productionStatus]}.`
+      `Production status changed to ${orderStatusCopy[productionStatus]}.`,
     );
   };
 
@@ -7626,12 +9625,12 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
       shipmentStatus,
       trackingNumber,
       carrierTrackingUrl,
-      trackingSource
+      trackingSource,
     });
     updateOrderFromStaff(
       order.id,
       shipmentResult.orderPatch,
-      shipmentResult.eventDetail
+      shipmentResult.eventDetail,
     );
   };
 
@@ -7641,9 +9640,14 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
         <div>
           <span className="eyebrow">Ops console</span>
           <h1>{order.id}</h1>
-          <p>{order.title} - {orderStatusCopy[order.status]} - {paymentStatusCopy[order.paymentStatus] || order.paymentStatus}</p>
+          <p>
+            {order.title} - {orderStatusCopy[order.status]} -{" "}
+            {paymentStatusCopy[order.paymentStatus] || order.paymentStatus}
+          </p>
         </div>
-        <button className="drawer-close" onClick={signOut}>Sign out</button>
+        <button className="drawer-close" onClick={signOut}>
+          Sign out
+        </button>
       </header>
 
       <div className="staff-detail-layout order-ops-layout">
@@ -7661,7 +9665,10 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
               </div>
               <div>
                 <span className="eyebrow">Payment</span>
-                <strong>{paymentStatusCopy[order.paymentStatus] || order.paymentStatus}</strong>
+                <strong>
+                  {paymentStatusCopy[order.paymentStatus] ||
+                    order.paymentStatus}
+                </strong>
               </div>
               <div>
                 <span className="eyebrow">Total</span>
@@ -7669,7 +9676,11 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
               </div>
               <div>
                 <span className="eyebrow">Shipping</span>
-                <strong>{shipping ? `${shipping.level} - ${shipping.carrier}` : "Not selected"}</strong>
+                <strong>
+                  {shipping
+                    ? `${shipping.level} - ${shipping.carrier}`
+                    : "Not selected"}
+                </strong>
               </div>
               <div>
                 <span className="eyebrow">Incoterm</span>
@@ -7689,80 +9700,161 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
             <div className="order-form-grid">
               <label className="field">
                 <span>Recipient</span>
-                <input value={addressDraft.name || ""} onChange={(event) => updateAddressDraft("name", event.target.value)} />
+                <input
+                  value={addressDraft.name || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("name", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>Email</span>
-                <input value={addressDraft.email || ""} onChange={(event) => updateAddressDraft("email", event.target.value)} />
+                <input
+                  value={addressDraft.email || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("email", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>Phone</span>
-                <input value={addressDraft.phone || ""} onChange={(event) => updateAddressDraft("phone", event.target.value)} />
+                <input
+                  value={addressDraft.phone || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("phone", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>Company</span>
-                <input value={addressDraft.company || ""} onChange={(event) => updateAddressDraft("company", event.target.value)} />
+                <input
+                  value={addressDraft.company || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("company", event.target.value)
+                  }
+                />
               </label>
               <label className="field wide">
                 <span>Address line 1</span>
-                <input value={addressDraft.line1 || ""} onChange={(event) => updateAddressDraft("line1", event.target.value)} />
+                <input
+                  value={addressDraft.line1 || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("line1", event.target.value)
+                  }
+                />
               </label>
               <label className="field wide">
                 <span>Address line 2</span>
-                <input value={addressDraft.line2 || ""} onChange={(event) => updateAddressDraft("line2", event.target.value)} />
+                <input
+                  value={addressDraft.line2 || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("line2", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>City</span>
-                <input value={addressDraft.city || ""} onChange={(event) => updateAddressDraft("city", event.target.value)} />
+                <input
+                  value={addressDraft.city || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("city", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>State / region</span>
-                <input value={addressDraft.region || ""} onChange={(event) => updateAddressDraft("region", event.target.value)} />
+                <input
+                  value={addressDraft.region || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("region", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>Postal code</span>
-                <input value={addressDraft.postalCode || ""} onChange={(event) => updateAddressDraft("postalCode", event.target.value)} />
+                <input
+                  value={addressDraft.postalCode || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("postalCode", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>Country</span>
-                <select value={addressDraft.country || ""} onChange={(event) => updateAddressDraft("country", event.target.value)}>
+                <select
+                  value={addressDraft.country || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("country", event.target.value)
+                  }
+                >
                   <option value="">Select country</option>
                   {checkoutCountries.map((country) => (
-                    <option value={country} key={country}>{country}</option>
+                    <option value={country} key={country}>
+                      {country}
+                    </option>
                   ))}
                 </select>
               </label>
               <label className="field">
                 <span>VAT / EORI / Tax ID</span>
-                <input value={addressDraft.taxId || ""} onChange={(event) => updateAddressDraft("taxId", event.target.value)} />
+                <input
+                  value={addressDraft.taxId || ""}
+                  onChange={(event) =>
+                    updateAddressDraft("taxId", event.target.value)
+                  }
+                />
               </label>
             </div>
 
             <div className="package-grid">
               <label className="field">
                 <span>Weight kg</span>
-                <input value={packageDraft.weightKg || ""} onChange={(event) => updatePackageDraft("weightKg", event.target.value)} />
+                <input
+                  value={packageDraft.weightKg || ""}
+                  onChange={(event) =>
+                    updatePackageDraft("weightKg", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>Length cm</span>
-                <input value={packageDraft.lengthCm || ""} onChange={(event) => updatePackageDraft("lengthCm", event.target.value)} />
+                <input
+                  value={packageDraft.lengthCm || ""}
+                  onChange={(event) =>
+                    updatePackageDraft("lengthCm", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>Width cm</span>
-                <input value={packageDraft.widthCm || ""} onChange={(event) => updatePackageDraft("widthCm", event.target.value)} />
+                <input
+                  value={packageDraft.widthCm || ""}
+                  onChange={(event) =>
+                    updatePackageDraft("widthCm", event.target.value)
+                  }
+                />
               </label>
               <label className="field">
                 <span>Height cm</span>
-                <input value={packageDraft.heightCm || ""} onChange={(event) => updatePackageDraft("heightCm", event.target.value)} />
+                <input
+                  value={packageDraft.heightCm || ""}
+                  onChange={(event) =>
+                    updatePackageDraft("heightCm", event.target.value)
+                  }
+                />
               </label>
             </div>
 
             <label className="field wide">
               <span>Shipping service</span>
-              <select value={selectedShippingId} onChange={(event) => setSelectedShippingId(event.target.value)}>
+              <select
+                value={selectedShippingId}
+                onChange={(event) => setSelectedShippingId(event.target.value)}
+              >
                 {order.shippingOptions.map((option) => (
                   <option value={option.id} key={option.id}>
-                    {option.level} - {option.carrier} {option.service} - ${option.price} - {option.days}
+                    {option.level} - {option.carrier} {option.service} - $
+                    {option.price} - {option.days}
                   </option>
                 ))}
               </select>
@@ -7794,7 +9886,10 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
             <h2>Payment</h2>
             <label className="field">
               <span>Status</span>
-              <select value={paymentStatus} onChange={(event) => setPaymentStatus(event.target.value)}>
+              <select
+                value={paymentStatus}
+                onChange={(event) => setPaymentStatus(event.target.value)}
+              >
                 <option value="unpaid">Unpaid</option>
                 <option value="bank_transfer_pending">Transfer pending</option>
                 <option value="paid">Paid</option>
@@ -7827,7 +9922,9 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
               <span>Estimated completion</span>
               <input
                 value={estimatedProductionComplete}
-                onChange={(event) => setEstimatedProductionComplete(event.target.value)}
+                onChange={(event) =>
+                  setEstimatedProductionComplete(event.target.value)
+                }
                 placeholder="YYYY-MM-DD"
               />
             </label>
@@ -7840,7 +9937,10 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
             <h2>Shipment tracking</h2>
             <label className="field">
               <span>Shipment status</span>
-              <select value={shipmentStatus} onChange={(event) => setShipmentStatus(event.target.value)}>
+              <select
+                value={shipmentStatus}
+                onChange={(event) => setShipmentStatus(event.target.value)}
+              >
                 <option value="not_shipped">Not shipped</option>
                 <option value="shipped">Shipped / in transit</option>
                 <option value="delivered">Delivered</option>
@@ -7848,7 +9948,10 @@ function StaffOrderDetail({ order, updateOrderFromStaff, sendOrderMessage, signO
             </label>
             <label className="field">
               <span>Tracking source</span>
-              <select value={trackingSource} onChange={(event) => setTrackingSource(event.target.value)}>
+              <select
+                value={trackingSource}
+                onChange={(event) => setTrackingSource(event.target.value)}
+              >
                 <option value="manual">Manual carrier link</option>
                 <option value="api">Carrier API linked</option>
               </select>
@@ -7893,7 +9996,7 @@ function StaffDetail({
   setIncludePreview,
   includeTable,
   setIncludeTable,
-  sendStaffUpdate
+  sendStaffUpdate,
 }) {
   return (
     <section className="staff-page staff-detail-page">
@@ -7901,9 +10004,13 @@ function StaffDetail({
         <div>
           <span className="eyebrow">Ops console</span>
           <h1>{request.id}</h1>
-          <p>{request.title} - {statusCopy[request.status]} - {currentUser.email}</p>
+          <p>
+            {request.title} - {statusCopy[request.status]} - {currentUser.email}
+          </p>
         </div>
-        <button className="drawer-close" onClick={signOut}>Sign out</button>
+        <button className="drawer-close" onClick={signOut}>
+          Sign out
+        </button>
       </header>
 
       <div className="staff-detail-layout">
@@ -7918,7 +10025,9 @@ function StaffDetail({
               <input
                 value={staffPrice}
                 onChange={(event) => setStaffPrice(event.target.value)}
-                placeholder={request.price ? request.price : "Optional until ready"}
+                placeholder={
+                  request.price ? request.price : "Optional until ready"
+                }
               />
             </label>
             <p>
@@ -7956,14 +10065,16 @@ function StaffComposer({
   setIncludePreview,
   includeTable,
   setIncludeTable,
-  sendUpdate
+  sendUpdate,
 }) {
   const staffUploadRef = useRef(null);
   const [uploadError, setUploadError] = useState("");
 
   const handleStaffUpload = (event) => {
     const selectedFiles = Array.from(event.target.files || []);
-    const oversized = selectedFiles.filter((file) => file.size > maxFileSizeBytes);
+    const oversized = selectedFiles.filter(
+      (file) => file.size > maxFileSizeBytes,
+    );
     const accepted = selectedFiles
       .filter((file) => file.size <= maxFileSizeBytes)
       .map(draftFileFromBrowser);
@@ -7973,7 +10084,9 @@ function StaffComposer({
     if (oversized.length) {
       setUploadError(`${oversized[0].name} is larger than 25 MB.`);
     } else if (accepted.length > nextFiles.length) {
-      setUploadError(`Each update can include up to ${maxFilesPerUpload} files.`);
+      setUploadError(
+        `Each update can include up to ${maxFilesPerUpload} files.`,
+      );
     } else {
       setUploadError("");
     }
@@ -8003,7 +10116,13 @@ function StaffComposer({
         >
           <Plus size={18} />
         </button>
-        <input ref={staffUploadRef} type="file" multiple hidden onChange={handleStaffUpload} />
+        <input
+          ref={staffUploadRef}
+          type="file"
+          multiple
+          hidden
+          onChange={handleStaffUpload}
+        />
         <textarea
           value={value}
           onChange={(event) => setValue(event.target.value)}
@@ -8026,7 +10145,11 @@ function StaffComposer({
           <ImageIcon size={16} />
           Preview
         </button>
-        <button className="send-button small" type="button" onClick={sendUpdate}>
+        <button
+          className="send-button small"
+          type="button"
+          onClick={sendUpdate}
+        >
           <Send size={17} />
         </button>
       </div>
@@ -8039,22 +10162,32 @@ function StatusBadge({ status }) {
   const className =
     status === "ready_to_confirm"
       ? "ready"
-      : status === "confirmed" || status === "paid" || status === "delivered" || status === "shipped"
+      : status === "confirmed" ||
+          status === "paid" ||
+          status === "delivered" ||
+          status === "shipped"
         ? "success"
-      : ["scheduled", "in_production", "ready_to_ship"].includes(status)
+        : ["scheduled", "in_production", "ready_to_ship"].includes(status)
           ? "ready"
-      : status === "in_review" || status === "checkout" || status === "awaiting_bank_transfer" || status === "payment_pending" || status === "needs_info"
-          ? "review"
-      : status === "not_supported" || status === "failed"
-          ? "blocked"
-          : "neutral";
+          : status === "in_review" ||
+              status === "checkout" ||
+              status === "awaiting_bank_transfer" ||
+              status === "payment_pending" ||
+              status === "needs_info"
+            ? "review"
+            : status === "not_supported" || status === "failed"
+              ? "blocked"
+              : "neutral";
   return <span className={`list-status ${className}`}>{label}</span>;
 }
 
 function FileChip({ file }) {
   const size = fileSizeLabel(file);
   return (
-    <span className="file-chip" title={size ? `${fileName(file)} - ${size}` : fileName(file)}>
+    <span
+      className="file-chip"
+      title={size ? `${fileName(file)} - ${size}` : fileName(file)}
+    >
       <File size={14} />
       {fileName(file)}
       {size && <small>{size}</small>}
@@ -8071,7 +10204,11 @@ function HarnessPreview({ request }) {
     <div className="inline-preview">
       <div className="preview-caption">
         <strong>{title}</strong>
-        <span>{dualBranch ? "Controller lead with two branches" : "Single harness layout draft"}</span>
+        <span>
+          {dualBranch
+            ? "Controller lead with two branches"
+            : "Single harness layout draft"}
+        </span>
       </div>
       <svg viewBox="0 0 520 180" aria-hidden="true">
         <path d="M48 88h142c40 0 68-28 112-28h164" />
@@ -8092,9 +10229,21 @@ function detailValue(text, pattern, fallback) {
 
 function BomTable({ request }) {
   const text = getFirstCustomerText(request || { messages: [] });
-  const quantity = detailValue(text, /\b\d+\s*(pcs|pieces|piece|sets|units)\b/i, "Confirm in thread");
-  const length = detailValue(text, /\b\d+(\.\d+)?\s*(m|meter|meters|cm|mm|inch|inches)\b/i, "Confirm in thread");
-  const rating = detailValue(text, /\b\d+(\.\d+)?\s*(v|volt|volts|a|amp|amps)\b/i, "Confirm in thread");
+  const quantity = detailValue(
+    text,
+    /\b\d+\s*(pcs|pieces|piece|sets|units)\b/i,
+    "Confirm in thread",
+  );
+  const length = detailValue(
+    text,
+    /\b\d+(\.\d+)?\s*(m|meter|meters|cm|mm|inch|inches)\b/i,
+    "Confirm in thread",
+  );
+  const rating = detailValue(
+    text,
+    /\b\d+(\.\d+)?\s*(v|volt|volts|a|amp|amps)\b/i,
+    "Confirm in thread",
+  );
 
   return (
     <table className="bom-table">
@@ -8141,7 +10290,8 @@ function PaymentModal({ price, total, method, close, markPaid }) {
         </div>
         <h2>{isPaypal ? "PayPal checkout" : "Secure hosted checkout"}</h2>
         <p>
-          Total due is ${total || price}. The order now has a hosted {method.provider}
+          Total due is ${total || price}. The order now has a hosted{" "}
+          {method.provider}
           payment session, so Easy Harness never stores card or wallet details.
         </p>
         <div className="payment-provider-box">
@@ -8149,8 +10299,13 @@ function PaymentModal({ price, total, method, close, markPaid }) {
           <span>{method.detail}</span>
         </div>
         <div className="modal-actions">
-          <button className="secondary-action" onClick={close}>Back</button>
-          <button className="publish-button" onClick={() => markPaid(method.id)}>
+          <button className="secondary-action" onClick={close}>
+            Back
+          </button>
+          <button
+            className="publish-button"
+            onClick={() => markPaid(method.id)}
+          >
             Return with payment confirmed
           </button>
         </div>
