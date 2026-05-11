@@ -454,6 +454,283 @@ function normalizeFieldValue(value: unknown): FieldValue {
   return { value: "unknown", source: null, confidence: "unknown" };
 }
 
+function isKnownFieldValue(value: FieldValue | undefined | null) {
+  if (!value) return false;
+  const text = normalizeString(value.value, "").toLowerCase();
+  return Boolean(
+    text && !["unknown", "not specified", "n/a", "none", "null"].includes(text),
+  );
+}
+
+function fieldText(value: FieldValue | undefined | null) {
+  return isKnownFieldValue(value) ? normalizeString(value?.value, "") : "";
+}
+
+function hasKnownRequirement(draft: EasyHarnessDraft, keys: string[]) {
+  return keys.some((key) => isKnownFieldValue(draft.known_requirements[key]));
+}
+
+function draftTextBlob(draft: EasyHarnessDraft) {
+  const knownText = Object.entries(draft.known_requirements)
+    .map(([key, value]) => `${key}: ${fieldText(value)}`)
+    .filter((line) => !line.endsWith(": "))
+    .join(" | ");
+  const evidenceText = draft.provided_evidence
+    .map((item) =>
+      [item.filename, item.content_summary, item.what_it_may_show]
+        .filter(Boolean)
+        .join(" "),
+    )
+    .join(" | ");
+  return [
+    draft.user_intent.intent_type,
+    draft.user_intent.connection_goal,
+    draft.user_intent.desired_outcome,
+    draft.user_facing_summary.request_line,
+    draft.user_facing_summary.compact_details.join(" "),
+    draft.user_facing_summary.what_we_have.join(" "),
+    draft.ai_interpretation.short_understanding,
+    draft.ai_interpretation.likely_harness_type,
+    draft.ai_interpretation.likely_use,
+    knownText,
+    evidenceText,
+  ]
+    .filter(Boolean)
+    .join(" | ")
+    .toLowerCase();
+}
+
+function matchesAny(text: string, patterns: RegExp[]) {
+  return patterns.some((pattern) => pattern.test(text));
+}
+
+function hasQuantityBasis(draft: EasyHarnessDraft) {
+  if (
+    hasKnownRequirement(draft, [
+      "quantity",
+      "qty",
+      "pieces",
+      "piece_count",
+      "order_quantity",
+    ])
+  )
+    return true;
+  const text = draftTextBlob(draft);
+  return matchesAny(text, [
+    /\b\d+\s*(pcs?|pieces?|units?|sets?|pairs?|samples?)\b/i,
+    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s*(pcs?|pieces?|units?|sets?|pairs?|samples?)\b/i,
+    /\bprototype\s*(sample|piece|unit)?\b/i,
+    /\bsample\s*(piece|unit|order)?\b/i,
+  ]);
+}
+
+function hasLengthOrScaleBasis(draft: EasyHarnessDraft) {
+  if (
+    hasKnownRequirement(draft, [
+      "length",
+      "estimated_length",
+      "approximate_length",
+      "full_length",
+      "cable_length",
+      "harness_length",
+      "scale",
+      "dimensions",
+    ])
+  )
+    return true;
+  const text = draftTextBlob(draft);
+  if (
+    matchesAny(text, [
+      /\b\d+(?:\.\d+)?\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
+    ])
+  )
+    return true;
+  return matchesAny(text, [
+    /\b(full|complete)\s+(physical\s+)?(sample|old harness|harness sample)\s+(can be measured|for measurement|available to measure)\b/i,
+    /\b(old harness|sample)\s+(will be sent|can be sent|available for measurement)\b/i,
+  ]);
+}
+
+function hasUseOrEnvironmentBasis(draft: EasyHarnessDraft) {
+  if (
+    hasKnownRequirement(draft, [
+      "environment",
+      "use_environment",
+      "use_case",
+      "application",
+      "application_type",
+      "equipment",
+      "device",
+      "usage",
+      "purpose",
+      "voltage",
+      "current",
+      "power",
+    ])
+  )
+    return true;
+  const text = draftTextBlob(draft);
+  return matchesAny(text, [
+    /\b(outdoor|indoor|vehicle|automotive|agricultural|field|machine|equipment|robot|prototype|controller|sensor|motor|battery|power|signal|data|can\b|rs485|waterproof|moisture|vibration|high temperature|low temperature)\b/i,
+  ]);
+}
+
+function hasRequestScope(draft: EasyHarnessDraft) {
+  const text = draftTextBlob(draft);
+  const hasIntent = Boolean(
+    normalizeString(draft.user_intent.connection_goal, "") ||
+      normalizeString(draft.user_intent.desired_outcome, "") ||
+      normalizeString(draft.user_facing_summary.request_line, ""),
+  );
+  const knownType = normalizeString(
+    draft.user_intent.intent_type,
+    "unknown",
+  ).toLowerCase();
+  return (
+    hasIntent ||
+    (knownType && knownType !== "unknown") ||
+    matchesAny(text, [
+      /\bconnect\b.+\b(to|with)\b/i,
+      /\b(copy|replace|remake|replicate)\b.+\b(harness|cable|loom)\b/i,
+      /\b(adapter|pigtail|extension cable|wiring loom|wire harness|cable assembly)\b/i,
+    ])
+  );
+}
+
+function hasPowerLoadRisk(draft: EasyHarnessDraft) {
+  const text = draftTextBlob(draft);
+  return matchesAny(text, [
+    /\b(battery|motor|heater|actuator|pump|inverter|driver|motor controller|power load|high current)\b/i,
+  ]);
+}
+
+function hasPowerBasis(draft: EasyHarnessDraft) {
+  if (
+    hasKnownRequirement(draft, [
+      "voltage",
+      "current",
+      "power",
+      "wattage",
+      "load",
+      "amp",
+      "amps",
+    ])
+  )
+    return true;
+  const text = draftTextBlob(draft);
+  return matchesAny(text, [
+    /\b\d+(?:\.\d+)?\s*(v|volt|volts|a|amp|amps|w|watt|watts|kw)\b/i,
+  ]);
+}
+
+function addQuestionOnce(
+  target: UnknownItem[],
+  field: string,
+  reason: string,
+  question: string,
+) {
+  if (target.some((item) => item.field === field || item.question === question))
+    return;
+  target.push({ field, reason, question });
+}
+
+function enforceDraftReadiness(draft: EasyHarnessDraft): EasyHarnessDraft {
+  const claimedReady =
+    draft.draft_closure.can_close_user_draft ||
+    draft.draft_meta.draft_status === "ready_for_easy_harness_review" ||
+    draft.draft_meta.draft_status === "closed_for_easy_harness_review";
+  if (!claimedReady) return draft;
+
+  const blockingQuestions: UnknownItem[] = [];
+  if (!hasRequestScope(draft)) {
+    addQuestionOnce(
+      blockingQuestions,
+      "request_scope",
+      "The request scope is not clear enough to form a usable draft.",
+      "What should this harness or cable connect, copy, or replace?",
+    );
+  }
+  if (!hasQuantityBasis(draft)) {
+    addQuestionOnce(
+      blockingQuestions,
+      "quantity",
+      "Quantity is a basic order detail needed before preparing a usable draft.",
+      "How many harnesses do you need?",
+    );
+  }
+  if (!hasLengthOrScaleBasis(draft)) {
+    addQuestionOnce(
+      blockingQuestions,
+      "length_or_measurement_basis",
+      "Approximate length or a clear measurement basis is needed before preparing a usable draft.",
+      "What is the approximate full length, or do you have a full sample that can be measured?",
+    );
+  }
+  if (!hasUseOrEnvironmentBasis(draft)) {
+    addQuestionOnce(
+      blockingQuestions,
+      "use_context",
+      "Basic use context helps Easy Harness prepare a draft that can be reviewed properly.",
+      "Where will this harness be used, or what equipment is it for?",
+    );
+  }
+  if (hasPowerLoadRisk(draft) && !hasPowerBasis(draft)) {
+    addQuestionOnce(
+      blockingQuestions,
+      "voltage_current_or_power",
+      "Power-load requests need at least an optional voltage, current, or power check.",
+      "Do you know the voltage, current, or power level? Approximate is fine.",
+    );
+  }
+
+  if (!blockingQuestions.length) return draft;
+
+  const selected = blockingQuestions.slice(0, 3);
+  const existingAskNow = draft.unknowns.ask_user_now || [];
+  const askNow = [...selected];
+  for (const item of existingAskNow) {
+    if (askNow.length >= 6) break;
+    if (
+      !askNow.some(
+        (existing) => existing.field === item.field || existing.question === item.question,
+      )
+    ) {
+      askNow.push(item);
+    }
+  }
+
+  return {
+    ...draft,
+    draft_meta: {
+      ...draft.draft_meta,
+      draft_status: "needs_key_clarification",
+      draft_maturity_level: Math.min(
+        Number(draft.draft_meta.draft_maturity_level || 2),
+        2,
+      ),
+    },
+    unknowns: {
+      ...draft.unknowns,
+      ask_user_now: askNow,
+    },
+    user_facing_summary: {
+      ...draft.user_facing_summary,
+      needed_next: selected.map((item) => item.question || item.field),
+      next_step: "Add these basics so Easy Harness can prepare the draft.",
+    },
+    draft_closure: {
+      ...draft.draft_closure,
+      can_close_user_draft: false,
+      closure_status: "needs_key_clarification",
+      closure_reason:
+        "The request intent is understood, but basic order details are still needed before an Easy Harness Draft can be prepared.",
+      next_action: "ask_user",
+      questions_to_ask: selected.map((item) => item.question || item.field),
+      customer_message_type: "ask_key_details",
+    },
+  };
+}
+
 function normalizeKnownRequirements(
   value: unknown,
 ): Record<string, FieldValue> {
@@ -554,7 +831,7 @@ function normalizeDraft(
   const neededNext = canClose ? [] : normalizeList(summary.needed_next, 3);
   const closureQuestions = canClose ? [] : questions.length ? questions : neededNext;
 
-  return {
+  const draft: EasyHarnessDraft = {
     schema_version: schemaVersion,
     draft_meta: {
       draft_status: closureStatus,
@@ -670,6 +947,7 @@ function normalizeDraft(
       customer_message_type: messageType,
     },
   };
+  return enforceDraftReadiness(draft);
 }
 
 function legacyStatusFor(draft: EasyHarnessDraft) {
@@ -842,7 +1120,7 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
     ...questions
       .slice(0, 3)
       .map((question, index) => `${index + 1}. ${question}`),
-    "If you’re not sure, say so and Easy Harness will review it later.",
+    "Approximate answers are fine. If one item is uncertain, say so.",
   ]
     .filter(Boolean)
     .join("\n\n");
@@ -896,6 +1174,10 @@ function buildMessageBlocks(draft: EasyHarnessDraft, customerMessage: string, re
         "Harness request",
       status: "Ready for Easy Harness review",
       compactDetails: draft.user_facing_summary.compact_details,
+      connectionGoal: draft.user_intent.connection_goal,
+      intentType: draft.user_intent.intent_type,
+      fromSide: draft.user_intent.from_side,
+      toSide: draft.user_intent.to_side,
       knownDetails: knownDetailLabels(draft),
       files: draft.provided_evidence
         .map((item) => item.filename || item.content_summary || item.type)
@@ -997,12 +1279,15 @@ async function callDeepSeek(inputText: string, trigger = "manual") {
             "A real connection goal can be device A to device B, copy/replace an old harness, make an adapter between two ports, connector ends, pinout, cable routing, or clear harness context.",
             "Generic messages like 'see whether my attachment is correct', 'I need a cable', 'design a harness', or an unrelated/reference product image are not enough to close a draft unless they also state what needs to connect.",
             "DeepSeek currently receives attachment metadata and conversation text, not reliable visual pixels. Do not claim to visually identify connector models from attachments. If photos are attached, route connector identification to Easy Harness review unless details are in text.",
-            "If the user asks to copy or replace an old harness and provides photos or sample files, treat that as a valid connection intent. Do not require device A-to-B endpoints before making progress; ask only high-value details such as exact copy vs allowed changes, quantity, or length if useful.",
-            "For power-load requests such as battery to motor, motor controller, heater, actuator, or other high-current equipment, ask one concise voltage/current/power question if not already known. Make it optional: if the user does not know, route it to Easy Harness review instead of blocking indefinitely.",
+            "Do not use keyword scripts or case-specific templates. Identify the request type from the whole conversation, then apply the same draft readiness standard to every request.",
+            "An Easy Harness Draft should be prepared only when the user-side request is a usable demand package, not merely when a broad intention is recognizable.",
+            "Before closing a draft, check for these basic order-level inputs: request scope, quantity or sample quantity, approximate length or measurement basis, use context or environment, and any safety-critical power information if relevant.",
+            "Do not require factory-level manufacturing details to close a draft, but do not put basic order details such as quantity, approximate length, or use context into Easy Harness review unless the user has explicitly provided a real measurement basis or says those details will be supplied later.",
+            "For power-load requests such as battery to motor, motor controller, heater, actuator, or other high-current equipment, ask one concise voltage/current/power question if not already known. It is a basic safety question, but do not ask factory production fields.",
             "If the user says they do not know a connector model but has photos, do not force a guess. Route connector identification to Easy Harness review.",
-            "When a draft is ready for Easy Harness review, user_facing_summary.needed_next must be empty unless the user personally must answer something now. Put Easy Harness-owned work in easy_harness_review, not needed_next.",
+            "When a draft is ready for Easy Harness review, user_facing_summary.needed_next must be empty. Put Easy Harness-owned or later engineering work in easy_harness_review or later_supplier_or_engineering_confirmation, not needed_next.",
             "Unknowns must be separated into: ask_user_now, ask_user_if_likely_known, easy_harness_review, later_supplier_or_engineering_confirmation.",
-            "Close the user draft when the request is harness-related, the connection intent can be stated clearly, user-provided information has been captured, unknowns are classified, and further broad questioning is unlikely to improve the user-side request.",
+            "Close the user draft only when the request is harness-related, the request scope is clear, the basic order-level inputs are sufficient for Easy Harness to prepare a usable draft, user-provided information has been captured, and remaining unknowns are mostly professional or review items.",
             "For ready_for_review, the message should be short and should not claim price, material, supplier, or production readiness.",
             "All customer-facing summaries and questions must be in English.",
             "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
@@ -1339,8 +1624,8 @@ Deno.serve(async (request) => {
           status: "needs_info",
           adapter: adapterId,
           reason:
-            "Easy Harness could not finish automatic intake checking. Staff can review the request manually.",
-          missing: ["manual review"],
+            "Easy Harness could not finish this intake check. The request is saved and can continue in this thread.",
+          missing: ["continue request"],
           checkedAt: new Date().toISOString(),
           error: message,
         },
@@ -1351,11 +1636,11 @@ Deno.serve(async (request) => {
       request_id: requestRow.id,
       author_id: null,
       author_role: "easy_harness",
-      body: "Automatic checking did not finish. Your request is saved, and Easy Harness can review it manually. You can also add more details here.",
+      body: "Easy Harness could not finish checking this request. Your request is saved, and you can continue adding details here.",
       blocks: [
         {
           type: "text",
-          text: "Automatic checking did not finish. Your request is saved, and Easy Harness can review it manually. You can also add more details here.",
+          text: "Easy Harness could not finish checking this request. Your request is saved, and you can continue adding details here.",
         },
       ],
       visibility: "thread",

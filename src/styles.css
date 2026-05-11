@@ -4382,3 +4382,63 @@ button:disabled {
 .full-detail-section.professional-details {
   background: rgba(9, 112, 103, 0.04);
 }
+
+.draft-connection-diagram {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.75rem;
+  margin: 1rem 0;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(13, 148, 136, 0.22);
+  border-radius: 18px;
+  background: rgba(240, 253, 250, 0.78);
+}
+
+.draft-connection-diagram span {
+  min-width: 0;
+  padding: 0.55rem 0.7rem;
+  border-radius: 999px;
+  background: #fff;
+  border: 1px solid rgba(15, 118, 110, 0.18);
+  font-weight: 800;
+  color: #0f3430;
+  text-align: center;
+  overflow-wrap: anywhere;
+}
+
+.draft-connection-diagram strong {
+  color: #0f766e;
+  font-size: 1.1rem;
+}
+
+.draft-detail-table {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.55rem;
+}
+
+.draft-detail-row {
+  display: grid;
+  grid-template-columns: minmax(120px, 0.55fr) minmax(0, 1fr);
+  gap: 0.7rem;
+  align-items: start;
+  padding: 0.58rem 0.7rem;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(15, 23, 42, 0.08);
+}
+
+.draft-detail-row span {
+  color: #64706d;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.draft-detail-row strong {
+  color: #12201e;
+  font-size: 0.94rem;
+  overflow-wrap: anywhere;
+}

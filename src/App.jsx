@@ -2915,7 +2915,7 @@ function App() {
           processingRequestId,
           requestForCheck?.supabaseId
             ? "Request is waiting for Easy Harness checking."
-            : "Request is saved without a live intake agent. Staff can review it manually.",
+            : "Request is saved. Easy Harness can continue reviewing it in this thread.",
         );
         setUserView("thread");
       }, 1800),
@@ -3994,6 +3994,10 @@ function App() {
           "Harness request",
         status: draftStatusTitle(status, data.status || request.status),
         compactDetails: draft.user_facing_summary?.compact_details || [],
+        connectionGoal: draft.user_intent?.connection_goal || "",
+        intentType: draft.user_intent?.intent_type || "",
+        fromSide: draft.user_intent?.from_side || "",
+        toSide: draft.user_intent?.to_side || [],
         knownDetails: knownRequirementItems(draft.known_requirements),
         files: (draft.provided_evidence || [])
           .map((item) => item.filename || item.content_summary || item.type)
@@ -4051,7 +4055,7 @@ function App() {
           blocks: [
             {
               type: "text",
-              text: "Automatic checking did not finish. Your request is saved, and Easy Harness can review it manually. You can also add more details here.",
+              text: "Easy Harness could not finish checking this request. Your request is saved, and you can continue adding details here.",
             },
           ],
         };
@@ -4062,8 +4066,8 @@ function App() {
             schema_version: "easy_harness_draft_v0_1",
             status: "needs_info",
             adapter: platformAdapters.checking.id,
-            reason: "Automatic checking did not finish. Easy Harness can review this manually.",
-            missing: ["manual review"],
+            reason: "Easy Harness could not finish this intake check. The request is saved and can continue in this thread.",
+            missing: ["continue request"],
             checkedAt: new Date().toISOString(),
             error: failureMessage,
           },
@@ -7036,11 +7040,23 @@ function ContentBlock({ block, request }) {
   return null;
 }
 
+function splitDetailRow(item = "") {
+  const text = String(item);
+  const separator = text.indexOf(":");
+  if (separator < 0) return ["Detail", text];
+  return [text.slice(0, separator), text.slice(separator + 1).trim()];
+}
+
 function ThreadDraftSummary({ block, request }) {
   const details = block.compactDetails || [];
   const knownDetails = block.knownDetails || [];
   const reviewItems = block.reviewItems || [];
   const files = block.files || [];
+  const fromSide = block.fromSide && block.fromSide !== "unknown" ? block.fromSide : "Request";
+  const toSides = Array.isArray(block.toSide) ? block.toSide.filter(Boolean) : [];
+  const diagramLabel = toSides.length
+    ? `${fromSide} → ${toSides.join(", ")}`
+    : block.connectionGoal || block.title || request.title;
   return (
     <div className="thread-draft-summary">
       <div className="draft-record-top">
@@ -7051,6 +7067,13 @@ function ThreadDraftSummary({ block, request }) {
         </div>
         <span className="draft-state">{block.status || "Ready for review"}</span>
       </div>
+
+      <div className="draft-connection-diagram" aria-label="Draft connection summary">
+        <span>{fromSide}</span>
+        <strong>→</strong>
+        <span>{toSides.length ? toSides.join(", ") : diagramLabel}</span>
+      </div>
+
       {!!details.length && (
         <div className="summary-chips draft-summary-chips">
           {details.slice(0, 6).map((item) => (
@@ -7058,16 +7081,24 @@ function ThreadDraftSummary({ block, request }) {
           ))}
         </div>
       )}
+
       {!!knownDetails.length && (
         <div className="draft-summary-section">
           <strong>Known details</strong>
-          <ul>
-            {knownDetails.slice(0, 6).map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ul>
+          <div className="draft-detail-table">
+            {knownDetails.slice(0, 8).map((item) => {
+              const [label, value] = splitDetailRow(item);
+              return (
+                <div className="draft-detail-row" key={item}>
+                  <span>{label}</span>
+                  <strong>{value}</strong>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
+
       {!!files.length && (
         <div className="draft-summary-section">
           <strong>Files received</strong>
