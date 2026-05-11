@@ -551,8 +551,8 @@ function normalizeDraft(
     summary.request_line,
     normalizeString(intent.connection_goal, "Harness request"),
   );
-  const neededNext = normalizeList(summary.needed_next, 3);
-  const closureQuestions = questions.length ? questions : neededNext;
+  const neededNext = canClose ? [] : normalizeList(summary.needed_next, 3);
+  const closureQuestions = canClose ? [] : questions.length ? questions : neededNext;
 
   return {
     schema_version: schemaVersion,
@@ -848,6 +848,64 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
     .join("\n\n");
 }
 
+function fieldValueLabel(value: unknown) {
+  if (!value) return "";
+  if (typeof value === "string") return value === "unknown" ? "" : value;
+  if (typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return normalizeString(record.value, "") || normalizeString(record.label, "");
+  }
+  return String(value);
+}
+
+function knownDetailLabels(draft: EasyHarnessDraft) {
+  return Object.entries(draft.known_requirements)
+    .map(([key, value]) => {
+      const label = fieldValueLabel(value);
+      return label ? `${key.replaceAll("_", " ")}: ${label}` : "";
+    })
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function unknownLabel(item: UnknownItem) {
+  return item.question || item.field || item.reason || "Review item";
+}
+
+function draftReviewItems(draft: EasyHarnessDraft) {
+  return [
+    ...draft.unknowns.easy_harness_review.map(unknownLabel),
+    ...draft.unknowns.later_supplier_or_engineering_confirmation.map(unknownLabel),
+  ]
+    .filter(Boolean)
+    .slice(0, 8);
+}
+
+function buildMessageBlocks(draft: EasyHarnessDraft, customerMessage: string, requestRow: RequestRow) {
+  const blocks: Array<Record<string, unknown>> = [
+    { type: "text", text: customerMessage },
+  ];
+  if (draft.draft_closure.can_close_user_draft) {
+    blocks.push({
+      type: "draft_summary",
+      draftId: `${requestRow.request_number}-D1`,
+      title:
+        draft.user_facing_summary.request_line ||
+        draft.user_intent.connection_goal ||
+        requestRow.title ||
+        "Harness request",
+      status: "Ready for Easy Harness review",
+      compactDetails: draft.user_facing_summary.compact_details,
+      knownDetails: knownDetailLabels(draft),
+      files: draft.provided_evidence
+        .map((item) => item.filename || item.content_summary || item.type)
+        .filter(Boolean),
+      reviewItems: draftReviewItems(draft),
+    });
+  }
+  return blocks;
+}
+
 function summarizeRequestForModel(
   requestRow: RequestRow,
   messages: MessageRow[],
@@ -939,6 +997,10 @@ async function callDeepSeek(inputText: string, trigger = "manual") {
             "A real connection goal can be device A to device B, copy/replace an old harness, make an adapter between two ports, connector ends, pinout, cable routing, or clear harness context.",
             "Generic messages like 'see whether my attachment is correct', 'I need a cable', 'design a harness', or an unrelated/reference product image are not enough to close a draft unless they also state what needs to connect.",
             "DeepSeek currently receives attachment metadata and conversation text, not reliable visual pixels. Do not claim to visually identify connector models from attachments. If photos are attached, route connector identification to Easy Harness review unless details are in text.",
+            "If the user asks to copy or replace an old harness and provides photos or sample files, treat that as a valid connection intent. Do not require device A-to-B endpoints before making progress; ask only high-value details such as exact copy vs allowed changes, quantity, or length if useful.",
+            "For power-load requests such as battery to motor, motor controller, heater, actuator, or other high-current equipment, ask one concise voltage/current/power question if not already known. Make it optional: if the user does not know, route it to Easy Harness review instead of blocking indefinitely.",
+            "If the user says they do not know a connector model but has photos, do not force a guess. Route connector identification to Easy Harness review.",
+            "When a draft is ready for Easy Harness review, user_facing_summary.needed_next must be empty unless the user personally must answer something now. Put Easy Harness-owned work in easy_harness_review, not needed_next.",
             "Unknowns must be separated into: ask_user_now, ask_user_if_likely_known, easy_harness_review, later_supplier_or_engineering_confirmation.",
             "Close the user draft when the request is harness-related, the connection intent can be stated clearly, user-provided information has been captured, unknowns are classified, and further broad questioning is unlikely to improve the user-side request.",
             "For ready_for_review, the message should be short and should not claim price, material, supplier, or production readiness.",
@@ -1163,6 +1225,7 @@ Deno.serve(async (request) => {
     const checkedAt = new Date().toISOString();
     const nextStatus = requestStatusFor(draft);
     const customerMessage = buildCustomerMessage(draft);
+    const messageBlocks = buildMessageBlocks(draft, customerMessage, requestRow);
     const checkResult = buildCheckResult(draft, {
       model,
       provider,
@@ -1198,21 +1261,33 @@ Deno.serve(async (request) => {
     if (updateError)
       throw new Error(`Could not update request: ${updateError.message}`);
 
-    const { error: messageInsertError } = await supabase
+    const { data: latestRows } = await supabase
       .from("request_messages")
-      .insert({
-        request_id: requestRow.id,
-        author_id: null,
-        author_role: "easy_harness",
-        body: customerMessage,
-        blocks: [{ type: "text", text: customerMessage }],
-        visibility: "thread",
-      });
+      .select("id,author_role,created_at")
+      .eq("request_id", requestRow.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const latestRole = latestRows?.[0]?.author_role || "";
+    let insertedMessage = true;
+    if (latestRole === "customer") {
+      const { error: messageInsertError } = await supabase
+        .from("request_messages")
+        .insert({
+          request_id: requestRow.id,
+          author_id: null,
+          author_role: "easy_harness",
+          body: customerMessage,
+          blocks: messageBlocks,
+          visibility: "thread",
+        });
 
-    if (messageInsertError)
-      throw new Error(
-        `Could not insert Easy Harness message: ${messageInsertError.message}`,
-      );
+      if (messageInsertError)
+        throw new Error(
+          `Could not insert Easy Harness message: ${messageInsertError.message}`,
+        );
+    } else {
+      insertedMessage = false;
+    }
 
     await supabase.from("integration_events").insert({
       adapter: adapterId,
@@ -1238,7 +1313,7 @@ Deno.serve(async (request) => {
       readiness: legacyReadinessFor(draft),
       draftStatus: draft.draft_meta.draft_status,
       checkResult,
-      message: customerMessage,
+      message: insertedMessage ? customerMessage : "",
     });
   } catch (error) {
     const message =
@@ -1271,6 +1346,20 @@ Deno.serve(async (request) => {
         },
       })
       .eq("id", requestRow.id);
+
+    await supabase.from("request_messages").insert({
+      request_id: requestRow.id,
+      author_id: null,
+      author_role: "easy_harness",
+      body: "Automatic checking did not finish. Your request is saved, and Easy Harness can review it manually. You can also add more details here.",
+      blocks: [
+        {
+          type: "text",
+          text: "Automatic checking did not finish. Your request is saved, and Easy Harness can review it manually. You can also add more details here.",
+        },
+      ],
+      visibility: "thread",
+    });
 
     return jsonResponse(
       {

@@ -873,8 +873,15 @@ function messageId() {
   return `m_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
 
-function makeRequestId(count) {
-  return `HD-2026-${1050 + count}-A`;
+function makeRequestId(existingRequests = []) {
+  const year = new Date().getFullYear();
+  const requestList = Array.isArray(existingRequests) ? existingRequests : [];
+  const maxExisting = requestList.reduce((max, request) => {
+    const match = String(request?.id || request?.request_number || "").match(/HD-\d{4}-(\d+)-A/i);
+    const value = match ? Number(match[1]) : 0;
+    return Number.isFinite(value) && value > max ? value : max;
+  }, 1049);
+  return `HD-${year}-${maxExisting + 1}-A`;
 }
 
 function inferTitle(text) {
@@ -894,6 +901,26 @@ function readStoredState(key, fallback) {
   } catch {
     return fallback;
   }
+}
+
+function writeStoredState(key, value) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // Local storage can be unavailable in private or restricted browsing modes.
+  }
+}
+
+function uploadTermsKey(userId) {
+  return `easy-harness.uploadTermsAccepted.${userId || "anonymous"}`;
+}
+
+function readUploadTermsAccepted(userId) {
+  return Boolean(readStoredState(uploadTermsKey(userId), false));
+}
+
+function writeUploadTermsAccepted(userId) {
+  writeStoredState(uploadTermsKey(userId), true);
 }
 
 function useStoredState(key, fallback) {
@@ -2387,8 +2414,8 @@ function App() {
     "easy-harness.authSession",
     null,
   );
-  const [userView, setUserView] = useState("start");
-  const [staffView, setStaffView] = useState("queue");
+  const [userView, setUserView] = useStoredState("easy-harness.userView", "start");
+  const [staffView, setStaffView] = useStoredState("easy-harness.staffView", "queue");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [requests, setRequests] = useStoredState(
     "easy-harness.requests",
@@ -2456,12 +2483,9 @@ function App() {
   const [processingIndex, setProcessingIndex] = useState(-1);
   const [processingRequestId, setProcessingRequestId] = useState("");
   const [submittingRequest, setSubmittingRequest] = useState(false);
+  const [submissionPhase, setSubmissionPhase] = useState("");
   const [sendingUserMessage, setSendingUserMessage] = useState(false);
-  const [agentActivity, setAgentActivity] = useState({
-    requestId: "",
-    mode: "",
-    startedAt: 0,
-  });
+  const [agentActivities, setAgentActivities] = useState({});
   const [userComposer, setUserComposer] = useState("");
   const [userComposerFiles, setUserComposerFiles] = useState([]);
   const [staffComposer, setStaffComposer] = useState("");
@@ -2492,10 +2516,19 @@ function App() {
   const userComposerUploadRef = useRef(null);
   const submittingRequestRef = useRef(false);
   const sendingUserMessageRef = useRef(false);
+  const currentUserIdRef = useRef(currentUserId);
+
+  useEffect(() => {
+    currentUserIdRef.current = currentUserId;
+  }, [currentUserId]);
 
   const currentUser = useMemo(
     () => users.find((user) => user.id === currentUserId) || null,
     [currentUserId, users],
+  );
+
+  const uploadTermsAccepted = Boolean(
+    currentUser?.termsAccepted || readUploadTermsAccepted(currentUser?.id),
   );
 
   const visibleRequests = useMemo(() => {
@@ -3940,15 +3973,45 @@ function App() {
     );
   }
 
+  function agentMessageBlocksFromCheckingResult(data, request) {
+    const blocks = data.message ? [{ type: "text", text: data.message }] : [];
+    const checkResult = data.checkResult || {};
+    const draft = normalizeDraftForView(checkResult, request);
+    const status = draft.draft_meta?.draft_status || data.draftStatus || "";
+    const readyForReview =
+      status === "ready_for_easy_harness_review" ||
+      status === "closed_for_easy_harness_review" ||
+      data.checkStatus === "accepted" ||
+      data.status === "in_review";
+    if (readyForReview) {
+      blocks.push({
+        type: "draft_summary",
+        draftId: `${request.id}-D1`,
+        title:
+          draft.user_facing_summary?.request_line ||
+          draft.user_intent?.connection_goal ||
+          request.title ||
+          "Harness request",
+        status: draftStatusTitle(status, data.status || request.status),
+        compactDetails: draft.user_facing_summary?.compact_details || [],
+        knownDetails: knownRequirementItems(draft.known_requirements),
+        files: (draft.provided_evidence || [])
+          .map((item) => item.filename || item.content_summary || item.type)
+          .filter(Boolean),
+        reviewItems: easyHarnessReviewItems(draft).slice(0, 5),
+      });
+    }
+    return blocks;
+  }
+
   async function invokeSupabaseChecking(request, trigger = "manual") {
     if (!supabase || !request?.supabaseId || !currentUser) return null;
 
     const activityMode = trigger === "initial_request" ? "initial" : "followup";
-    setAgentActivity({
-      requestId: request.id,
-      mode: activityMode,
-      startedAt: Date.now(),
-    });
+    setAgentActivities((current) => ({
+      ...current,
+      [request.id]: { mode: activityMode, startedAt: Date.now() },
+    }));
 
     recordServiceEvent(
       platformAdapters.checking.id,
@@ -3969,16 +4032,44 @@ function App() {
       });
 
       if (error || !data?.ok) {
+        const failureMessage =
+          error?.message ||
+          data?.message ||
+          data?.code ||
+          "Easy Harness intake agent did not finish.";
         recordServiceEvent(
           platformAdapters.checking.id,
           "remote_check_failed",
           "request",
           request.id,
-          error?.message ||
-            data?.message ||
-            data?.code ||
-            "Easy Harness intake agent did not finish.",
+          failureMessage,
         );
+        const fallbackMessage = {
+          id: `agent_fallback_${request.id}_${Date.now()}`,
+          role: "easy",
+          createdAt: new Date().toISOString(),
+          blocks: [
+            {
+              type: "text",
+              text: "Automatic checking did not finish. Your request is saved, and Easy Harness can review it manually. You can also add more details here.",
+            },
+          ],
+        };
+        updateRequest(request.id, (current) => ({
+          ...current,
+          status: "needs_info",
+          checkResult: {
+            schema_version: "easy_harness_draft_v0_1",
+            status: "needs_info",
+            adapter: platformAdapters.checking.id,
+            reason: "Automatic checking did not finish. Easy Harness can review this manually.",
+            missing: ["manual review"],
+            checkedAt: new Date().toISOString(),
+            error: failureMessage,
+          },
+          updated: "Just now",
+          messages: appendMessageIfMissing(current.messages || [], fallbackMessage),
+        }));
         return null;
       }
 
@@ -3996,7 +4087,7 @@ function App() {
             id: `agent_${data.requestId || request.supabaseId}_${data.checkResult?.checkedAt || Date.now()}`,
             role: "easy",
             createdAt: data.checkResult?.checkedAt || new Date().toISOString(),
-            blocks: [{ type: "text", text: data.message }],
+            blocks: agentMessageBlocksFromCheckingResult(data, request),
           }
         : null;
       const nextStatus = data.status || request.status;
@@ -4024,11 +4115,12 @@ function App() {
       if (data.requestNumber) setActiveRequestId(data.requestNumber);
       return data;
     } finally {
-      setAgentActivity((current) =>
-        current.requestId === request.id
-          ? { requestId: "", mode: "", startedAt: 0 }
-          : current,
-      );
+      setAgentActivities((current) => {
+        if (!current[request.id]) return current;
+        const next = { ...current };
+        delete next[request.id];
+        return next;
+      });
     }
   }
 
@@ -4176,16 +4268,32 @@ function App() {
       return null;
     }
 
+    let mergedUser = user;
     setUsers((current) => {
-      const exists = current.some((item) => item.id === user.id);
-      return exists
-        ? current.map((item) =>
-            item.id === user.id ? { ...item, ...user } : item,
-          )
-        : [user, ...current];
+      const existing = current.find((item) => item.id === user.id);
+      mergedUser = existing
+        ? {
+            ...existing,
+            ...user,
+            termsAccepted:
+              existing.termsAccepted ||
+              user.termsAccepted ||
+              readUploadTermsAccepted(user.id),
+            termsAcceptedAt:
+              existing.termsAcceptedAt || user.termsAcceptedAt || "",
+          }
+        : {
+            ...user,
+            termsAccepted: user.termsAccepted || readUploadTermsAccepted(user.id),
+          };
+      return existing
+        ? current.map((item) => (item.id === user.id ? mergedUser : item))
+        : [mergedUser, ...current];
     });
 
-    signIn(user.id, createSupabaseAuthSession(session, user), user);
+    signIn(user.id, createSupabaseAuthSession(session, mergedUser), mergedUser, {
+      resetView: false,
+    });
     await loadSupabaseRequestData(user);
     await loadSupabaseOrderData(user);
     await loadSupabaseNotificationData(user);
@@ -4200,15 +4308,26 @@ function App() {
     return user;
   }
 
-  function signIn(userId, session = null, userOverride = null) {
+  function signIn(userId, session = null, userOverride = null, options = {}) {
     const selected = userOverride || users.find((user) => user.id === userId);
     if (!selected || selected.status === "suspended") return;
-    const isSwitchingUser = currentUserId !== userId;
+    const isSwitchingUser = currentUserIdRef.current !== userId;
     setAuthSession(session || createLocalAuthSession(selected));
     setCurrentUserId(userId);
     setUsers((current) =>
       current.map((user) =>
-        user.id === userId ? { ...user, lastActive: "Just now" } : user,
+        user.id === userId
+          ? {
+              ...user,
+              ...selected,
+              lastActive: "Just now",
+              termsAccepted:
+                user.termsAccepted ||
+                selected.termsAccepted ||
+                readUploadTermsAccepted(userId),
+              termsAcceptedAt: user.termsAcceptedAt || selected.termsAcceptedAt || "",
+            }
+          : user,
       ),
     );
     recordAudit(
@@ -4218,7 +4337,7 @@ function App() {
       `${roleCopy[selected.role]} workspace opened.`,
       selected,
     );
-    if (isSwitchingUser) {
+    if (isSwitchingUser && options.resetView !== false) {
       setUserView("requests");
       setStaffView("queue");
     }
@@ -4495,6 +4614,15 @@ function App() {
     event.target.value = "";
   }
 
+  function removePendingUpload(target, fileKey) {
+    const matches = (file) => (file.id || fileName(file)) === fileKey;
+    if (target === "composer") {
+      setUserComposerFiles((current) => current.filter((file) => !matches(file)));
+      return;
+    }
+    setUploadFiles((current) => current.filter((file) => !matches(file)));
+  }
+
   function fillSampleRequest() {
     setDescription(
       "I need a harness to connect a controller to two sensors. I have connector photos and an old harness sample.",
@@ -4531,6 +4659,7 @@ function App() {
       return;
     submittingRequestRef.current = true;
     setSubmittingRequest(true);
+    setSubmissionPhase("creating");
     try {
       if (!uploadFiles.length) {
         setFileError(
@@ -4538,13 +4667,16 @@ function App() {
         );
         return;
       }
-      if (!actor.termsAccepted && !termsChecked) {
+      const actorTermsAccepted =
+        actor.termsAccepted || readUploadTermsAccepted(actor.id);
+      if (!actorTermsAccepted && !termsChecked) {
         setTermsError(
           "Please accept the upload and request terms before submitting.",
         );
         return;
       }
-      if (!actor.termsAccepted && termsChecked) {
+      if (!actorTermsAccepted && termsChecked) {
+        writeUploadTermsAccepted(actor.id);
         updateUser(
           actor.id,
           {
@@ -4563,7 +4695,7 @@ function App() {
       setDescription("");
       setUploadFiles([]);
       setFileError("");
-      const nextId = makeRequestId(requests.length);
+      const nextId = makeRequestId(requests);
       const firstMessage = customerMessage(text, files);
       const nextRequest = {
         id: nextId,
@@ -4587,12 +4719,19 @@ function App() {
         messages: [firstMessage],
       };
 
+      setSubmissionPhase("uploading");
       const savedBundle = await createSupabaseRequestBundle(
         nextRequest,
         firstMessage,
         uploadDrafts,
         actor,
       );
+      if (supabase && isUuidLike(actor.id) && !savedBundle?.requestRow) {
+        setDescription(text);
+        setUploadFiles(uploadDrafts);
+        setFileError("Request could not be saved. Please try again.");
+        return;
+      }
       const savedRequest = savedBundle?.requestRow
         ? {
             ...nextRequest,
@@ -4650,6 +4789,7 @@ function App() {
       setTermsChecked(false);
       if (savedRequest.supabaseId) {
         setProcessingRequestId("");
+        setSubmissionPhase("checking");
         setUserView("thread");
         recordServiceEvent(
           platformAdapters.checking.id,
@@ -4658,7 +4798,7 @@ function App() {
           savedRequest.id,
           "Request is waiting for Easy Harness checking.",
         );
-        await invokeSupabaseChecking(savedRequest, "initial_request");
+        void invokeSupabaseChecking(savedRequest, "initial_request");
       } else {
         setProcessingRequestId(savedRequest.id);
         setUserView("processing");
@@ -4666,6 +4806,7 @@ function App() {
     } finally {
       submittingRequestRef.current = false;
       setSubmittingRequest(false);
+      setSubmissionPhase("");
     }
   }
 
@@ -4685,7 +4826,7 @@ function App() {
     );
     const shouldRunRemoteChecking =
       remoteThread &&
-      ["checking", "needs_info", "not_supported", "draft_saved"].includes(
+      ["checking", "needs_info", "not_supported", "draft_saved", "in_review"].includes(
         activeRequest.status,
       );
     const message = {
@@ -4710,10 +4851,10 @@ function App() {
           return {
             ...request,
             files: nextFiles,
-            status: ["needs_info", "not_supported"].includes(request.status)
+            status: ["needs_info", "not_supported", "in_review"].includes(request.status)
               ? "checking"
               : request.status,
-            checkResult: ["needs_info", "not_supported"].includes(
+            checkResult: ["needs_info", "not_supported", "in_review"].includes(
               request.status,
             )
               ? {
@@ -4816,7 +4957,7 @@ function App() {
             "Customer update saved to Supabase.",
           );
           if (shouldRunRemoteChecking) {
-            await invokeSupabaseChecking(activeRequest, "customer_followup");
+            void invokeSupabaseChecking(activeRequest, "customer_followup");
           }
         }
       } else {
@@ -5347,10 +5488,13 @@ function App() {
             files={uploadFiles}
             uploadRef={uploadRef}
             handleUpload={handleUpload}
+            removeFile={(fileKey) => removePendingUpload("start", fileKey)}
             fillSampleRequest={fillSampleRequest}
             startRequest={startRequest}
             submittingRequest={submittingRequest}
+            submissionPhase={submissionPhase}
             currentUser={currentUser}
+            uploadTermsAccepted={uploadTermsAccepted}
             termsChecked={termsChecked}
             setTermsChecked={setTermsChecked}
             termsError={termsError}
@@ -5388,9 +5532,13 @@ function App() {
               files={uploadFiles}
               uploadRef={uploadRef}
               handleUpload={handleUpload}
+              removeFile={(fileKey) => removePendingUpload("start", fileKey)}
               fillSampleRequest={fillSampleRequest}
               startRequest={startRequest}
+              submittingRequest={submittingRequest}
+              submissionPhase={submissionPhase}
               currentUser={currentUser}
+              uploadTermsAccepted={uploadTermsAccepted}
               termsChecked={termsChecked}
               setTermsChecked={setTermsChecked}
               termsError={termsError}
@@ -5407,9 +5555,10 @@ function App() {
             composerFiles={userComposerFiles}
             uploadRef={userComposerUploadRef}
             handleUpload={(event) => handleUpload(event, "composer")}
+            removeFile={(fileKey) => removePendingUpload("composer", fileKey)}
             sendMessage={sendUserMessage}
             sendingMessage={sendingUserMessage}
-            agentActivity={agentActivity}
+            agentActivity={agentActivities[activeRequest.id] ? { requestId: activeRequest.id, ...agentActivities[activeRequest.id] } : null}
             confirmRequest={confirmRequest}
             fileError={fileError}
             openOrder={openOrder}
@@ -6055,15 +6204,23 @@ function StartScreen({
   files,
   uploadRef,
   handleUpload,
+  removeFile,
   fillSampleRequest,
   startRequest,
   submittingRequest = false,
+  submissionPhase = "",
   currentUser,
+  uploadTermsAccepted = false,
   termsChecked,
   setTermsChecked,
   termsError,
   fileError,
 }) {
+  const phaseCopy = {
+    creating: "Creating your request…",
+    uploading: "Uploading files…",
+    checking: "Easy Harness is checking your request…",
+  };
   return (
     <section className="start-screen">
       <div className="start-copy clean">
@@ -6074,6 +6231,7 @@ function StartScreen({
         <button
           className="attach-button"
           onClick={() => uploadRef.current?.click()}
+          disabled={submittingRequest}
         >
           <Plus size={21} />
         </button>
@@ -6082,6 +6240,7 @@ function StartScreen({
           onChange={(event) => setDescription(event.target.value)}
           placeholder="Describe the connection you need, or upload the files you already have..."
           rows={1}
+          disabled={submittingRequest}
         />
         <input
           ref={uploadRef}
@@ -6104,6 +6263,7 @@ function StartScreen({
         <button
           className="soft-chip"
           onClick={() => uploadRef.current?.click()}
+          disabled={submittingRequest}
         >
           <Upload size={16} />
           Upload files
@@ -6118,14 +6278,28 @@ function StartScreen({
       {!!files.length && (
         <div className="file-strip compact center">
           {files.map((file) => (
-            <FileChip key={file.id || fileName(file)} file={file} />
+            <FileChip
+              key={file.id || fileName(file)}
+              file={file}
+              onRemove={() => removeFile?.(file.id || fileName(file))}
+            />
           ))}
+        </div>
+      )}
+
+      {submittingRequest && (
+        <div className="submission-progress-card">
+          <Clock3 size={17} />
+          <div>
+            <strong>{phaseCopy[submissionPhase] || "Creating your request…"}</strong>
+            <p>Keep this page open. Easy Harness will move you into the request thread automatically.</p>
+          </div>
         </div>
       )}
 
       {fileError && <div className="form-error">{fileError}</div>}
 
-      {!currentUser?.termsAccepted && (
+      {!uploadTermsAccepted && (
         <label className={`terms-card ${termsError ? "error" : ""}`}>
           <input
             type="checkbox"
@@ -6347,6 +6521,7 @@ function AccountScreen({ user, updateUser }) {
   };
 
   const acceptTerms = () => {
+    writeUploadTermsAccepted(user.id);
     updateUser(
       {
         termsAccepted: true,
@@ -6500,6 +6675,7 @@ function RequestWorkspace({
   composerFiles,
   uploadRef,
   handleUpload,
+  removeFile,
   sendMessage,
   sendingMessage = false,
   agentActivity,
@@ -6508,16 +6684,15 @@ function RequestWorkspace({
   openOrder,
   linkedOrder,
 }) {
-  const missingItems =
-    request.checkResult?.user_facing_summary?.needed_next ||
-    request.checkResult?.missing ||
-    request.checkResult?.missing_information ||
-    [];
+  const draftForView = normalizeDraftForView(request.checkResult || {}, request);
+  const draftStatus = draftForView.draft_meta?.draft_status || "";
+  const missingItems = userNeededNextItems(draftForView);
   const agentActive = agentActivity?.requestId === request.id;
   const shouldShowMissingInfo =
     perspective === "user" &&
     missingItems.length > 0 &&
-    ["needs_info", "in_review"].includes(request.status);
+    !isReadyDraftStatus(draftStatus) &&
+    ["needs_info", "not_supported", "checking"].includes(request.status);
 
   return (
     <section className="request-workspace">
@@ -6543,6 +6718,7 @@ function RequestWorkspace({
             files={composerFiles}
             uploadRef={uploadRef}
             handleUpload={handleUpload}
+            removeFile={removeFile}
             sendMessage={sendMessage}
             sending={sendingMessage}
             fileError={fileError}
@@ -6827,6 +7003,10 @@ function ContentBlock({ block, request }) {
     );
   }
 
+  if (block.type === "draft_summary") {
+    return <ThreadDraftSummary block={block} request={request} />;
+  }
+
   if (block.type === "event") {
     return (
       <div className="event-note">
@@ -6856,12 +7036,72 @@ function ContentBlock({ block, request }) {
   return null;
 }
 
+function ThreadDraftSummary({ block, request }) {
+  const details = block.compactDetails || [];
+  const knownDetails = block.knownDetails || [];
+  const reviewItems = block.reviewItems || [];
+  const files = block.files || [];
+  return (
+    <div className="thread-draft-summary">
+      <div className="draft-record-top">
+        <div>
+          <span className="eyebrow">Easy Harness draft</span>
+          <h2>{block.draftId || `${request.id}-D1`}</h2>
+          <p>{block.title || request.title}</p>
+        </div>
+        <span className="draft-state">{block.status || "Ready for review"}</span>
+      </div>
+      {!!details.length && (
+        <div className="summary-chips draft-summary-chips">
+          {details.slice(0, 6).map((item) => (
+            <em key={item}>{item}</em>
+          ))}
+        </div>
+      )}
+      {!!knownDetails.length && (
+        <div className="draft-summary-section">
+          <strong>Known details</strong>
+          <ul>
+            {knownDetails.slice(0, 6).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {!!files.length && (
+        <div className="draft-summary-section">
+          <strong>Files received</strong>
+          <ul>
+            {files.slice(0, 5).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {!!reviewItems.length && (
+        <div className="draft-summary-section">
+          <strong>Easy Harness will review</strong>
+          <ul>
+            {reviewItems.slice(0, 5).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+      <p className="draft-summary-note">
+        You can still add details or corrections in this thread.
+      </p>
+    </div>
+  );
+}
+
 function UserComposer({
   value,
   setValue,
   files,
   uploadRef,
   handleUpload,
+  removeFile,
   sendMessage,
   sending = false,
   fileError,
@@ -6871,7 +7111,11 @@ function UserComposer({
       {!!files.length && (
         <div className="composer-files">
           {files.map((file) => (
-            <FileChip file={file} key={file.id || fileName(file)} />
+            <FileChip
+              file={file}
+              key={file.id || fileName(file)}
+              onRemove={() => removeFile?.(file.id || fileName(file))}
+            />
           ))}
         </div>
       )}
@@ -7020,6 +7264,72 @@ function normalizeDraftForView(checkResult = {}, request = {}) {
   };
 }
 
+function isReadyDraftStatus(status) {
+  return (
+    status === "ready_for_easy_harness_review" ||
+    status === "closed_for_easy_harness_review"
+  );
+}
+
+function normalizeUnknownItemList(items = []) {
+  return (Array.isArray(items) ? items : [])
+    .map((item) => unknownItemLabel(item))
+    .filter(Boolean);
+}
+
+function userNeededNextItems(draft = {}) {
+  const status = draft?.draft_meta?.draft_status || "";
+  if (isReadyDraftStatus(status)) return [];
+  const unknowns = draft?.unknowns || {};
+  const directQuestions = [
+    ...normalizeUnknownItemList(unknowns.ask_user_now),
+    ...normalizeUnknownItemList(unknowns.ask_user_if_likely_known),
+  ];
+  if (directQuestions.length) return [...new Set(directQuestions)].slice(0, 3);
+  return (draft?.user_facing_summary?.needed_next || [])
+    .filter((item) => !isEasyHarnessReviewOnlyItem(item))
+    .slice(0, 3);
+}
+
+function isEasyHarnessReviewOnlyItem(item = "") {
+  const text = String(item).toLowerCase();
+  return /easy harness|review|visual|identify|connector identification|finalize|terminal|seal|wire sizing|engineering|supplier/.test(text);
+}
+
+function easyHarnessReviewItems(draft = {}) {
+  const unknowns = draft?.unknowns || {};
+  const direct = normalizeUnknownItemList(unknowns.easy_harness_review);
+  const later = normalizeUnknownItemList(unknowns.later_supplier_or_engineering_confirmation);
+  const fromSummary = (draft?.user_facing_summary?.needed_next || []).filter(isEasyHarnessReviewOnlyItem);
+  return [...new Set([...direct, ...fromSummary, ...later])].slice(0, 8);
+}
+
+function professionalDetailItems(details = {}) {
+  const items = [];
+  const connectors = Array.isArray(details.connectors) ? details.connectors : [];
+  connectors.slice(0, 4).forEach((item) => {
+    const label = item.part_number || item.value || item.label;
+    if (label) items.push(`Connector: ${label}`);
+  });
+  const wireGauge = detailValueLabel(details.wire_gauge);
+  if (wireGauge) items.push(`Wire gauge: ${wireGauge}`);
+  const pinout = Array.isArray(details.pinout) ? details.pinout : [];
+  if (pinout.length) items.push(`Pinout: ${pinout.length} pin assignment${pinout.length > 1 ? "s" : ""} captured`);
+  const terminals = Array.isArray(details.terminals) ? details.terminals : [];
+  terminals.slice(0, 3).forEach((item) => {
+    const label = item.part_number || item.value || item.label;
+    if (label) items.push(`Terminal: ${label}`);
+  });
+  const shielding = detailValueLabel(details.shielding);
+  if (shielding) items.push(`Shielding: ${shielding}`);
+  const tests = Array.isArray(details.testing_requirements) ? details.testing_requirements : [];
+  tests.slice(0, 3).forEach((item) => {
+    const label = item.name || item.value || item.requirement || item.label;
+    if (label) items.push(`Test: ${label}`);
+  });
+  return [...new Set(items)].slice(0, 8);
+}
+
 function draftStatusTitle(status, requestStatus) {
   const copy = {
     not_harness_related: "Needs harness-related information",
@@ -7120,7 +7430,9 @@ function IntakeDraftCard({ checkResult, request }) {
       ? summary.what_we_have
       : knownRequirementItems(draft.known_requirements)
   ).slice(0, 4);
-  const neededNext = (summary.needed_next || []).slice(0, 3);
+  const neededNext = userNeededNextItems(draft);
+  const reviewItems = easyHarnessReviewItems(draft);
+  const professionalItems = professionalDetailItems(draft.captured_professional_details);
   const evidence = draft.provided_evidence || [];
   const riskFlags = draft.risk_flags || [];
   const fullUnknowns = unknownsByOwner(draft);
@@ -7169,6 +7481,17 @@ function IntakeDraftCard({ checkResult, request }) {
         </div>
       )}
 
+      {!!reviewItems.length && (
+        <div className="summary-section review-items">
+          <span>Easy Harness will review</span>
+          <ul>
+            {reviewItems.slice(0, 4).map((item) => (
+              <li key={item}>{formatMissingInfoItem(item)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {!!evidence.length && (
         <div className="summary-section">
           <span>Files received</span>
@@ -7199,6 +7522,17 @@ function IntakeDraftCard({ checkResult, request }) {
               <strong>Known details</strong>
               <ul>
                 {knownRequirementItems(draft.known_requirements).map((item) => (
+                  <li key={item}>{item}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {!!professionalItems.length && (
+            <div className="full-detail-section professional-details">
+              <strong>Professional details captured</strong>
+              <ul>
+                {professionalItems.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
               </ul>
@@ -10181,16 +10515,26 @@ function StatusBadge({ status }) {
   return <span className={`list-status ${className}`}>{label}</span>;
 }
 
-function FileChip({ file }) {
+function FileChip({ file, onRemove }) {
   const size = fileSizeLabel(file);
   return (
     <span
-      className="file-chip"
+      className={`file-chip ${onRemove ? "removable" : ""}`}
       title={size ? `${fileName(file)} - ${size}` : fileName(file)}
     >
       <File size={14} />
       {fileName(file)}
       {size && <small>{size}</small>}
+      {onRemove && (
+        <button
+          type="button"
+          className="file-chip-remove"
+          onClick={onRemove}
+          aria-label={`Remove ${fileName(file)}`}
+        >
+          ×
+        </button>
+      )}
     </span>
   );
 }
