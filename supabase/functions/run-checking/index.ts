@@ -604,23 +604,49 @@ function hasPowerLoadRisk(draft: EasyHarnessDraft) {
   ]);
 }
 
-function hasPowerBasis(draft: EasyHarnessDraft) {
+function hasVoltageBasis(draft: EasyHarnessDraft) {
+  if (hasKnownRequirement(draft, ["voltage", "volts", "v_rating"])) return true;
+  const text = draftTextBlob(draft);
+  return matchesAny(text, [/\b\d+(?:\.\d+)?\s*(v|volt|volts)\b/i]);
+}
+
+function hasCurrentOrPowerBasis(draft: EasyHarnessDraft) {
   if (
     hasKnownRequirement(draft, [
-      "voltage",
       "current",
+      "max_current",
+      "maximum_current",
       "power",
       "wattage",
       "load",
       "amp",
       "amps",
+      "a_rating",
     ])
   )
     return true;
   const text = draftTextBlob(draft);
   return matchesAny(text, [
-    /\b\d+(?:\.\d+)?\s*(v|volt|volts|a|amp|amps|w|watt|watts|kw)\b/i,
+    /\b\d+(?:\.\d+)?\s*(a|amp|amps|w|watt|watts|kw)\b/i,
+    /\b(low|small|signal[-\s]?level|logic[-\s]?level)\s+(current|power)\b/i,
   ]);
+}
+
+function hasPowerBasis(draft: EasyHarnessDraft) {
+  return hasVoltageBasis(draft) || hasCurrentOrPowerBasis(draft);
+}
+
+function hasExplicitPowerConductor(draft: EasyHarnessDraft) {
+  const text = draftTextBlob(draft);
+  return matchesAny(text, [
+    /\b(pin\s*\d+\s*[=:]\s*\d+(?:\.\d+)?\s*v)\b/i,
+    /\b(12v|24v|48v|5v)\b.+\b(gnd|ground)\b/i,
+    /\b(power|supply|vcc|vin|battery\s*positive|positive supply)\b/i,
+  ]);
+}
+
+function needsCurrentOrPowerBeforeDraft(draft: EasyHarnessDraft) {
+  return (hasPowerLoadRisk(draft) || hasExplicitPowerConductor(draft)) && !hasCurrentOrPowerBasis(draft);
 }
 
 function addQuestionOnce(
@@ -674,12 +700,17 @@ function enforceDraftReadiness(draft: EasyHarnessDraft): EasyHarnessDraft {
       "Where will this harness be used, or what equipment is it for?",
     );
   }
-  if (hasPowerLoadRisk(draft) && !hasPowerBasis(draft)) {
+  if (needsCurrentOrPowerBeforeDraft(draft)) {
+    const hasVoltage = hasVoltageBasis(draft);
     addQuestionOnce(
       blockingQuestions,
-      "voltage_current_or_power",
-      "Power-load requests need at least an optional voltage, current, or power check.",
-      "Do you know the voltage, current, or power level? Approximate is fine.",
+      hasVoltage ? "current_or_power" : "voltage_current_or_power",
+      hasVoltage
+        ? "A power-carrying harness needs expected current or power before the user-side draft can be treated as ready."
+        : "A power-carrying harness needs voltage and expected current or power before the user-side draft can be treated as ready.",
+      hasVoltage
+        ? "What maximum current or power is expected on the power line? Approximate is fine."
+        : "What voltage and maximum current or power will this harness carry? Approximate is fine.",
     );
   }
 
@@ -1281,13 +1312,13 @@ async function callDeepSeek(inputText: string, trigger = "manual") {
             "DeepSeek currently receives attachment metadata and conversation text, not reliable visual pixels. Do not claim to visually identify connector models from attachments. If photos are attached, route connector identification to Easy Harness review unless details are in text.",
             "Do not use keyword scripts or case-specific templates. Identify the request type from the whole conversation, then apply the same draft readiness standard to every request.",
             "An Easy Harness Draft should be prepared only when the user-side request is a usable demand package, not merely when a broad intention is recognizable.",
-            "Before closing a draft, check for these basic order-level inputs: request scope, quantity or sample quantity, approximate length or measurement basis, use context or environment, and any safety-critical power information if relevant.",
+            "Before closing a draft, check for these basic order-level inputs: request scope, quantity or sample quantity, approximate length or measurement basis, use context or environment, and power-carrying electrical basics when relevant.",
             "Do not require factory-level manufacturing details to close a draft, but do not put basic order details such as quantity, approximate length, or use context into Easy Harness review unless the user has explicitly provided a real measurement basis or says those details will be supplied later.",
-            "For power-load requests such as battery to motor, motor controller, heater, actuator, or other high-current equipment, ask one concise voltage/current/power question if not already known. It is a basic safety question, but do not ask factory production fields.",
+            "For power-carrying requests, expected voltage and current or power are functional/safety basics, not mere factory production details. If a supply pin, battery, motor, heater, actuator, pump, inverter, driver, or other load is involved and current or power is not known, ask one concise question before closing the draft. Do not ask terminal/crimp/tooling/IPC details as a substitute.",
             "If the user says they do not know a connector model but has photos, do not force a guess. Route connector identification to Easy Harness review.",
             "When a draft is ready for Easy Harness review, user_facing_summary.needed_next must be empty. Put Easy Harness-owned or later engineering work in easy_harness_review or later_supplier_or_engineering_confirmation, not needed_next.",
             "Unknowns must be separated into: ask_user_now, ask_user_if_likely_known, easy_harness_review, later_supplier_or_engineering_confirmation.",
-            "Close the user draft only when the request is harness-related, the request scope is clear, the basic order-level inputs are sufficient for Easy Harness to prepare a usable draft, user-provided information has been captured, and remaining unknowns are mostly professional or review items.",
+            "Close the user draft only when the request is harness-related, the request scope is clear, the basic order-level inputs are sufficient for Easy Harness to prepare a usable draft, key functional electrical information has been captured where relevant, user-provided information has been captured, and remaining unknowns are mostly professional or review items.",
             "For ready_for_review, the message should be short and should not claim price, material, supplier, or production readiness.",
             "All customer-facing summaries and questions must be in English.",
             "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",

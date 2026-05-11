@@ -6812,13 +6812,33 @@ function AgentActivityCard({ mode, startedAt }) {
 }
 
 function formatMissingInfoItem(item) {
+  const raw = String(item || "").trim();
+  if (!raw) return "Review item";
+  const lower = raw.toLowerCase();
   const copy = {
     "target quantity": "Target quantity",
     "approximate length": "Approximate length",
     "electrical rating": "Voltage or current rating",
+    power_details: "Power / voltage details",
+    voltage_current_or_power: "Voltage, current, or power level",
+    current_or_power: "Current or power level",
+    maximum_current: "Maximum current",
+    connector_identification: "Connector identification",
+    wire_gauge_and_colors: "Wire type, gauge, and colors",
+    routing_and_branch_design: "Routing and branch layout",
+    ip67_method: "Waterproofing / IP67 method",
+    unused_pins: "Unused pin handling",
+    terminal_and_crimp_specs: "Terminal and crimp details",
+    attachment_review: "Attachment review",
+    length_or_measurement_basis: "Approximate length or measurement basis",
+    request_scope: "Connection or copy scope",
+    use_context: "Use context or equipment",
   };
 
-  return copy[item] || item;
+  if (copy[raw]) return copy[raw];
+  if (copy[lower]) return copy[lower];
+  const text = raw.replaceAll("_", " ").replace(/\s+/g, " ").trim();
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function ThreadHeader({ request }) {
@@ -7104,7 +7124,7 @@ function ThreadDraftSummary({ block, request }) {
           <strong>Files received</strong>
           <ul>
             {files.slice(0, 5).map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item}>{formatMissingInfoItem(item)}</li>
             ))}
           </ul>
         </div>
@@ -7114,7 +7134,7 @@ function ThreadDraftSummary({ block, request }) {
           <strong>Easy Harness will review</strong>
           <ul>
             {reviewItems.slice(0, 5).map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item}>{formatMissingInfoItem(item)}</li>
             ))}
           </ul>
         </div>
@@ -7495,7 +7515,7 @@ function IntakeDraftCard({ checkResult, request }) {
           <span>What we have</span>
           <ul>
             {whatWeHave.map((item) => (
-              <li key={item}>{item}</li>
+              <li key={item}>{formatMissingInfoItem(item)}</li>
             ))}
           </ul>
         </div>
@@ -7553,7 +7573,7 @@ function IntakeDraftCard({ checkResult, request }) {
               <strong>Known details</strong>
               <ul>
                 {knownRequirementItems(draft.known_requirements).map((item) => (
-                  <li key={item}>{item}</li>
+                  <li key={item}>{formatMissingInfoItem(item)}</li>
                 ))}
               </ul>
             </div>
@@ -7564,7 +7584,7 @@ function IntakeDraftCard({ checkResult, request }) {
               <strong>Professional details captured</strong>
               <ul>
                 {professionalItems.map((item) => (
-                  <li key={item}>{item}</li>
+                  <li key={item}>{formatMissingInfoItem(item)}</li>
                 ))}
               </ul>
             </div>
