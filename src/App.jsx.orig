@@ -2387,8 +2387,8 @@ function App() {
     "easy-harness.authSession",
     null,
   );
-  const [userView, setUserView] = useStoredState("easy-harness.userView", "start");
-  const [staffView, setStaffView] = useStoredState("easy-harness.staffView", "queue");
+  const [userView, setUserView] = useState("start");
+  const [staffView, setStaffView] = useState("queue");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [requests, setRequests] = useStoredState(
     "easy-harness.requests",
@@ -4203,7 +4203,7 @@ function App() {
   function signIn(userId, session = null, userOverride = null) {
     const selected = userOverride || users.find((user) => user.id === userId);
     if (!selected || selected.status === "suspended") return;
-    const isSwitchingUser = readStoredState("easy-harness.currentUserId", "") !== userId;
+    const isSwitchingUser = currentUserId !== userId;
     setAuthSession(session || createLocalAuthSession(selected));
     setCurrentUserId(userId);
     setUsers((current) =>
