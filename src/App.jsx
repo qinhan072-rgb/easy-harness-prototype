@@ -3732,22 +3732,36 @@ function App() {
   ) {
     if (!supabase || !isUuidLike(actor?.id)) return null;
 
-    const { data: requestRow, error: requestError } = await supabase
-      .from("requests")
-      .insert(supabaseRequestInsertFromLocal(request))
-      .select("id,request_number,updated_at,created_at")
-      .single();
+    const payload = supabaseRequestInsertFromLocal(request);
+    const { data: createdRequest, error: requestError } = await supabase.rpc(
+      "create_request_with_number",
+      {
+        p_customer_label: payload.customer_label,
+        p_title: payload.title,
+        p_customer_summary: payload.customer_summary,
+        p_status: payload.status,
+        p_check_status: payload.check_status,
+        p_check_result: payload.check_result,
+        p_files_count: payload.files_count,
+      },
+    );
 
-    if (requestError) {
+    const requestRow = Array.isArray(createdRequest)
+      ? createdRequest[0]
+      : createdRequest;
+
+    if (requestError || !requestRow?.id || !requestRow?.request_number) {
       recordServiceEvent(
         "supabase-database",
         "request_insert_failed",
         "request",
         request.id,
-        requestError.message,
+        requestError?.message || "Request number was not returned.",
       );
       return null;
     }
+
+    const realRequestNumber = requestRow.request_number;
 
     const { data: messageRow, error: messageError } = await supabase
       .from("request_messages")
@@ -3762,7 +3776,7 @@ function App() {
         "supabase-database",
         "request_message_insert_failed",
         "request",
-        request.id,
+        realRequestNumber,
         messageError.message,
       );
       return { requestRow, messageRow: null, attachments: [] };
@@ -3770,7 +3784,7 @@ function App() {
 
     const savedAttachments = await persistSupabaseAttachments(
       uploadDrafts,
-      request.id,
+      realRequestNumber,
       requestRow.id,
       messageRow.id,
       actor.id,
@@ -3780,7 +3794,7 @@ function App() {
       "supabase-database",
       "request_inserted",
       "request",
-      request.id,
+      realRequestNumber,
       "Request, first message, and attachment metadata saved to Supabase.",
     );
     return {
@@ -3788,7 +3802,7 @@ function App() {
       messageRow,
       attachments: (savedAttachments || []).map((attachment) => ({
         id: attachment.id,
-        requestId: request.id,
+        requestId: realRequestNumber,
         supabaseRequestId: requestRow.id,
         messageId: messageRow?.id || "",
         uploadedBy: actor.id,
@@ -4713,7 +4727,10 @@ function App() {
       setDescription("");
       setUploadFiles([]);
       setFileError("");
-      const nextId = makeRequestId(requests);
+      const nextId =
+        supabase && isUuidLike(actor.id)
+          ? `pending-${Date.now()}`
+          : makeRequestId(requests);
       const firstMessage = customerMessage(text, files);
       const nextRequest = {
         id: nextId,
@@ -4753,6 +4770,7 @@ function App() {
       const savedRequest = savedBundle?.requestRow
         ? {
             ...nextRequest,
+            id: savedBundle.requestRow.request_number,
             supabaseId: savedBundle.requestRow.id,
             updated: displayTime(
               savedBundle.requestRow.updated_at ||
@@ -4789,15 +4807,15 @@ function App() {
       }
       addNotification({
         role: "staff",
-        requestId: nextId,
+        requestId: savedRequest.id,
         title: "New request",
-        body: `${nextId} is ready for review.`,
+        body: `${savedRequest.id} is ready for review.`,
       });
       recordAudit(
         "request_created",
         "request",
-        nextId,
-        `${actor.email} created ${nextRequest.title}.`,
+        savedRequest.id,
+        `${actor.email} created ${savedRequest.title}.`,
         actor,
       );
       setActiveRequestId(savedRequest.id);
