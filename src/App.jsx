@@ -2417,43 +2417,40 @@ function App() {
   const [userView, setUserView] = useStoredState("easy-harness.userView", "start");
   const [staffView, setStaffView] = useStoredState("easy-harness.staffView", "queue");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [requests, setRequests] = useStoredState(
-    "easy-harness.requests",
-    seedRequests,
-  );
-  const [orders, setOrders] = useStoredState("easy-harness.orders", seedOrders);
-  const [activeOrderId, setActiveOrderId] = useStoredState(
-    "easy-harness.activeOrderId",
-    seedOrders[0].id,
-  );
-  const [attachmentRecords, setAttachmentRecords] = useStoredState(
-    "easy-harness.attachments",
-    seedAttachmentRecords,
-  );
-  const [storageObjectRecords, setStorageObjectRecords] = useStoredState(
-    "easy-harness.storageObjects",
-    seedStorageObjectRecords,
-  );
-  const [requestMessageRecords, setRequestMessageRecords] = useStoredState(
-    "easy-harness.requestMessages",
-    seedRequestMessageRecords,
-  );
-  const [quoteRecords, setQuoteRecords] = useStoredState(
-    "easy-harness.quotes",
-    seedQuoteRecords,
-  );
-  const [paymentRecords, setPaymentRecords] = useStoredState(
-    "easy-harness.payments",
-    seedPaymentRecords,
-  );
-  const [shipmentRecords, setShipmentRecords] = useStoredState(
-    "easy-harness.shipments",
-    seedShipmentRecords,
-  );
-  const [orderMessageRecords, setOrderMessageRecords] = useStoredState(
-    "easy-harness.orderMessages",
-    seedOrderMessageRecords,
-  );
+  // Server-backed business data must not use browser localStorage as the
+  // source of truth when Supabase is configured. In hosted mode, these records
+  // are loaded from Supabase after auth/session restore; localStorage is kept
+  // only for local demo mode.
+  const [requests, setRequests] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.requests", seedRequests);
+  const [orders, setOrders] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.orders", seedOrders);
+  const [activeOrderId, setActiveOrderId] = supabaseConfigured
+    ? useState("")
+    : useStoredState("easy-harness.activeOrderId", seedOrders[0].id);
+  const [attachmentRecords, setAttachmentRecords] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.attachments", seedAttachmentRecords);
+  const [storageObjectRecords, setStorageObjectRecords] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.storageObjects", seedStorageObjectRecords);
+  const [requestMessageRecords, setRequestMessageRecords] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.requestMessages", seedRequestMessageRecords);
+  const [quoteRecords, setQuoteRecords] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.quotes", seedQuoteRecords);
+  const [paymentRecords, setPaymentRecords] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.payments", seedPaymentRecords);
+  const [shipmentRecords, setShipmentRecords] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.shipments", seedShipmentRecords);
+  const [orderMessageRecords, setOrderMessageRecords] = supabaseConfigured
+    ? useState([])
+    : useStoredState("easy-harness.orderMessages", seedOrderMessageRecords);
   const [notifications, setNotifications] = useStoredState(
     "easy-harness.notifications",
     seedNotifications,
@@ -3591,7 +3588,7 @@ function App() {
     setActiveRequestId((current) => {
       if (current && remoteRequests.some((request) => request.id === current))
         return current;
-      return remoteRequests[0]?.id || current;
+      return remoteRequests[0]?.id || "";
     });
     setDatabaseProviderStatus("ready");
     recordServiceEvent(
@@ -3663,7 +3660,11 @@ function App() {
       localOrderFromSupabase(row, user),
     );
     setOrders(remoteOrders);
-    if (remoteOrders[0]) setActiveOrderId(remoteOrders[0].id);
+    setActiveOrderId((current) => {
+      if (current && remoteOrders.some((order) => order.id === current))
+        return current;
+      return remoteOrders[0]?.id || "";
+    });
     recordServiceEvent(
       "supabase-database",
       "orders_loaded",
@@ -4559,6 +4560,19 @@ function App() {
       setAuthSession(null);
     }
     setCurrentUserId("");
+    if (supabaseConfigured) {
+      setRequests([]);
+      setOrders([]);
+      setActiveRequestId("");
+      setActiveOrderId("");
+      setAttachmentRecords([]);
+      setStorageObjectRecords([]);
+      setRequestMessageRecords([]);
+      setQuoteRecords([]);
+      setPaymentRecords([]);
+      setShipmentRecords([]);
+      setOrderMessageRecords([]);
+    }
     setUserView("start");
     setStaffView("queue");
     setShowPayment(false);
@@ -5020,23 +5034,19 @@ function App() {
       Number.isFinite(numericPrice) &&
       numericPrice > 0 &&
       price !== activeRequest.price;
-    if (!hasContent && !hasPrice) return;
+    if (!activeRequest || (!hasContent && !hasPrice)) return;
+
+    if (supabaseConfigured && !activeRequest.supabaseId) {
+      setFileError(
+        "This request is not synced yet. Refresh the workspace before releasing updates.",
+      );
+      return;
+    }
+
     let staffMessageId = "";
-    let staffMessage = null;
-    let priceMessage = null;
-    let releasedQuote = null;
-
-    updateRequest(activeRequest.id, (request) => {
-      const messages = [...request.messages];
-      const quote = hasPrice
-        ? createQuoteRecord(request, price, currentUser)
-        : null;
-      if (quote) releasedQuote = quote;
-
-      if (hasContent) {
-        staffMessageId = messageId();
-        staffMessage = {
-          id: staffMessageId,
+    const staffMessage = hasContent
+      ? {
+          id: messageId(),
           role: "easy",
           createdAt: "Now",
           blocks: [
@@ -5047,22 +5057,56 @@ function App() {
               ? [{ type: "attachments", files: attachmentNames }]
               : []),
           ],
-        };
-        messages.push(staffMessage);
-      }
+        }
+      : null;
+    if (staffMessage) staffMessageId = staffMessage.id;
 
-      if (hasPrice) {
-        priceMessage = priceEvent(price);
-        messages.push(priceMessage);
+    const priceMessage = hasPrice ? priceEvent(price) : null;
+    const releasedQuote = hasPrice
+      ? createQuoteRecord(activeRequest, price, currentUser)
+      : null;
+
+    let saved = null;
+    if (activeRequest.supabaseId) {
+      saved = await persistSupabaseStaffRequestUpdate(
+        activeRequest,
+        [staffMessage, priceMessage].filter(Boolean),
+        releasedQuote,
+      );
+
+      if (hasPrice && !saved?.savedQuote) {
+        setFileError(
+          "Price could not be saved to the shared workspace. Please try again before asking the customer to confirm.",
+        );
+        return;
       }
+    }
+
+    const quoteForState = saved?.savedQuote || releasedQuote;
+
+    updateRequest(activeRequest.id, (request) => {
+      const messages = [...request.messages];
+      if (staffMessage) messages.push(staffMessage);
+      if (priceMessage) messages.push(priceMessage);
+
+      const existingQuotes = request.quotes || [];
+      const nextQuotes =
+        hasPrice && quoteForState
+          ? [
+              ...existingQuotes.filter(
+                (quote) =>
+                  quote.id !== releasedQuote?.id && quote.id !== quoteForState.id,
+              ),
+              quoteForState,
+            ]
+          : existingQuotes;
 
       return {
         ...request,
-        price: hasPrice ? price : request.price,
-        quotes: hasPrice
-          ? [...(request.quotes || []), quote]
-          : request.quotes || [],
-        activeQuoteId: hasPrice ? quote.id : request.activeQuoteId || "",
+        price: hasPrice && quoteForState ? String(quoteForState.amount) : request.price,
+        quotes: nextQuotes,
+        activeQuoteId:
+          hasPrice && quoteForState ? quoteForState.id : request.activeQuoteId || "",
         status: hasPrice
           ? "ready_to_confirm"
           : request.status === "draft_saved"
@@ -5098,7 +5142,7 @@ function App() {
         text || "Media update added.",
       );
     }
-    if (hasPrice) {
+    if (hasPrice && quoteForState) {
       addNotification({
         userId: activeRequest.customerId,
         requestId: activeRequest.id,
@@ -5111,7 +5155,7 @@ function App() {
         activeRequest.id,
         `Harness price set to $${price}.`,
       );
-      if (releasedQuote) writeQuoteLedger(releasedQuote);
+      writeQuoteLedger(quoteForState);
       recordServiceEvent(
         platformAdapters.checking.id,
         "quote_released",
@@ -5120,40 +5164,51 @@ function App() {
         "Harness quote released from current thread basis.",
       );
     }
-    if (activeRequest.supabaseId) {
-      const saved = await persistSupabaseStaffRequestUpdate(
-        activeRequest,
-        [staffMessage, priceMessage].filter(Boolean),
-        releasedQuote,
-      );
-      if (saved?.savedQuote) {
-        updateRequest(activeRequest.id, (request) => ({
-          ...request,
-          price: String(saved.savedQuote.amount),
-          activeQuoteId: saved.savedQuote.id,
-          quotes: (request.quotes || []).map((quote) =>
-            quote.id === releasedQuote.id ? saved.savedQuote : quote,
-          ),
-        }));
-        writeQuoteLedger(saved.savedQuote);
-      }
-    }
+
     setStaffComposer("");
     setStaffAttachment([]);
     if (hasPrice) setStaffPrice(price);
     setIncludePreview(false);
     setIncludeTable(false);
+    setFileError("");
   }
 
   async function confirmRequest() {
     if (activeRequest.status !== "ready_to_confirm") return;
     const quote = activeQuoteForRequest(activeRequest);
     const localOrder = createOrderFromRequest(activeRequest, currentUser);
-    const remoteOrder = quote
-      ? await confirmSupabaseRequestOrder(activeRequest, quote, localOrder)
-      : null;
-    const nextOrder = remoteOrder || ensureOrderForRequest(activeRequest);
-    if (remoteOrder) {
+
+    let nextOrder = null;
+
+    if (supabaseConfigured || activeRequest.supabaseId) {
+      if (!activeRequest.supabaseId || !isUuidLike(quote?.id)) {
+        setFileError(
+          "This confirmation is not synced yet. Refresh the request and try again.",
+        );
+        recordServiceEvent(
+          "supabase-database",
+          "order_confirm_blocked_unsynced_quote",
+          "request",
+          activeRequest.id,
+          "Customer confirmation blocked because the active quote is not persisted.",
+        );
+        return;
+      }
+
+      const remoteOrder = await confirmSupabaseRequestOrder(
+        activeRequest,
+        quote,
+        localOrder,
+      );
+
+      if (!remoteOrder?.supabaseId) {
+        setFileError(
+          "Order could not be saved. Please try again before leaving this page.",
+        );
+        return;
+      }
+
+      nextOrder = remoteOrder;
       setOrders((current) => [
         remoteOrder,
         ...current.filter((order) => order.id !== remoteOrder.id),
@@ -5165,7 +5220,10 @@ function App() {
         remoteOrder.id,
         `${remoteOrder.id} created from ${activeRequest.id}.`,
       );
+    } else {
+      nextOrder = ensureOrderForRequest(activeRequest);
     }
+
     updateRequest(activeRequest.id, (request) => ({
       ...request,
       status: "confirmed",
@@ -5200,6 +5258,7 @@ function App() {
     if (quote) {
       writeQuoteLedger({ ...quote, status: "confirmed", confirmedAt: "Now" });
     }
+    setFileError("");
     setUserView("order");
   }
 
