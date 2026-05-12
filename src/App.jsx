@@ -3493,61 +3493,14 @@ function App() {
     if (!supabase || !user?.id) return;
     setDatabaseProviderStatus("connecting");
 
-    const { data, error } = await supabase
-      .from("requests")
-      .select(
-        `
-        id,
-        request_number,
-        customer_id,
-        customer_label,
-        title,
-        status,
-        customer_summary,
-        check_status,
-        check_result,
-        files_count,
-        active_quote_id,
-        confirmed_quote_id,
-        created_at,
-        updated_at,
-        request_messages (
-          id,
-          author_id,
-          author_role,
-          body,
-          blocks,
-          created_at
-        ),
-        attachments (
-          id,
-          owner_id,
-          request_id,
-          request_message_id,
-          name,
-          mime_type,
-          size_bytes,
-          purpose,
-          created_at
-        ),
-        quotes (
-          id,
-          request_id,
-          version,
-          amount,
-          currency,
-          basis_message_ids,
-          status,
-          released_by,
-          released_at,
-          valid_until
-        )
-      `,
-      )
-      .order("updated_at", { ascending: false });
+    const { data, error } = await supabase.rpc("list_workspace_requests");
 
     if (error) {
       setDatabaseProviderStatus("error");
+      setRequests([]);
+      setRequestMessageRecords([]);
+      setAttachmentRecords([]);
+      setActiveRequestId("");
       recordServiceEvent(
         "supabase-database",
         "requests_load_failed",
@@ -3558,15 +3511,16 @@ function App() {
       return;
     }
 
+    const rows = (data || []).map(normalizeWorkspaceRequestRow);
     const remoteRequests = dedupeRequestsByIdentity(
-      (data || []).map((row) => localRequestFromSupabase(row, user)),
+      rows.map((row) => localRequestFromSupabase(row, user)),
     );
     const remoteMessages = remoteRequests.flatMap((request) =>
       (request.messages || []).map((message) =>
         requestMessageRecord(request, message),
       ),
     );
-    const remoteAttachments = (data || []).flatMap((row) =>
+    const remoteAttachments = rows.flatMap((row) =>
       (row.attachments || []).map((attachment) => ({
         id: attachment.id,
         requestId: row.request_number,
@@ -3603,49 +3557,11 @@ function App() {
   async function loadSupabaseOrderData(user) {
     if (!supabase || !user?.id) return;
 
-    const { data, error } = await supabase
-      .from("orders")
-      .select(
-        `
-        id,
-        order_number,
-        request_id,
-        customer_id,
-        quote_id,
-        title,
-        status,
-        payment_status,
-        fulfillment_status,
-        production_status,
-        harness_price,
-        shipping_price,
-        total_due,
-        currency,
-        incoterm,
-        address,
-        snapshot,
-        package_estimate,
-        production_lead_time,
-        estimated_production_complete,
-        created_at,
-        updated_at,
-        requests (
-          request_number,
-          customer_label
-        ),
-        order_messages (
-          id,
-          author_id,
-          author_role,
-          body,
-          visibility,
-          created_at
-        )
-      `,
-      )
-      .order("updated_at", { ascending: false });
+    const { data, error } = await supabase.rpc("list_workspace_orders");
 
     if (error) {
+      setOrders([]);
+      setActiveOrderId("");
       recordServiceEvent(
         "supabase-database",
         "orders_load_failed",
@@ -3656,9 +3572,8 @@ function App() {
       return;
     }
 
-    const remoteOrders = (data || []).map((row) =>
-      localOrderFromSupabase(row, user),
-    );
+    const rows = (data || []).map(normalizeWorkspaceOrderRow);
+    const remoteOrders = rows.map((row) => localOrderFromSupabase(row, user));
     setOrders(remoteOrders);
     setActiveOrderId((current) => {
       if (current && remoteOrders.some((order) => order.id === current))
@@ -5627,39 +5542,45 @@ function App() {
             />
           ))}
 
-        {userView === "thread" && activeRequest && (
-          <RequestWorkspace
-            request={activeRequest}
-            perspective="user"
-            composerValue={userComposer}
-            setComposerValue={setUserComposer}
-            composerFiles={userComposerFiles}
-            uploadRef={userComposerUploadRef}
-            handleUpload={(event) => handleUpload(event, "composer")}
-            removeFile={(fileKey) => removePendingUpload("composer", fileKey)}
-            sendMessage={sendUserMessage}
-            sendingMessage={sendingUserMessage}
-            agentActivity={agentActivities[activeRequest.id] ? { requestId: activeRequest.id, ...agentActivities[activeRequest.id] } : null}
-            confirmRequest={confirmRequest}
-            fileError={fileError}
-            openOrder={openOrder}
-            linkedOrder={orders.find(
-              (order) => order.requestId === activeRequest.id,
-            )}
-          />
-        )}
+        {userView === "thread" &&
+          (activeRequest ? (
+            <RequestWorkspace
+              request={activeRequest}
+              perspective="user"
+              composerValue={userComposer}
+              setComposerValue={setUserComposer}
+              composerFiles={userComposerFiles}
+              uploadRef={userComposerUploadRef}
+              handleUpload={(event) => handleUpload(event, "composer")}
+              removeFile={(fileKey) => removePendingUpload("composer", fileKey)}
+              sendMessage={sendUserMessage}
+              sendingMessage={sendingUserMessage}
+              agentActivity={agentActivities[activeRequest.id] ? { requestId: activeRequest.id, ...agentActivities[activeRequest.id] } : null}
+              confirmRequest={confirmRequest}
+              fileError={fileError}
+              openOrder={openOrder}
+              linkedOrder={orders.find(
+                (order) => order.requestId === activeRequest.id,
+              )}
+            />
+          ) : (
+            <RequestsList requests={visibleRequests} openRequest={openRequest} />
+          ))}
 
-        {userView === "order" && activeOrder && (
-          <OrderWorkspace
-            order={activeOrder}
-            request={requests.find(
-              (request) => request.id === activeOrder.requestId,
-            )}
-            updateOrder={(updater) => updateOrder(activeOrder.id, updater)}
-            startPayment={startPayment}
-            sendOrderMessage={sendOrderMessage}
-          />
-        )}
+        {userView === "order" &&
+          (activeOrder ? (
+            <OrderWorkspace
+              order={activeOrder}
+              request={requests.find(
+                (request) => request.id === activeOrder.requestId,
+              )}
+              updateOrder={(updater) => updateOrder(activeOrder.id, updater)}
+              startPayment={startPayment}
+              sendOrderMessage={sendOrderMessage}
+            />
+          ) : (
+            <OrdersList orders={visibleOrders} openOrder={openOrder} />
+          ))}
       </main>
 
       {showPayment && (
@@ -9999,7 +9920,25 @@ function StaffOrderDetail({
     setInternalNotes(order?.internalNotes || "");
   }, [order?.id]);
 
-  if (!order) return null;
+  if (!order) {
+    return (
+      <section className="staff-page staff-detail-page">
+        <header className="staff-header sticky-staff-header">
+          <div>
+            <span className="eyebrow">Ops console</span>
+            <h1>Active order</h1>
+            <p>No order is selected.</p>
+          </div>
+          <button className="drawer-close" onClick={signOut}>
+            Sign out
+          </button>
+        </header>
+        <div className="empty-state">
+          <p>Confirmed requests will appear in the order queue.</p>
+        </div>
+      </section>
+    );
+  }
 
   const shipping = selectedShipping(order);
   const packageNumber = (field, fallback) => {
@@ -10460,6 +10399,26 @@ function StaffDetail({
   setIncludeTable,
   sendStaffUpdate,
 }) {
+  if (!request) {
+    return (
+      <section className="staff-page staff-detail-page">
+        <header className="staff-header sticky-staff-header">
+          <div>
+            <span className="eyebrow">Ops console</span>
+            <h1>Active request</h1>
+            <p>No request is selected.</p>
+          </div>
+          <button className="drawer-close" onClick={signOut}>
+            Sign out
+          </button>
+        </header>
+        <div className="empty-state">
+          <p>Open a request from the queue to review its thread and release a price.</p>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="staff-page staff-detail-page">
       <header className="staff-header sticky-staff-header">
