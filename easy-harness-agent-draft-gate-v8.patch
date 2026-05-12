@@ -1,0 +1,445 @@
+diff --git a/src/App.jsx b/src/App.jsx
+index 4019747..6e48034 100644
+--- a/src/App.jsx
++++ b/src/App.jsx
+@@ -47,7 +47,7 @@ const processingSteps = [
+ ];
+ 
+ const statusCopy = {
+-  draft_saved: "Draft saved",
++  draft_saved: "Request received",
+   checking: "Checking",
+   needs_info: "Needs details",
+   not_supported: "Unable to review",
+@@ -7308,6 +7308,7 @@ function normalizeDraftForView(checkResult = {}, request = {}) {
+       })),
+       easy_harness_review: [],
+       later_supplier_or_engineering_confirmation: [],
++      not_applicable: [],
+     },
+     risk_flags: [],
+     user_facing_summary: {
+@@ -7358,7 +7359,7 @@ function isReadyDraftStatus(status) {
+ function normalizeUnknownItemList(items = []) {
+   return (Array.isArray(items) ? items : [])
+     .map((item) => unknownItemLabel(item))
+-    .filter(Boolean);
++    .filter((item) => item && !isPlaceholderUnknown(item));
+ }
+ 
+ function userNeededNextItems(draft = {}) {
+@@ -7380,12 +7381,26 @@ function isEasyHarnessReviewOnlyItem(item = "") {
+   return /easy harness|review|visual|identify|connector identification|finalize|terminal|seal|wire sizing|engineering|supplier/.test(text);
+ }
+ 
++function isPlaceholderUnknown(item = "") {
++  const text = String(item).trim().toLowerCase();
++  return (
++    !text ||
++    text === "unknown_item" ||
++    text === "needs later confirmation." ||
++    text === "needs later confirmation" ||
++    text === "review item" ||
++    /unknown[_\s-]*item/.test(text)
++  );
++}
++
+ function easyHarnessReviewItems(draft = {}) {
+   const unknowns = draft?.unknowns || {};
+   const direct = normalizeUnknownItemList(unknowns.easy_harness_review);
+   const later = normalizeUnknownItemList(unknowns.later_supplier_or_engineering_confirmation);
+   const fromSummary = (draft?.user_facing_summary?.needed_next || []).filter(isEasyHarnessReviewOnlyItem);
+-  return [...new Set([...direct, ...fromSummary, ...later])].slice(0, 8);
++  return [...new Set([...direct, ...fromSummary, ...later])]
++    .filter((item) => !isPlaceholderUnknown(item))
++    .slice(0, 8);
+ }
+ 
+ function professionalDetailItems(details = {}) {
+@@ -7472,7 +7487,11 @@ function unknownsByOwner(draft) {
+       "Later engineering",
+       unknowns.later_supplier_or_engineering_confirmation || [],
+     ],
+-  ].filter(([, items]) => Array.isArray(items) && items.length);
++    ["Not applicable", unknowns.not_applicable || []],
++  ].map(([label, items]) => [
++    label,
++    (Array.isArray(items) ? items : []).filter((item) => !isPlaceholderUnknown(unknownItemLabel(item))),
++  ]).filter(([, items]) => Array.isArray(items) && items.length);
+ }
+ 
+ function IntakeDraftCard({ checkResult, request }) {
+diff --git a/supabase/functions/run-checking/index.ts b/supabase/functions/run-checking/index.ts
+index 984425e..1841d87 100644
+--- a/supabase/functions/run-checking/index.ts
++++ b/supabase/functions/run-checking/index.ts
+@@ -141,6 +141,7 @@ type EasyHarnessDraft = {
+     ask_user_if_likely_known: UnknownItem[];
+     easy_harness_review: UnknownItem[];
+     later_supplier_or_engineering_confirmation: UnknownItem[];
++    not_applicable: UnknownItem[];
+   };
+   risk_flags: Array<{
+     type: string;
+@@ -290,6 +291,7 @@ const draftSchema = {
+         "ask_user_if_likely_known",
+         "easy_harness_review",
+         "later_supplier_or_engineering_confirmation",
++        "not_applicable",
+       ],
+       properties: {
+         ask_user_now: {
+@@ -308,6 +310,10 @@ const draftSchema = {
+           type: "array",
+           items: { type: "object", additionalProperties: true },
+         },
++        not_applicable: {
++          type: "array",
++          items: { type: "object", additionalProperties: true },
++        },
+       },
+     },
+     risk_flags: {
+@@ -422,21 +428,44 @@ function normalizeList(value: unknown, limit = 12) {
+ 
+ function normalizeUnknownList(value: unknown, limit = 10): UnknownItem[] {
+   if (!Array.isArray(value)) return [];
++  const seen = new Set<string>();
+   return value
+     .map((item) => {
+-      if (typeof item === "string") return { field: item, reason: item };
++      if (typeof item === "string") {
++        const text = normalizeString(item, "");
++        return text ? { field: text, reason: text } : null;
++      }
+       if (item && typeof item === "object") {
+         const raw = item as Record<string, unknown>;
++        const field = normalizeString(raw.field, "");
++        const reason = normalizeString(raw.reason, "");
++        const question = normalizeString(raw.question, "");
++        if (!field && !reason && !question) return null;
+         return {
+-          field: normalizeString(raw.field, "unknown_item"),
+-          reason: normalizeString(raw.reason, "Needs later confirmation."),
+-          question: normalizeString(raw.question, "") || undefined,
++          field: field || reason || question,
++          reason: reason || question || field,
++          question: question || undefined,
+         };
+       }
+       return null;
+     })
+-    .filter(Boolean)
+-    .slice(0, limit) as UnknownItem[];
++    .filter((item): item is NonNullable<typeof item> => Boolean(item))
++    .filter((item) => {
++      const text = [item.field, item.reason, item.question]
++        .filter(Boolean)
++        .join(" ")
++        .toLowerCase()
++        .trim();
++      if (!text) return false;
++      if (/^unknown[_\s-]*item$/.test(String(item.field).toLowerCase())) return false;
++      if (/^(needs?\s+later\s+confirmation|later confirmation|review item)$/i.test(String(item.reason).trim())) return false;
++      if (text === "unknown_item needs later confirmation.") return false;
++      const key = [item.field, item.reason, item.question || ""].join("|").toLowerCase();
++      if (seen.has(key)) return false;
++      seen.add(key);
++      return true;
++    })
++    .slice(0, limit);
+ }
+ 
+ function normalizeFieldValue(value: unknown): FieldValue {
+@@ -646,6 +675,7 @@ function hasExplicitPowerConductor(draft: EasyHarnessDraft) {
+ }
+ 
+ function needsCurrentOrPowerBeforeDraft(draft: EasyHarnessDraft) {
++  if (hasExplicitSignalOnlyNoPower(draft)) return false;
+   return (hasPowerLoadRisk(draft) || hasExplicitPowerConductor(draft)) && !hasCurrentOrPowerBasis(draft);
+ }
+ 
+@@ -660,6 +690,167 @@ function addQuestionOnce(
+   target.push({ field, reason, question });
+ }
+ 
++function addUnknownOnce(target: UnknownItem[], field: string, reason: string, question?: string) {
++  if (!field || !reason) return;
++  if (target.some((item) => item.field === field || item.reason === reason)) return;
++  target.push({ field, reason, question });
++}
++
++function setKnownRequirementIfMissing(
++  draft: EasyHarnessDraft,
++  key: string,
++  value: string,
++  source = "derived_from_conversation",
++  confidence: FieldValue["confidence"] = "partial",
++) {
++  if (!value) return;
++  if (isKnownFieldValue(draft.known_requirements[key])) return;
++  draft.known_requirements[key] = { value, source, confidence };
++}
++
++function connectionTextForExtraction(draft: EasyHarnessDraft) {
++  return [
++    draft.user_intent.connection_goal,
++    draft.user_intent.desired_outcome,
++    draft.user_intent.from_side,
++    draft.user_intent.to_side.join(" "),
++    draft.user_facing_summary.request_line,
++    draft.user_facing_summary.compact_details.join(" "),
++    draft.user_facing_summary.what_we_have.join(" "),
++    draft.ai_interpretation.short_understanding,
++    Object.entries(draft.known_requirements)
++      .map(([key, value]) => `${key}: ${fieldText(value)}`)
++      .join(" "),
++  ]
++    .filter(Boolean)
++    .join(" | ");
++}
++
++function firstMatchText(text: string, patterns: RegExp[]) {
++  for (const pattern of patterns) {
++    const match = text.match(pattern);
++    if (match) return match;
++  }
++  return null;
++}
++
++function deriveMissingKnownRequirements(draft: EasyHarnessDraft) {
++  const text = connectionTextForExtraction(draft);
++  const lower = text.toLowerCase();
++
++  const quantity = firstMatchText(text, [
++    /\b(?:quantity|qty|need|needs|make|order|for)\s*[:=]?\s*(\d{1,6})\s*(pcs?|pieces?|units?|sets?|pairs?|samples?)\b/i,
++    /\b(\d{1,6})\s*(pcs?|pieces?|units?|sets?|pairs?|samples?)\b/i,
++  ]);
++  if (quantity) setKnownRequirementIfMissing(draft, "quantity", `${quantity[1]} ${quantity[2]}`);
++
++  const length = firstMatchText(text, [
++    /\b(?:length|full length|total length|about|approx\.?|approximately|around)?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
++  ]);
++  if (length) setKnownRequirementIfMissing(draft, "harness_length", `${length[1]} ${length[2]}`);
++
++  const voltage = firstMatchText(text, [/\b(\d+(?:\.\d+)?)\s*(v|volt|volts)\b/i]);
++  if (voltage) setKnownRequirementIfMissing(draft, "voltage", `${voltage[1]} ${voltage[2]}`);
++
++  const current = firstMatchText(text, [/\b(\d+(?:\.\d+)?)\s*(a|amp|amps)\b/i]);
++  if (current) setKnownRequirementIfMissing(draft, "current", `${current[1]} ${current[2]}`);
++
++  const power = firstMatchText(text, [/\b(\d+(?:\.\d+)?)\s*(w|watt|watts|kw)\b/i]);
++  if (power) setKnownRequirementIfMissing(draft, "power", `${power[1]} ${power[2]}`);
++
++  if (/\b(signal[-\s]?only|no\s+power|does\s+not\s+carry\s+power|not\s+carry\s+power|without\s+power)\b/i.test(text)) {
++    setKnownRequirementIfMissing(draft, "power", "none (signal only)", "derived_from_conversation", "confirmed");
++    addUnknownOnce(
++      draft.unknowns.not_applicable,
++      "voltage_current_for_load",
++      "Not needed at intake because the customer specified signal only / no power.",
++    );
++  }
++
++  if (/\b(can[-\s]?h|can[-\s]?l|can bus|can\s+signal)\b/i.test(text)) {
++    setKnownRequirementIfMissing(draft, "signal_type", "CAN bus", "derived_from_conversation", "partial");
++    if (!draft.ai_interpretation.likely_use || draft.ai_interpretation.likely_use === "unknown") {
++      draft.ai_interpretation.likely_use = "signal";
++    }
++  }
++
++  const envParts: string[] = [];
++  if (/\boutdoor\b/i.test(text)) envParts.push("outdoor");
++  if (/\bindoor\b/i.test(text)) envParts.push("indoor");
++  if (/\bfield\s+equipment\b/i.test(text)) envParts.push("field equipment");
++  if (/\bIP\s*6[56789]\b/i.test(text)) {
++    const ip = text.match(/\bIP\s*6[56789]\b/i)?.[0]?.replace(/\s+/g, "") || "IP-rated";
++    envParts.push(ip);
++  }
++  if (envParts.length) {
++    setKnownRequirementIfMissing(draft, "environment", [...new Set(envParts)].join(", "));
++  } else if (isKnownFieldValue(draft.known_requirements.environmental)) {
++    setKnownRequirementIfMissing(draft, "environment", fieldText(draft.known_requirements.environmental));
++  }
++
++  const pinAssignments: Array<Record<string, unknown>> = [];
++  const pinPattern = /\bpin\s*(\d{1,3})\s*(?:[:=\-]|\s+)\s*([A-Za-z0-9+/_\- ]{1,40})(?=\s*(?:,|;|\||$|\.))/gi;
++  let match: RegExpExecArray | null;
++  while ((match = pinPattern.exec(text)) && pinAssignments.length < 30) {
++    const signal = match[2].trim().replace(/\s+/g, " ");
++    if (signal) pinAssignments.push({ pin: match[1], signal, source: "derived_from_conversation" });
++  }
++  if (pinAssignments.length && !draft.captured_professional_details.pinout.length) {
++    draft.captured_professional_details.pinout = pinAssignments;
++  }
++
++  if (isKnownFieldValue(draft.known_requirements.connector_end_a)) {
++    const value = fieldText(draft.known_requirements.connector_end_a);
++    if (!draft.captured_professional_details.connectors.some((item) => item.end === "A" || item.value === value)) {
++      draft.captured_professional_details.connectors.push({ end: "A", value, source: "known_requirements" });
++    }
++  }
++  if (isKnownFieldValue(draft.known_requirements.connector_end_b)) {
++    const value = fieldText(draft.known_requirements.connector_end_b);
++    if (!draft.captured_professional_details.connectors.some((item) => item.end === "B" || item.value === value)) {
++      draft.captured_professional_details.connectors.push({ end: "B", value, source: "known_requirements" });
++    }
++  }
++
++  if (draft.draft_closure.can_close_user_draft) {
++    if (/\bconnector\b/i.test(lower)) {
++      addUnknownOnce(
++        draft.unknowns.easy_harness_review,
++        "connector_part_selection",
++        "Select or verify connector brand/part numbers from the stated connector type, files, photos, or sample.",
++      );
++    }
++    if (/\bip\s*6[56789]|waterproof|outdoor\b/i.test(lower)) {
++      addUnknownOnce(
++        draft.unknowns.easy_harness_review,
++        "environmental_sealing_review",
++        "Review waterproofing/sealing approach against the stated outdoor/IP preference.",
++      );
++    }
++    if (/\bshield|drain|can[-\s]?h|can[-\s]?l|can bus\b/i.test(lower)) {
++      addUnknownOnce(
++        draft.unknowns.easy_harness_review,
++        "signal_and_shielding_review",
++        "Review CAN signal cable, shielding, drain connection, and continuity expectations.",
++      );
++    }
++    if (draft.provided_evidence.length) {
++      addUnknownOnce(
++        draft.unknowns.easy_harness_review,
++        "attachment_review",
++        "Review uploaded files for connector orientation, pinout, layout, and missing visual details.",
++      );
++    }
++  }
++
++  return draft;
++}
++
++function hasExplicitSignalOnlyNoPower(draft: EasyHarnessDraft) {
++  const text = draftTextBlob(draft);
++  return /\b(signal[-\s]?only|no\s+power|does\s+not\s+carry\s+power|not\s+carry\s+power|without\s+power)\b/i.test(text);
++}
++
+ function enforceDraftReadiness(draft: EasyHarnessDraft): EasyHarnessDraft {
+   const claimedReady =
+     draft.draft_closure.can_close_user_draft ||
+@@ -940,6 +1131,7 @@ function normalizeDraft(
+         unknowns.later_supplier_or_engineering_confirmation,
+         10,
+       ),
++      not_applicable: normalizeUnknownList(unknowns.not_applicable, 10),
+     },
+     risk_flags: normalizeArrayObjects(value.risk_flags, 12).map((item) => ({
+       type: normalizeString(item.type, "risk"),
+@@ -978,7 +1170,7 @@ function normalizeDraft(
+       customer_message_type: messageType,
+     },
+   };
+-  return enforceDraftReadiness(draft);
++  return enforceDraftReadiness(deriveMissingKnownRequirements(draft));
+ }
+ 
+ function legacyStatusFor(draft: EasyHarnessDraft) {
+@@ -1050,9 +1242,10 @@ function buildFactoryDraftLegacy(draft: EasyHarnessDraft) {
+       draft.ai_interpretation.likely_use ||
+       field("application_type") ||
+       "unknown",
+-    quantity: field("quantity"),
+-    estimated_length: field("estimated_length") || field("length"),
+-    environment: field("environment"),
++    quantity: field("quantity") || field("qty") || field("piece_count"),
++    estimated_length:
++      field("estimated_length") || field("harness_length") || field("length") || field("cable_length"),
++    environment: field("environment") || field("environmental") || field("use_environment"),
+     connector_notes:
+       draft.unknowns.easy_harness_review.find((item) =>
+         item.field.includes("connector"),
+@@ -1134,9 +1327,9 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
+ 
+   if (messageType === "ready_for_review") {
+     return [
++      "Easy Harness Draft is ready.",
+       header || "Harness request",
+-      "This is clear enough for Easy Harness review.",
+-      "We’ll review the files and remaining technical details from here.",
++      "Easy Harness will review the remaining selection, file details, and feasibility from here.",
+     ]
+       .filter(Boolean)
+       .join("\n\n");
+@@ -1298,29 +1491,27 @@ async function callDeepSeek(inputText: string, trigger = "manual") {
+           role: "system",
+           content: [
+             "You are Easy Harness Intake Agent.",
+-            "Your job is to organize a user's custom wire harness, cable assembly, connector adapter, pigtail, wiring loom, or old harness replacement request into Easy Harness Draft v0.1.",
++            "Your job is to translate a user's own words, files, photos, sketches, old samples, pinouts, or partial notes into Easy Harness Draft v0.1.",
+             "You are not a general chatbot, not a sales assistant, and not a traditional factory questionnaire.",
+-            "The draft closes at Ready for Easy Harness Review. It does NOT mean supplier RFQ, quotation, material confirmation, or production readiness.",
+-            "Capture what the user provides. If the user provides connector model, terminal, wire gauge, pinout, material, shielding, test requirement, BOM, drawing, or compliance detail, preserve it precisely.",
+-            "If the user does not provide factory-level details, do not force them as universal requirements. Classify unknowns by owner instead.",
+-            "Show understanding through structure, not repeated claims that you understand. Keep customer-facing output precise, efficient, and short.",
+-            "Ask at most three customer-facing questions. Only ask questions that materially improve draft closure.",
+-            "Do not ask for terminal part numbers, exact wire gauge, strip length, crimp details, IPC class, FAI, packaging, test fixture, or controlled drawing revision unless the user already appears to be a professional and the item is directly relevant.",
+-            "Run a strict relevance gate first. Do not prepare or close a draft if there is no harness-related connection goal.",
+-            "A real connection goal can be device A to device B, copy/replace an old harness, make an adapter between two ports, connector ends, pinout, cable routing, or clear harness context.",
+-            "Generic messages like 'see whether my attachment is correct', 'I need a cable', 'design a harness', or an unrelated/reference product image are not enough to close a draft unless they also state what needs to connect.",
+-            "DeepSeek currently receives attachment metadata and conversation text, not reliable visual pixels. Do not claim to visually identify connector models from attachments. If photos are attached, route connector identification to Easy Harness review unless details are in text.",
+-            "Do not use keyword scripts or case-specific templates. Identify the request type from the whole conversation, then apply the same draft readiness standard to every request.",
+-            "An Easy Harness Draft should be prepared only when the user-side request is a usable demand package, not merely when a broad intention is recognizable.",
+-            "Before closing a draft, check for these basic order-level inputs: request scope, quantity or sample quantity, approximate length or measurement basis, use context or environment, and power-carrying electrical basics when relevant.",
+-            "Do not require factory-level manufacturing details to close a draft, but do not put basic order details such as quantity, approximate length, or use context into Easy Harness review unless the user has explicitly provided a real measurement basis or says those details will be supplied later.",
+-            "For power-carrying requests, expected voltage and current or power are functional/safety basics, not mere factory production details. If a supply pin, battery, motor, heater, actuator, pump, inverter, driver, or other load is involved and current or power is not known, ask one concise question before closing the draft. Do not ask terminal/crimp/tooling/IPC details as a substitute.",
+-            "If the user says they do not know a connector model but has photos, do not force a guess. Route connector identification to Easy Harness review.",
+-            "When a draft is ready for Easy Harness review, user_facing_summary.needed_next must be empty. Put Easy Harness-owned or later engineering work in easy_harness_review or later_supplier_or_engineering_confirmation, not needed_next.",
+-            "Unknowns must be separated into: ask_user_now, ask_user_if_likely_known, easy_harness_review, later_supplier_or_engineering_confirmation.",
+-            "Close the user draft only when the request is harness-related, the request scope is clear, the basic order-level inputs are sufficient for Easy Harness to prepare a usable draft, key functional electrical information has been captured where relevant, user-provided information has been captured, and remaining unknowns are mostly professional or review items.",
+-            "For ready_for_review, the message should be short and should not claim price, material, supplier, or production readiness.",
+-            "All customer-facing summaries and questions must be in English.",
++            "The draft closes at Ready for Easy Harness Review. This means a user-side and platform-side requirement object is clear enough for Easy Harness review, quote-path evaluation, and supplier/manufacturing follow-up. It does NOT mean final BOM, supplier RFQ, automatic quote, material confirmation, or production readiness.",
++            "Core promise: Upload what you have. We'll build the harness you need. This means accept user-native expression and structure it. It does not mean fake certainty.",
++            "First decide what the user already provided, what the user likely knows and must answer now, what Easy Harness can evaluate from files/photos/samples later, what supplier/manufacturing should confirm later, and what is not applicable.",
++            "Capture all explicit details. If the user provides connector model, connector type, terminal, wire gauge, length, quantity, voltage, current, pinout, material, shielding, environment, IP rating, test requirement, BOM, drawing, or compliance detail, preserve it in known_requirements and/or captured_professional_details.",
++            "Do not ask for terminal part numbers, exact wire gauge, strip length, crimp details, connector brand, IPC class, FAI, packaging, test fixture, controlled drawing revision, or factory production details unless they truly block the Draft stage.",
++            "Ask at most three customer-facing questions, and prefer one or two. Only ask questions that block Draft closure and that the user is likely to know.",
++            "Run a strict relevance gate first. Do not prepare or close a draft if there is no harness/cable connection goal. A real connection goal can be device A to device B, copy/replace an old harness, make an adapter between ports, named connector ends, a pinout, cable routing, or another clear harness context.",
++            "Messages like 'Is this file ok?', 'I need a cable', or an unrelated/reference image are not enough to close a draft unless they also state what needs to connect, copy, or replace.",
++            "DeepSeek currently receives attachment metadata and conversation text, not reliable visual pixels. Do not claim to visually identify connector models from attachments. If photos/samples are attached, route visual identification, connector selection, pinout verification, layout, and wire-detail verification to Easy Harness review unless those details are stated in text.",
++            "General Draft gate: close the draft when connection goal, endpoints or samples/photos, use/function, quantity or approximate quantity, length or measurement basis, environment/use context, and critical safety info are sufficient. Remaining professional unknowns should move to Easy Harness review or supplier/manufacturing confirmation.",
++            "Do not close the draft when there is no harness/cable connection goal, the user only asks whether an unrelated file is ok, Easy Harness cannot tell what should be built, or a power-carrying harness lacks basic voltage/current/power and no safe approximation is possible.",
++            "For power-carrying requests, voltage and expected current or power are functional/safety basics. If a supply pin, battery, motor, heater, actuator, pump, inverter, driver, controller power line, or other load is involved and current or power is not known, ask one concise question before closing the draft.",
++            "If the user clearly says signal only, no power, data only, or no load current, voltage/current is not applicable and must not be asked as a blocking question. Put this in unknowns.not_applicable if useful.",
++            "If the user wants to copy an old harness and provides photos/sample plus quantity and approximate or measurable length, connector part numbers, terminal choices, wire construction, and visual pinout verification usually belong to Easy Harness review, not ask_user_now.",
++            "If a draft is ready, user_facing_summary.needed_next must be empty. Put Easy Harness-owned work in easy_harness_review, later production details in later_supplier_or_engineering_confirmation, and irrelevant/not-needed items in not_applicable.",
++            "Unknowns must be separated into: ask_user_now, ask_user_if_likely_known, easy_harness_review, later_supplier_or_engineering_confirmation, and not_applicable. Never output vague placeholders like unknown_item or Needs later confirmation.",
++            "For ready_for_review, customer-facing content should be a compact Easy Harness Draft summary: request line, key details, files received, remaining Easy Harness review items, and clear next step. Do not claim price, material, supplier, or production readiness.",
++            "Do not mention manual review, human review, or manual processing. Say Easy Harness review or Easy Harness will continue from here.",
++            "Show understanding through structure, not repeated claims that you understand. Keep customer-facing output concise and in English.",
+             "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
+             "The JSON object must follow this schema shape:",
+             jsonShape,
+@@ -1655,7 +1846,7 @@ Deno.serve(async (request) => {
+           status: "needs_info",
+           adapter: adapterId,
+           reason:
+-            "Easy Harness could not finish this intake check. The request is saved and can continue in this thread.",
++            "Easy Harness could not finish this intake check. Add one more note or resend the last detail so Easy Harness can continue in this thread.",
+           missing: ["continue request"],
+           checkedAt: new Date().toISOString(),
+           error: message,
+@@ -1667,11 +1858,11 @@ Deno.serve(async (request) => {
+       request_id: requestRow.id,
+       author_id: null,
+       author_role: "easy_harness",
+-      body: "Easy Harness could not finish checking this request. Your request is saved, and you can continue adding details here.",
++      body: "Easy Harness could not finish checking this request. Add one more note or resend the last detail, and Easy Harness will continue here.",
+       blocks: [
+         {
+           type: "text",
+-          text: "Easy Harness could not finish checking this request. Your request is saved, and you can continue adding details here.",
++          text: "Easy Harness could not finish checking this request. Add one more note or resend the last detail, and Easy Harness will continue here.",
+         },
+       ],
+       visibility: "thread",

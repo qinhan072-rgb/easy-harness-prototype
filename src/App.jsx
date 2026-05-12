@@ -47,7 +47,7 @@ const processingSteps = [
 ];
 
 const statusCopy = {
-  draft_saved: "Draft saved",
+  draft_saved: "Request received",
   checking: "Checking",
   needs_info: "Needs details",
   not_supported: "Unable to review",
@@ -973,58 +973,6 @@ function isUuidLike(value) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value || "",
   );
-}
-
-function parseWorkspaceJsonArray(value) {
-  if (Array.isArray(value)) return value;
-  if (!value) return [];
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return Array.isArray(parsed) ? parsed : [];
-    } catch {
-      return [];
-    }
-  }
-  return [];
-}
-
-function parseWorkspaceJsonObject(value) {
-  if (!value) return {};
-  if (Array.isArray(value)) return {};
-  if (typeof value === "object") return value;
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-        ? parsed
-        : {};
-    } catch {
-      return {};
-    }
-  }
-  return {};
-}
-
-function normalizeWorkspaceRequestRow(row = {}) {
-  return {
-    ...row,
-    request_messages: parseWorkspaceJsonArray(row.request_messages),
-    attachments: parseWorkspaceJsonArray(row.attachments),
-    quotes: parseWorkspaceJsonArray(row.quotes),
-    check_result: parseWorkspaceJsonObject(row.check_result),
-  };
-}
-
-function normalizeWorkspaceOrderRow(row = {}) {
-  return {
-    ...row,
-    address: parseWorkspaceJsonObject(row.address),
-    snapshot: parseWorkspaceJsonObject(row.snapshot),
-    package_estimate: parseWorkspaceJsonObject(row.package_estimate),
-    requests: parseWorkspaceJsonObject(row.requests),
-    order_messages: parseWorkspaceJsonArray(row.order_messages),
-  };
 }
 
 function draftFileFromBrowser(file) {
@@ -2556,9 +2504,6 @@ function App() {
         ? "unavailable"
         : "local",
   );
-  const [supabaseSessionReady, setSupabaseSessionReady] = useState(
-    !supabaseConfigured,
-  );
   const [databaseProviderStatus, setDatabaseProviderStatus] = useState(
     supabaseConfigured ? "connecting" : "local",
   );
@@ -2638,13 +2583,6 @@ function App() {
     if (!supabase || !currentUser || !activeRequest?.supabaseId)
       return undefined;
     if (
-      supabaseConfigured &&
-      (!supabaseSessionReady ||
-        authSession?.adapter !== "supabase-auth" ||
-        authSession.userId !== currentUser.id)
-    )
-      return undefined;
-    if (
       !["checking", "needs_info", "in_review", "not_supported"].includes(
         activeRequest.status,
       )
@@ -2666,59 +2604,27 @@ function App() {
     activeRequest?.status,
     activeRequest?.supabaseId,
     currentUser?.id,
-    supabaseSessionReady,
-    authSession?.adapter,
-    authSession?.userId,
   ]);
 
   useEffect(() => {
     if (!supabase || !currentUser?.id) return;
-    if (
-      supabaseConfigured &&
-      (!supabaseSessionReady ||
-        authSession?.adapter !== "supabase-auth" ||
-        authSession.userId !== currentUser.id)
-    )
-      return;
     if (["requests", "thread"].includes(userView)) {
       void loadSupabaseRequestData(currentUser);
     }
     if (["orders", "order"].includes(userView)) {
       void loadSupabaseOrderData(currentUser);
     }
-  }, [
-    currentUser?.id,
-    supabase,
-    userView,
-    supabaseSessionReady,
-    authSession?.adapter,
-    authSession?.userId,
-  ]);
+  }, [currentUser?.id, supabase, userView]);
 
   useEffect(() => {
     if (!supabase || !currentUser?.id || currentUser.role !== "staff") return;
-    if (
-      supabaseConfigured &&
-      (!supabaseSessionReady ||
-        authSession?.adapter !== "supabase-auth" ||
-        authSession.userId !== currentUser.id)
-    )
-      return;
     if (["queue", "detail"].includes(staffView)) {
       void loadSupabaseRequestData(currentUser);
     }
     if (staffView === "order") {
       void loadSupabaseOrderData(currentUser);
     }
-  }, [
-    currentUser?.id,
-    currentUser?.role,
-    staffView,
-    supabase,
-    supabaseSessionReady,
-    authSession?.adapter,
-    authSession?.userId,
-  ]);
+  }, [currentUser?.id, currentUser?.role, staffView, supabase]);
 
   const backendTableRows = useMemo(
     () => [
@@ -2865,12 +2771,10 @@ function App() {
 
     const restoreSession = async () => {
       setAuthProviderStatus("connecting");
-      setSupabaseSessionReady(false);
       const { data, error } = await supabase.auth.getSession();
       if (disposed) return;
       if (error) {
         setAuthProviderStatus("error");
-        setSupabaseSessionReady(true);
         return;
       }
       if (data.session) {
@@ -2879,7 +2783,6 @@ function App() {
       }
       setCurrentUserId("");
       setAuthSession(null);
-      setSupabaseSessionReady(true);
       setAuthProviderStatus("ready");
     };
 
@@ -2890,11 +2793,9 @@ function App() {
             setCurrentUserId("");
             setAuthSession(null);
           }
-          setSupabaseSessionReady(true);
           setAuthProviderStatus("ready");
           return;
         }
-        setSupabaseSessionReady(false);
         window.setTimeout(() => {
           syncSupabaseSession(session, event.toLowerCase());
         }, 0);
@@ -3101,7 +3002,8 @@ function App() {
     if (!supabase || !request?.supabaseId || !isUuidLike(quote?.id))
       return null;
     const shipping = selectedShipping(order);
-    const { data, error } = await supabase.rpc("confirm_request_order", {
+    const { data, error } = await supabase.rpc("confirm_request_order_for_profile", {
+      p_customer_id: currentUser.id,
       p_request_id: request.supabaseId,
       p_quote_id: quote.id,
       p_order_number: order.id,
@@ -3625,7 +3527,9 @@ function App() {
     if (!supabase || !user?.id) return;
     setDatabaseProviderStatus("connecting");
 
-    const { data, error } = await supabase.rpc("list_workspace_requests");
+    const { data, error } = await supabase.rpc("list_workspace_requests_for_profile", {
+      p_profile_id: user.id,
+    });
 
     if (error) {
       setDatabaseProviderStatus("error");
@@ -3685,7 +3589,9 @@ function App() {
   async function loadSupabaseOrderData(user) {
     if (!supabase || !user?.id) return;
 
-    const { data, error } = await supabase.rpc("list_workspace_orders");
+    const { data, error } = await supabase.rpc("list_workspace_orders_for_profile", {
+      p_profile_id: user.id,
+    });
 
     if (error) {
       recordServiceEvent(
@@ -3775,8 +3681,9 @@ function App() {
 
     const payload = supabaseRequestInsertFromLocal(request);
     const { data: createdRequest, error: requestError } = await supabase.rpc(
-      "create_request_with_number",
+      "create_request_with_number_for_profile",
       {
+        p_customer_id: actor.id,
         p_customer_label: payload.customer_label,
         p_title: payload.title,
         p_customer_summary: payload.customer_summary,
@@ -4364,7 +4271,6 @@ function App() {
       user.id,
       `${roleCopy[user.role]} session is active.`,
     );
-    setSupabaseSessionReady(true);
     setAuthProviderStatus("ready");
     return user;
   }
@@ -4733,16 +4639,6 @@ function App() {
   async function submitRequestForUser(actor) {
     if (!actor || actor.role !== "customer" || submittingRequestRef.current)
       return;
-    if (
-      supabaseConfigured &&
-      (!authSession ||
-        authSession.adapter !== "supabase-auth" ||
-        authSession.userId !== actor.id ||
-        !isUuidLike(actor.id))
-    ) {
-      setFileError("Please finish signing in before submitting this request.");
-      return;
-    }
     submittingRequestRef.current = true;
     setSubmittingRequest(true);
     setSubmissionPhase("creating");
@@ -7412,6 +7308,7 @@ function normalizeDraftForView(checkResult = {}, request = {}) {
       })),
       easy_harness_review: [],
       later_supplier_or_engineering_confirmation: [],
+      not_applicable: [],
     },
     risk_flags: [],
     user_facing_summary: {
@@ -7462,7 +7359,7 @@ function isReadyDraftStatus(status) {
 function normalizeUnknownItemList(items = []) {
   return (Array.isArray(items) ? items : [])
     .map((item) => unknownItemLabel(item))
-    .filter(Boolean);
+    .filter((item) => item && !isPlaceholderUnknown(item));
 }
 
 function userNeededNextItems(draft = {}) {
@@ -7484,12 +7381,26 @@ function isEasyHarnessReviewOnlyItem(item = "") {
   return /easy harness|review|visual|identify|connector identification|finalize|terminal|seal|wire sizing|engineering|supplier/.test(text);
 }
 
+function isPlaceholderUnknown(item = "") {
+  const text = String(item).trim().toLowerCase();
+  return (
+    !text ||
+    text === "unknown_item" ||
+    text === "needs later confirmation." ||
+    text === "needs later confirmation" ||
+    text === "review item" ||
+    /unknown[_\s-]*item/.test(text)
+  );
+}
+
 function easyHarnessReviewItems(draft = {}) {
   const unknowns = draft?.unknowns || {};
   const direct = normalizeUnknownItemList(unknowns.easy_harness_review);
   const later = normalizeUnknownItemList(unknowns.later_supplier_or_engineering_confirmation);
   const fromSummary = (draft?.user_facing_summary?.needed_next || []).filter(isEasyHarnessReviewOnlyItem);
-  return [...new Set([...direct, ...fromSummary, ...later])].slice(0, 8);
+  return [...new Set([...direct, ...fromSummary, ...later])]
+    .filter((item) => !isPlaceholderUnknown(item))
+    .slice(0, 8);
 }
 
 function professionalDetailItems(details = {}) {
@@ -7576,7 +7487,11 @@ function unknownsByOwner(draft) {
       "Later engineering",
       unknowns.later_supplier_or_engineering_confirmation || [],
     ],
-  ].filter(([, items]) => Array.isArray(items) && items.length);
+    ["Not applicable", unknowns.not_applicable || []],
+  ].map(([label, items]) => [
+    label,
+    (Array.isArray(items) ? items : []).filter((item) => !isPlaceholderUnknown(unknownItemLabel(item))),
+  ]).filter(([, items]) => Array.isArray(items) && items.length);
 }
 
 function IntakeDraftCard({ checkResult, request }) {
