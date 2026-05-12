@@ -2923,7 +2923,7 @@ function App() {
           processingRequestId,
           requestForCheck?.supabaseId
             ? "Request is waiting for Easy Harness checking."
-            : "Request is saved. Easy Harness can continue reviewing it in this thread.",
+            : "Easy Harness is waiting for the next detail in this thread.",
         );
         setUserView("thread");
       }, 1800),
@@ -3990,7 +3990,7 @@ function App() {
           blocks: [
             {
               type: "text",
-              text: "Easy Harness could not finish checking this request. Your request is saved, and you can continue adding details here.",
+              text: "Easy Harness could not finish this check. Please resend the last detail or add one more note, and Easy Harness will retry in this thread.",
             },
           ],
         };
@@ -4001,7 +4001,7 @@ function App() {
             schema_version: "easy_harness_draft_v0_1",
             status: "needs_info",
             adapter: platformAdapters.checking.id,
-            reason: "Easy Harness could not finish this intake check. The request is saved and can continue in this thread.",
+            reason: "Easy Harness could not finish this intake check. Customer can resend the last detail or add one more note to retry in this thread.",
             missing: ["continue request"],
             checkedAt: new Date().toISOString(),
             error: failureMessage,
