@@ -12,10 +12,8 @@ import {
   Clock3,
   CreditCard,
   File,
-  FileSpreadsheet,
   FileText,
   Folder,
-  Image as ImageIcon,
   Lock,
   MailCheck,
   MapPin,
@@ -48,13 +46,13 @@ const processingSteps = [
 
 const statusCopy = {
   draft_saved: "Request received",
-  checking: "Checking",
-  needs_info: "Needs details",
-  not_supported: "Unable to review",
-  in_review: "In review",
-  ready_to_confirm: "Ready to confirm",
-  confirmed: "Confirmed",
-  paid: "Paid",
+  checking: "Organizing request",
+  needs_info: "Need your reply",
+  not_supported: "Need connection goal",
+  in_review: "Easy Harness review",
+  ready_to_confirm: "Price ready",
+  confirmed: "Request confirmed",
+  paid: "Payment received",
 };
 
 const statusRank = {
@@ -68,7 +66,7 @@ const statusRank = {
   paid: 5,
 };
 
-const workflowSteps = ["Check", "Draft", "Review", "Confirm"];
+const workflowSteps = ["Received", "Draft", "Review", "Price"];
 
 const intakeOutcomeCopy = {
   needs_info: "More details needed",
@@ -86,8 +84,8 @@ const checkoutSmokeCopy =
 void checkoutSmokeCopy;
 
 const orderStatusCopy = {
-  checkout: "Checkout",
-  awaiting_bank_transfer: "Awaiting transfer",
+  checkout: "Order in preparation",
+  awaiting_bank_transfer: "Bank transfer pending",
   paid: "Scheduled",
   scheduled: "Scheduled",
   in_production: "In production",
@@ -98,11 +96,11 @@ const orderStatusCopy = {
 };
 
 const paymentStatusCopy = {
-  unpaid: "Unpaid",
-  payment_pending: "Provider pending",
-  bank_transfer_pending: "Transfer pending",
-  paid: "Paid",
-  failed: "Failed",
+  unpaid: "Payment not started",
+  payment_pending: "Payment in progress",
+  bank_transfer_pending: "Bank transfer pending",
+  paid: "Payment received",
+  failed: "Payment failed",
 };
 
 const productionSteps = ["Scheduled", "Production", "Ready to ship"];
@@ -5309,8 +5307,8 @@ function App() {
       messages: [
         ...request.messages,
         eventMessage(
-          "Confirmed",
-          "You confirmed the current draft and harness price.",
+          "Request and price confirmed",
+          "Your order is open. Complete delivery, shipping, and payment details on the order page.",
         ),
       ],
     }));
@@ -5319,7 +5317,7 @@ function App() {
       role: "staff",
       requestId: activeRequest.id,
       title: "Request confirmed",
-      body: `${activeRequest.id} has been confirmed and converted to ${nextOrder.id}.`,
+      body: `${activeRequest.id} has been confirmed and opened as ${nextOrder.id}.`,
     });
     recordAudit(
       "request_confirmed",
@@ -5645,11 +5643,11 @@ function App() {
         )}
 
         {userView === "requests" && (
-          <RequestsList requests={visibleRequests} openRequest={openRequest} />
+          <RequestsList requests={visibleRequests} openRequest={openRequest} startNewRequest={() => setUserView("start")} />
         )}
 
         {userView === "orders" && (
-          <OrdersList orders={visibleOrders} openOrder={openOrder} />
+          <OrdersList orders={visibleOrders} openOrder={openOrder} openRequests={() => setUserView("requests")} startNewRequest={() => setUserView("start")} />
         )}
 
         {userView === "account" &&
@@ -5703,7 +5701,7 @@ function App() {
               )}
             />
           ) : (
-            <RequestsList requests={visibleRequests} openRequest={openRequest} />
+            <RequestsList requests={visibleRequests} openRequest={openRequest} startNewRequest={() => setUserView("start")} />
           ))}
 
         {userView === "order" &&
@@ -5718,7 +5716,7 @@ function App() {
               sendOrderMessage={sendOrderMessage}
             />
           ) : (
-            <OrdersList orders={visibleOrders} openOrder={openOrder} />
+            <OrdersList orders={visibleOrders} openOrder={openOrder} openRequests={() => setUserView("requests")} startNewRequest={() => setUserView("start")} />
           ))}
       </main>
 
@@ -5897,7 +5895,7 @@ function AuthModal({
                 <small>Secure account sign-in</small>
               </span>
             </button>
-            <p className="auth-provider-note">Microsoft soon / Apple soon</p>
+            <p className="auth-provider-note">Or use a secure email sign-in link below.</p>
           </div>
         )}
         {!notice && authUsesSupabase && (
@@ -6150,8 +6148,8 @@ function UserSidebar({
                 key={request.id}
                 onClick={() => openRequest(request.id, "user")}
               >
-                <strong>{request.id}</strong>
-                <span>{request.title}</span>
+                <strong>{request.title}</strong>
+                <span>{request.id}</span>
                 <small>{statusCopy[request.status]}</small>
               </button>
             ))}
@@ -6164,8 +6162,8 @@ function UserSidebar({
                   key={order.id}
                   onClick={() => openOrder(order.id)}
                 >
-                  <strong>{order.id}</strong>
-                  <span>{order.title}</span>
+                  <strong>{order.title}</strong>
+                  <span>{order.id}</span>
                   <small>{orderStatusCopy[order.status]}</small>
                 </button>
               ))}
@@ -6174,13 +6172,8 @@ function UserSidebar({
         </div>
       ) : null}
 
-      <div className="rail-bottom">
-        {currentUser ? (
-          <div className="rail-user">
-            <UserCircle size={22} />
-            {sidebarOpen && <span>{currentUser.name}</span>}
-          </div>
-        ) : (
+      {!currentUser && (
+        <div className="rail-bottom">
           <button
             className="rail-user rail-user-button"
             onClick={() =>
@@ -6192,8 +6185,8 @@ function UserSidebar({
             <UserCircle size={22} />
             {sidebarOpen && <span>Log in</span>}
           </button>
-        )}
-      </div>
+        </div>
+      )}
     </aside>
   );
 }
@@ -6249,42 +6242,30 @@ function TopAccount({
     <div className="top-account">
       <button
         className="account-icon notification-button"
-        aria-label="Open notifications"
+        aria-label="Open updates"
         onClick={toggleNotifications}
+        title="Request and order updates"
       >
         <Bell size={18} />
         {!!unreadCount && <span>{unreadCount}</span>}
       </button>
-      <button
-        className="account-icon"
-        aria-label="Open account menu"
-        onClick={toggleAccount}
-      >
-        <UserCircle size={20} />
-      </button>
-      <button className="signin-button" onClick={toggleAccount}>
-        {user.name}
+      <button className="account-pill" onClick={toggleAccount} aria-label="Open account menu">
+        <span className="account-initials">{initials(user.name || user.email)}</span>
+        <span className="account-name">{user.name || user.email}</span>
       </button>
       {accountOpen && (
         <div className="account-menu">
-          <button onClick={() => chooseAccountItem(openAccount)}>
-            Account
-          </button>
-          <button onClick={() => chooseAccountItem(openRequests)}>
-            My requests
-          </button>
-          <button onClick={() => chooseAccountItem(openOrders)}>
-            My orders
-          </button>
-          <button className="danger" onClick={() => chooseAccountItem(signOut)}>
-            Sign out
-          </button>
+          <button onClick={() => chooseAccountItem(openAccount)}>Account</button>
+          <button onClick={() => chooseAccountItem(openRequests)}>My requests</button>
+          <button onClick={() => chooseAccountItem(openOrders)}>My orders</button>
+          <button className="danger" onClick={() => chooseAccountItem(signOut)}>Sign out</button>
         </div>
       )}
       {notificationsOpen && (
         <div className="notification-panel">
           <div className="notification-panel-head">
-            <strong>Notifications</strong>
+            <strong>Updates</strong>
+            <small>Request and order changes that need attention.</small>
           </div>
           {notifications.length ? (
             notifications.map((notification) => (
@@ -6300,7 +6281,7 @@ function TopAccount({
             ))
           ) : (
             <div className="empty-state compact">
-              <p>No notifications yet.</p>
+              <p>No new updates. Request updates will appear here when Easy Harness needs your attention.</p>
             </div>
           )}
         </div>
@@ -6366,6 +6347,12 @@ function StartScreen({
     <section className="start-screen">
       <div className="start-copy clean">
         <h1>Upload what you have. We’ll build the harness you need.</h1>
+        <p>Describe the connection, upload photos, old samples, sketches, pinouts, or BOM files. Easy Harness will organize them into a clear harness request.</p>
+        <div className="start-helper-row" aria-label="Supported request inputs">
+          <span>Photos</span>
+          <span>Old harness samples</span>
+          <span>Pinouts or sketches</span>
+        </div>
       </div>
 
       <div className="upload-composer">
@@ -6379,7 +6366,7 @@ function StartScreen({
         <textarea
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          placeholder="Describe the connection you need, or upload the files you already have..."
+          placeholder="Tell us what should connect, or upload the files you already have..."
           rows={1}
           disabled={submittingRequest}
         />
@@ -6507,39 +6494,52 @@ function ProcessingScreen({ request, progressIndex }) {
   );
 }
 
-function RequestsList({ requests, openRequest }) {
+function RequestsList({ requests, openRequest, startNewRequest }) {
+  const list = dedupeRequestsByIdentity(requests);
   return (
     <section className="requests-screen">
       <div className="requests-header">
         <span className="eyebrow">Requests</span>
         <h1>Your harness requests</h1>
-        <p>Open a request, continue the thread, or confirm a released price.</p>
+        <p>Continue a thread, review an Easy Harness Draft, or confirm a price when it is ready.</p>
       </div>
 
-      <div className="request-list">
-        {dedupeRequestsByIdentity(requests).map((request) => (
-          <button
-            className="request-row"
-            key={request.id}
-            onClick={() => openRequest(request.id, "user")}
-          >
-            <div>
-              <strong>{request.id}</strong>
-              <span>{request.title}</span>
-            </div>
-            <div className="request-row-meta">
-              <StatusBadge status={request.status} />
-              <small>{request.updated}</small>
-            </div>
+      {list.length ? (
+        <div className="request-list">
+          {list.map((request) => (
+            <button
+              className="request-row"
+              key={request.id}
+              onClick={() => openRequest(request.id, "user")}
+            >
+              <div>
+                <strong>{request.title}</strong>
+                <span>{request.id}</span>
+              </div>
+              <div className="request-row-meta">
+                <StatusBadge status={request.status} />
+                <small>{request.updated}</small>
+              </div>
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="empty-state action-empty-state">
+          <div>
+            <strong>No harness requests yet.</strong>
+            <p>Start with a short description, a photo, a sketch, a pinout, or an old harness sample.</p>
+          </div>
+          <button className="secondary-action" onClick={startNewRequest}>
+            New request
           </button>
-        ))}
-      </div>
+        </div>
+      )}
     </section>
   );
 }
 
-function OrdersList({ orders, openOrder }) {
-  const toPay = orders.filter((order) => order.paymentStatus !== "paid");
+function OrdersList({ orders, openOrder, openRequests, startNewRequest }) {
+  const paymentNeeded = orders.filter((order) => order.paymentStatus !== "paid");
   const active = orders.filter(
     (order) => order.paymentStatus === "paid" && order.status !== "delivered",
   );
@@ -6551,16 +6551,16 @@ function OrdersList({ orders, openOrder }) {
     <section className="requests-screen">
       <div className="requests-header">
         <span className="eyebrow">Orders</span>
-        <h1>Your orders</h1>
-        <p>Finish checkout or track production and delivery after payment.</p>
+        <h1>Your confirmed orders</h1>
+        <p>Complete payment and delivery details, or track production and shipment after payment.</p>
       </div>
 
       <div className="order-list-groups">
         {orders.length ? (
           <>
             <OrderListGroup
-              title="To pay"
-              orders={toPay}
+              title="Payment needed"
+              orders={paymentNeeded}
               openOrder={openOrder}
             />
             <OrderListGroup
@@ -6575,8 +6575,19 @@ function OrdersList({ orders, openOrder }) {
             />
           </>
         ) : (
-          <div className="empty-state">
-            <p>Confirmed requests will appear here as orders.</p>
+          <div className="empty-state action-empty-state">
+            <div>
+              <strong>No confirmed orders yet.</strong>
+              <p>Orders appear after Easy Harness releases a price and you confirm the request.</p>
+            </div>
+            <div className="empty-actions">
+              <button className="secondary-action" onClick={openRequests}>
+                View requests
+              </button>
+              <button className="text-button" onClick={startNewRequest}>
+                New request
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -6602,8 +6613,8 @@ function OrderListGroup({ title, orders, openOrder }) {
               onClick={() => openOrder(order.id)}
             >
               <div>
-                <strong>{order.id}</strong>
-                <span>{order.title}</span>
+                <strong>{order.title}</strong>
+                <span>{order.id}</span>
                 <small>
                   {order.paymentStatus === "paid"
                     ? `${orderStatusCopy[order.status]} - ${shipping?.carrier || "Shipping pending"}`
@@ -6940,7 +6951,7 @@ function AgentActivityCard({ mode, startedAt }) {
             <span></span>
           </div>
           <small>
-            This can take up to 1–2 minutes with the high-reasoning model.
+            This may take about a minute. You can keep this page open while the Draft updates.
           </small>
         </div>
       </div>
@@ -6983,9 +6994,9 @@ function ThreadHeader({ request }) {
     <header className="thread-header">
       <div className="thread-title">
         <div>
-          <span className="eyebrow">Request</span>
-          <h1>{request.id}</h1>
-          <p>{request.title}</p>
+          <span className="eyebrow">Request {request.id}</span>
+          <h1>{request.title}</h1>
+          <p>Continue the thread, review the Draft, or confirm the price when it is ready.</p>
         </div>
         <StatusBadge status={request.status} />
       </div>
@@ -7185,8 +7196,8 @@ function ContentBlock({ block, request }) {
       <div className="event-note price-note">
         <CircleDollarSign size={16} />
         <div>
-          <strong>Price updated</strong>
-          <p>${block.amount} - Ready to confirm</p>
+          <strong>Price ready</strong>
+          <p>${block.amount} - Review and confirm the request when it looks correct.</p>
         </div>
       </div>
     );
@@ -7613,11 +7624,10 @@ function IntakeDraftCard({ checkResult, request }) {
   if (!hasDraft) {
     return (
       <div className="side-card request-summary-card quiet">
-        <span className="summary-kicker">Current status</span>
+        <span className="summary-kicker">Current step</span>
         <h2>{statusCopy[request.status] || "Request received"}</h2>
         <p>
-          Easy Harness will show the request summary here after the intake check
-          finishes.
+          Easy Harness will show the next step here after the intake check finishes.
         </p>
       </div>
     );
@@ -7632,54 +7642,38 @@ function IntakeDraftCard({ checkResult, request }) {
     draft.ai_interpretation?.short_understanding ||
     "Harness request";
   const compactDetails = summary.compact_details || [];
-  const whatWeHave = (
-    summary.what_we_have?.length
-      ? summary.what_we_have
-      : knownRequirementItems(draft.known_requirements)
-  ).slice(0, 4);
   const neededNext = userNeededNextItems(draft);
   const reviewItems = easyHarnessReviewItems(draft);
-  const professionalItems = professionalDetailItems(draft.captured_professional_details);
   const evidence = draft.provided_evidence || [];
-  const riskFlags = draft.risk_flags || [];
-  const fullUnknowns = unknownsByOwner(draft);
+  const userAction = neededNext.length
+    ? "Please reply with the key detail below so Easy Harness can continue."
+    : isReadyDraftStatus(status)
+      ? "No action needed right now. You can still add corrections in the thread."
+      : "Easy Harness is organizing the request. Add any missing connection details if you have them.";
 
   return (
     <div
       className={`side-card request-summary-card draft-status-${draftStatusTone(status)}`}
     >
-      <span className="summary-kicker">Current status</span>
+      <span className="summary-kicker">Current step</span>
       <h2>{draftStatusTitle(status, request.status)}</h2>
-      {summary.next_step && (
-        <p className="summary-next-action">{summary.next_step}</p>
-      )}
+      <p className="summary-next-action">{userAction}</p>
 
       <div className="summary-section compact-meta">
         <span>Request</span>
         <strong>{requestLine}</strong>
         {!!compactDetails.length && (
           <div className="summary-chips">
-            {compactDetails.slice(0, 5).map((item) => (
+            {compactDetails.slice(0, 4).map((item) => (
               <em key={item}>{item}</em>
             ))}
           </div>
         )}
       </div>
 
-      {!!whatWeHave.length && (
-        <div className="summary-section">
-          <span>What we have</span>
-          <ul>
-            {whatWeHave.map((item) => (
-              <li key={item}>{formatMissingInfoItem(item)}</li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {!!neededNext.length && (
         <div className="summary-section warning">
-          <span>Needed next</span>
+          <span>Your reply needed</span>
           <ul>
             {neededNext.map((item) => (
               <li key={item}>{formatMissingInfoItem(item)}</li>
@@ -7703,7 +7697,7 @@ function IntakeDraftCard({ checkResult, request }) {
         <div className="summary-section">
           <span>Files received</span>
           <ul>
-            {evidence.slice(0, 4).map((item, index) => (
+            {evidence.slice(0, 3).map((item, index) => (
               <li key={`${item.filename || item.type}-${index}`}>
                 {item.filename || item.content_summary || item.type}
               </li>
@@ -7711,73 +7705,6 @@ function IntakeDraftCard({ checkResult, request }) {
           </ul>
         </div>
       )}
-
-      <details className="full-draft-details">
-        <summary>View full request details</summary>
-        <div className="full-draft-content">
-          <div className="full-detail-section">
-            <strong>Intent</strong>
-            <p>
-              {draft.user_intent?.desired_outcome ||
-                draft.ai_interpretation?.short_understanding ||
-                requestLine}
-            </p>
-          </div>
-
-          {!!knownRequirementItems(draft.known_requirements).length && (
-            <div className="full-detail-section">
-              <strong>Known details</strong>
-              <ul>
-                {knownRequirementItems(draft.known_requirements).map((item) => (
-                  <li key={item}>{formatMissingInfoItem(item)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {!!professionalItems.length && (
-            <div className="full-detail-section professional-details">
-              <strong>Professional details captured</strong>
-              <ul>
-                {professionalItems.map((item) => (
-                  <li key={item}>{formatMissingInfoItem(item)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          {!!fullUnknowns.length && (
-            <div className="full-detail-section unknowns-by-owner">
-              <strong>Open items by owner</strong>
-              {fullUnknowns.map(([label, items]) => (
-                <div key={label} className="unknown-owner-group">
-                  <span>{label}</span>
-                  <ul>
-                    {items.slice(0, 6).map((item, index) => (
-                      <li key={`${label}-${index}`}>
-                        {unknownItemLabel(item)}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {!!riskFlags.length && (
-            <div className="full-detail-section">
-              <strong>Review flags</strong>
-              <ul>
-                {riskFlags.slice(0, 6).map((item, index) => (
-                  <li key={`${item.type || "risk"}-${index}`}>
-                    {item.description || item.type}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-      </details>
     </div>
   );
 }
@@ -7808,7 +7735,7 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
           </div>
           <p>
             {request.price
-              ? "Review the latest thread update, then confirm when the draft works for your device."
+              ? "This confirms the current harness request and price. Payment and delivery details are completed on the order page."
               : "The price appears after Easy Harness review."}
           </p>
           {quote && (
@@ -7836,8 +7763,8 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
             {linkedOrder
               ? "Open order"
               : ready
-                ? "Confirm draft"
-                : "Confirm locked"}
+                ? "Accept price and create order"
+                : "Price not ready"}
           </button>
         </div>
       )}
@@ -7905,10 +7832,10 @@ function OrderWorkspace({
           <header className="order-header">
             <div className="thread-title">
               <div>
-                <span className="eyebrow">{isPaid ? "Order" : "Checkout"}</span>
-                <h1>{isPaid ? "Order details" : "Complete your order"}</h1>
+                <span className="eyebrow">Order</span>
+                <h1>{isPaid ? "Order details" : "Order in preparation"}</h1>
                 <p>
-                  {order.id} from {order.requestId}
+                  {order.id} from {order.requestId}. Complete delivery, shipping, and payment when everything looks correct.
                 </p>
               </div>
               <StatusBadge status={order.status} />
@@ -8161,7 +8088,7 @@ function OrderWorkspace({
           <section className="order-card">
             <div className="order-section-title">
               <CheckCircle2 size={18} />
-              <h2>Before you pay</h2>
+              <h2>Before payment</h2>
             </div>
             <div className="policy-list">
               <p>
@@ -8291,7 +8218,7 @@ function OrderWorkspace({
             )}
             <p className="checkout-note">
               {completeAddress
-                ? "Choose a payment method only after the request, address, shipping method, and import-tax boundary look correct."
+                ? "Choose a payment method after the request, address, shipping method, and import-tax boundary look correct."
                 : "Add a complete delivery address before choosing a payment method."}
             </p>
           </div>
@@ -9688,16 +9615,10 @@ function StaffApp({
           <span>Easy Harness Ops</span>
         </div>
         <button
-          className={`staff-nav ${staffView === "queue" ? "active" : ""}`}
+          className={`staff-nav ${staffView === "queue" || staffView === "detail" ? "active" : ""}`}
           onClick={() => setStaffView("queue")}
         >
-          Queue
-        </button>
-        <button
-          className={`staff-nav ${staffView === "detail" ? "active" : ""}`}
-          onClick={() => setStaffView("detail")}
-        >
-          Active request
+          Requests
         </button>
         <button
           className={`staff-nav ${staffView === "orders" || staffView === "order" ? "active" : ""}`}
@@ -9790,8 +9711,8 @@ function staffRequestBuckets(requests) {
       ),
     },
     {
-      title: "Ready for quote work",
-      description: "Review is open and no harness price has been released.",
+      title: "Needs price review",
+      description: "Draft is ready enough for Easy Harness to prepare a price.",
       requests: requests.filter(
         (request) => request.status === "in_review" && !request.price,
       ),
@@ -9816,8 +9737,8 @@ function staffRequestBuckets(requests) {
 function staffOrderBuckets(orders) {
   return [
     {
-      title: "Checkout and payment",
-      description: "Customer needs to finish checkout or transfer.",
+      title: "Payment needed",
+      description: "Customer needs to complete payment or transfer.",
       orders: orders.filter((order) => order.paymentStatus !== "paid"),
     },
     {
@@ -9845,7 +9766,7 @@ function requestNextAction(request) {
   if (request.status === "needs_info") {
     const missing = request.checkResult?.missing || [];
     return missing.length
-      ? `Ask customer for ${missing.join(", ")}`
+      ? `Ask customer for ${missing.map(formatMissingInfoItem).join(", ")}`
       : "Ask customer for the missing request details";
   }
   if (request.status === "in_review" && request.price)
@@ -10597,8 +10518,9 @@ function StaffDetail({
           <MessageList request={request} perspective="staff" />
         </div>
         <aside className="staff-price-pane">
+          <IntakeDraftCard checkResult={request.checkResult} request={request} />
           <div className="side-card price-card">
-            <h2>Confirmation</h2>
+            <h2>Release price to customer</h2>
             <label className="field">
               <span>Harness price</span>
               <input
@@ -10610,11 +10532,10 @@ function StaffDetail({
               />
             </label>
             <p>
-              Updating the price creates a small thread record for both sides.
-              Leaving it empty sends only the message content.
+              Release a customer-visible price when the Draft is clear enough. Leaving it empty sends only the message content.
             </p>
             <button className="secondary-action" onClick={sendStaffUpdate}>
-              Record price update
+              Release price or send update
             </button>
           </div>
         </aside>
@@ -10708,22 +10629,7 @@ function StaffComposer({
           placeholder="Reply as Easy Harness..."
           rows={1}
         />
-        <button
-          className={`composer-toggle ${includeTable ? "active" : ""}`}
-          onClick={() => setIncludeTable((current) => !current)}
-          type="button"
-        >
-          <FileSpreadsheet size={16} />
-          Table
-        </button>
-        <button
-          className={`composer-toggle ${includePreview ? "active" : ""}`}
-          onClick={() => setIncludePreview((current) => !current)}
-          type="button"
-        >
-          <ImageIcon size={16} />
-          Preview
-        </button>
+
         <button
           className="send-button small"
           type="button"

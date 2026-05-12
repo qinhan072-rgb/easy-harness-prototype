@@ -4461,3 +4461,119 @@ button:disabled {
     font-size: 30px;
   }
 }
+
+/* UX cleanup: focused account, clearer empty states, and calmer intake copy */
+.account-pill {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  gap: 9px;
+  padding: 3px 12px 3px 4px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--text);
+  font-weight: 780;
+  box-shadow: 0 8px 28px rgba(20, 37, 34, 0.05);
+}
+
+.account-pill:hover {
+  border-color: var(--line-strong);
+  background: #fff;
+}
+
+.account-initials {
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: var(--teal-soft);
+  color: var(--teal);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.account-name {
+  max-width: 168px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.notification-panel-head {
+  display: grid;
+  gap: 3px;
+}
+
+.notification-panel-head small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.start-helper-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.start-helper-row span {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  padding: 0 11px;
+  border: 1px solid rgba(10, 88, 92, 0.12);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.66);
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 760;
+}
+
+.action-empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.action-empty-state strong {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--text);
+  font-size: 16px;
+}
+
+.empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.request-row span {
+  display: block;
+}
+
+.staff-price-pane .request-summary-card {
+  margin-bottom: 12px;
+}
+
+@media (max-width: 720px) {
+  .account-name {
+    display: none;
+  }
+
+  .action-empty-state {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .empty-actions {
+    justify-content: flex-start;
+  }
+}

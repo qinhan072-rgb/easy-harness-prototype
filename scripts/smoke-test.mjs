@@ -298,8 +298,8 @@ const checks = [
     pass: app.includes("signInWithGoogle") &&
       app.includes("supabase.auth.signInWithOAuth") &&
       app.includes('provider: "google"') &&
-      app.includes("Microsoft soon") &&
-      app.includes("Apple soon")
+      app.includes("Continue with Google") &&
+      app.includes("secure email sign-in link")
   },
   {
     name: "auth email confirmation state is explicit",
@@ -328,7 +328,7 @@ const checks = [
   },
   {
     name: "checkout includes normal trade confirmation rules",
-    pass: app.includes("Before you pay") &&
+    pass: app.includes("Before payment") &&
       app.includes("Final confirmation") &&
       app.includes("Address changes") &&
       app.includes("Cancellation")
@@ -350,8 +350,8 @@ const checks = [
   {
     name: "staff queues are grouped by real work lanes",
     pass: app.includes("Needs customer details") &&
-      app.includes("Ready for quote work") &&
-      app.includes("Checkout and payment") &&
+      app.includes("Needs price review") &&
+      app.includes("Payment needed") &&
       app.includes("requestNextAction") &&
       app.includes("orderNextAction")
   },
@@ -482,8 +482,8 @@ const checks = [
       app.includes("Confirmed order")
   },
   {
-    name: "orders list separates checkout from active orders",
-    pass: app.includes("To pay") && app.includes("Active orders") && app.includes("Completed")
+    name: "orders list separates payment-needed from active orders",
+    pass: app.includes("Payment needed") && app.includes("Active orders") && app.includes("Completed")
   }
 ];
 
