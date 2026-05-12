@@ -2468,10 +2468,9 @@ function App() {
     "easy-harness.serviceEvents",
     seedServiceEvents,
   );
-  const [activeRequestId, setActiveRequestId] = useStoredState(
-    "easy-harness.activeRequestId",
-    seedRequests[0].id,
-  );
+  const [activeRequestId, setActiveRequestId] = supabaseConfigured
+    ? useState("")
+    : useStoredState("easy-harness.activeRequestId", seedRequests[0].id);
   const [description, setDescription] = useState("");
   const [uploadFiles, setUploadFiles] = useState([]);
   const [termsChecked, setTermsChecked] = useState(false);
@@ -2530,6 +2529,11 @@ function App() {
 
   const visibleRequests = useMemo(() => {
     if (!currentUser) return [];
+    // In Supabase mode the server RPC already scopes rows by auth.uid() and
+    // role. Do not re-filter by a browser-side user id here; doing so can hide
+    // valid server records after session restore, incognito login, or cross-tab
+    // auth changes.
+    if (supabaseConfigured) return dedupeRequestsByIdentity(requests);
     const scoped =
       currentUser.role === "customer"
         ? requests.filter((request) => request.customerId === currentUser.id)
@@ -2547,6 +2551,9 @@ function App() {
 
   const visibleOrders = useMemo(() => {
     if (!currentUser) return [];
+    // Same rule as requests: Supabase RPCs are the authority for workspace
+    // visibility. Client-side filtering is only for local/demo mode.
+    if (supabaseConfigured) return orders;
     if (currentUser.role === "customer") {
       return orders.filter((order) => order.customerId === currentUser.id);
     }
@@ -2722,6 +2729,10 @@ function App() {
   );
 
   useEffect(() => {
+    // Only local/demo mode should synthesize a local auth session. In hosted
+    // Supabase mode the real auth session must come from supabase.auth; creating
+    // a local replacement during restore can desync the visible workspace.
+    if (supabaseConfigured) return;
     if (!currentUserId) {
       if (authSession) setAuthSession(null);
       return;
@@ -3497,10 +3508,6 @@ function App() {
 
     if (error) {
       setDatabaseProviderStatus("error");
-      setRequests([]);
-      setRequestMessageRecords([]);
-      setAttachmentRecords([]);
-      setActiveRequestId("");
       recordServiceEvent(
         "supabase-database",
         "requests_load_failed",
@@ -3560,8 +3567,6 @@ function App() {
     const { data, error } = await supabase.rpc("list_workspace_orders");
 
     if (error) {
-      setOrders([]);
-      setActiveOrderId("");
       recordServiceEvent(
         "supabase-database",
         "orders_load_failed",
@@ -4228,9 +4233,9 @@ function App() {
     signIn(user.id, createSupabaseAuthSession(session, mergedUser), mergedUser, {
       resetView: false,
     });
-    await loadSupabaseRequestData(user);
-    await loadSupabaseOrderData(user);
-    await loadSupabaseNotificationData(user);
+    await loadSupabaseRequestData(mergedUser);
+    await loadSupabaseOrderData(mergedUser);
+    await loadSupabaseNotificationData(mergedUser);
     recordServiceEvent(
       "supabase-auth",
       action,
@@ -4512,10 +4517,12 @@ function App() {
 
   function openRequest(requestId, nextSurface = currentUser?.role) {
     if (currentUser?.role === "customer") {
-      const allowed = requests.some(
-        (request) =>
-          request.id === requestId && request.customerId === currentUser.id,
-      );
+      const allowed = supabaseConfigured
+        ? requests.some((request) => request.id === requestId)
+        : requests.some(
+            (request) =>
+              request.id === requestId && request.customerId === currentUser.id,
+          );
       if (!allowed) return;
     }
     setActiveRequestId(requestId);
