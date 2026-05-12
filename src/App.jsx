@@ -2606,6 +2606,26 @@ function App() {
     currentUser?.id,
   ]);
 
+  useEffect(() => {
+    if (!supabase || !currentUser?.id) return;
+    if (["requests", "thread"].includes(userView)) {
+      void loadSupabaseRequestData(currentUser);
+    }
+    if (["orders", "order"].includes(userView)) {
+      void loadSupabaseOrderData(currentUser);
+    }
+  }, [currentUser?.id, supabase, userView]);
+
+  useEffect(() => {
+    if (!supabase || !currentUser?.id || currentUser.role !== "staff") return;
+    if (["queue", "detail"].includes(staffView)) {
+      void loadSupabaseRequestData(currentUser);
+    }
+    if (staffView === "order") {
+      void loadSupabaseOrderData(currentUser);
+    }
+  }, [currentUser?.id, currentUser?.role, staffView, supabase]);
+
   const backendTableRows = useMemo(
     () => [
       {
@@ -2948,9 +2968,11 @@ function App() {
 
   function openOrder(orderId) {
     if (currentUser?.role === "customer") {
-      const allowed = orders.some(
-        (order) => order.id === orderId && order.customerId === currentUser.id,
-      );
+      const allowed = supabaseConfigured
+        ? orders.some((order) => order.id === orderId)
+        : orders.some(
+            (order) => order.id === orderId && order.customerId === currentUser.id,
+          );
       if (!allowed) return;
     }
     setActiveOrderId(orderId);
@@ -2980,7 +3002,8 @@ function App() {
     if (!supabase || !request?.supabaseId || !isUuidLike(quote?.id))
       return null;
     const shipping = selectedShipping(order);
-    const { data, error } = await supabase.rpc("confirm_request_order", {
+    const { data, error } = await supabase.rpc("confirm_request_order_for_profile", {
+      p_customer_id: currentUser.id,
       p_request_id: request.supabaseId,
       p_quote_id: quote.id,
       p_order_number: order.id,
@@ -3504,7 +3527,9 @@ function App() {
     if (!supabase || !user?.id) return;
     setDatabaseProviderStatus("connecting");
 
-    const { data, error } = await supabase.rpc("list_workspace_requests");
+    const { data, error } = await supabase.rpc("list_workspace_requests_for_profile", {
+      p_profile_id: user.id,
+    });
 
     if (error) {
       setDatabaseProviderStatus("error");
@@ -3564,7 +3589,9 @@ function App() {
   async function loadSupabaseOrderData(user) {
     if (!supabase || !user?.id) return;
 
-    const { data, error } = await supabase.rpc("list_workspace_orders");
+    const { data, error } = await supabase.rpc("list_workspace_orders_for_profile", {
+      p_profile_id: user.id,
+    });
 
     if (error) {
       recordServiceEvent(
@@ -3654,8 +3681,9 @@ function App() {
 
     const payload = supabaseRequestInsertFromLocal(request);
     const { data: createdRequest, error: requestError } = await supabase.rpc(
-      "create_request_with_number",
+      "create_request_with_number_for_profile",
       {
+        p_customer_id: actor.id,
         p_customer_label: payload.customer_label,
         p_title: payload.title,
         p_customer_summary: payload.customer_summary,
