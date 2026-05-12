@@ -327,9 +327,9 @@ const checks = [
       !app.includes('placeholder="Optional for business import"')
   },
   {
-    name: "checkout includes normal trade confirmation rules",
-    pass: app.includes("Before payment") &&
-      app.includes("Final confirmation") &&
+    name: "checkout includes clear payment confirmation rules",
+    pass: app.includes("Payment confirmation") &&
+      app.includes("What payment confirms") &&
       app.includes("Address changes") &&
       app.includes("Cancellation")
   },

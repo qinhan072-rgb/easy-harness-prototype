@@ -1412,6 +1412,289 @@ function buildMessageBlocks(draft: EasyHarnessDraft, customerMessage: string, re
   return blocks;
 }
 
+
+function cleanExtractedText(value = "") {
+  return value
+    .replace(/^\s*(should be|is|are|to be|an?|the)\s+/i, "")
+    .replace(/\s+/g, " ")
+    .replace(/[.;,]+$/g, "")
+    .trim();
+}
+
+function firstCapture(text: string, patterns: RegExp[]) {
+  for (const pattern of patterns) {
+    const match = text.match(pattern);
+    if (match?.[1]) return cleanExtractedText(match[1]);
+  }
+  return "";
+}
+
+function valueField(value: string, source = "local_draft_builder", confidence: FieldValue["confidence"] = "partial") {
+  return { value, source, confidence };
+}
+
+function customerConversationText(requestRow: RequestRow, messages: MessageRow[]) {
+  const customerMessages = messages
+    .filter((message) => message.author_role === "customer")
+    .map((message) => textFromBlocks(message.blocks, message.body))
+    .filter(Boolean)
+    .join("\n\n");
+  return [requestRow.title, requestRow.customer_summary, customerMessages]
+    .filter(Boolean)
+    .join("\n\n")
+    .trim();
+}
+
+function extractPinoutDetails(text: string) {
+  const assignments: Array<Record<string, unknown>> = [];
+  const pattern = /\bpin\s*(\d{1,3})\s*(?:[:=\-]|\s+)\s*([A-Za-z0-9+/_\- ]{1,40})(?=\s*(?:,|;|\||$|\.))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = pattern.exec(text)) && assignments.length < 30) {
+    const signal = cleanExtractedText(match[2]);
+    if (signal) assignments.push({ pin: match[1], signal, source: "local_draft_builder" });
+  }
+  return assignments;
+}
+
+function buildLocalDraftFromRequest(
+  requestRow: RequestRow,
+  messages: MessageRow[],
+  attachments: Array<AttachmentRow & { storage?: StorageRow }>,
+  trigger = "manual",
+  primaryAgentIssue = "",
+) {
+  const text = customerConversationText(requestRow, messages);
+  const lower = text.toLowerCase();
+  const quantity = firstCapture(text, [
+    /\b(?:quantity|qty|need|needs|make|order|for)\s*[:=]?\s*(\d{1,6}\s*(?:pcs?|pieces?|units?|sets?|pairs?|samples?))\b/i,
+    /\b(\d{1,6}\s*(?:pcs?|pieces?|units?|sets?|pairs?|samples?))\b/i,
+  ]);
+  const length = firstCapture(text, [
+    /\b(?:length|full length|total length|about|approx\.?|approximately|around)?\s*[:=]?\s*(\d+(?:\.\d+)?\s*(?:mm|cm|m|meter|meters|in|inch|inches|ft|feet))\b/i,
+  ]);
+  const endA = firstCapture(text, [
+    /\bend\s*a\b[^\n.]*?(?:should be|is|:|=)\s*(?:an?\s+)?([^\n.]+)/i,
+    /\bfrom\s+(?:side|end)?\s*[:=]?\s*([^\n.]+?)\s+to\s+/i,
+  ]);
+  const endB = firstCapture(text, [
+    /\bend\s*b\b[^\n.]*?(?:should be|is|:|=)\s*(?:an?\s+)?([^\n.]+)/i,
+    /\bto\s+(?:side|end)?\s*[:=]?\s*([^\n.]+)/i,
+  ]);
+  const signalOnly = /\b(signal[-\s]?only|no\s+power|does\s+not\s+carry\s+power|not\s+carry\s+power|without\s+power|data[-\s]?only)\b/i.test(text);
+  const isCan = /\b(can[-\s]?h|can[-\s]?l|can\s*bus|can\s+signal)\b/i.test(text);
+  const oldHarnessCopy = /\b(copy|replicate|remake|replace)\b.+\b(old\s+)?(harness|cable|loom|sample)\b/i.test(text);
+  const hasConnectorOrEndpoint = Boolean(endA || endB || /\b(m\d+|jst|molex|te\s+connectivity|deutsch|connector|socket|plug|controller|sensor|battery|motor|device|port|pinout)\b/i.test(text));
+  const hasBuildIntent = /\b(harness|cable|loom|wire\s+assembly|adapter|pigtail|connect|copy|replace|remake|replicate)\b/i.test(text);
+  const hasConnectionContext = Boolean(
+    (hasBuildIntent && hasConnectorOrEndpoint) ||
+      oldHarnessCopy ||
+      (endA && endB) ||
+      /\bconnect\b.+\b(to|with)\b/i.test(text),
+  );
+
+  const envParts: string[] = [];
+  if (/\boutdoor\b/i.test(text)) envParts.push("outdoor");
+  if (/\bindoor\b/i.test(text)) envParts.push("indoor");
+  if (/\bfield\s+equipment\b/i.test(text)) envParts.push("field equipment");
+  if (/\bvehicle|automotive|agricultural|machine|equipment|robot|prototype\b/i.test(text)) {
+    const use = firstCapture(text, [/\b(for|used in|use in)\s+([^\n.]{3,60})/i]);
+    if (use) envParts.push(use);
+  }
+  const ipRating = firstCapture(text, [/\b(IP\s*6[56789])\b/i]);
+  if (ipRating) envParts.push(ipRating.replace(/\s+/g, ""));
+  const environment = [...new Set(envParts)].join(", ");
+
+  const voltage = firstCapture(text, [/\b(\d+(?:\.\d+)?\s*(?:v|volt|volts))\b/i]);
+  const current = firstCapture(text, [/\b(\d+(?:\.\d+)?\s*(?:a|amp|amps))\b/i]);
+  const power = firstCapture(text, [/\b(\d+(?:\.\d+)?\s*(?:w|watt|watts|kw))\b/i]);
+  const hasPowerLoad = /\b(battery|motor|heater|actuator|pump|inverter|driver|motor controller|power line|power load|high current)\b/i.test(text);
+  const pinout = extractPinoutDetails(text);
+
+  const questions: string[] = [];
+  if (!hasConnectionContext) {
+    questions.push("What should this harness or cable connect, copy, or replace?");
+  } else if (hasPowerLoad && !signalOnly && !current && !power) {
+    questions.push("What maximum current or power is expected on the power line? Approximate is fine.");
+  } else {
+    if (!quantity) questions.push("How many harnesses do you need?");
+    if (!length && !oldHarnessCopy) questions.push("What is the approximate full length, or is there a full sample that can be measured?");
+  }
+
+  const canClose = hasConnectionContext && questions.length === 0;
+  const closureStatus: DraftStatus = canClose
+    ? "ready_for_easy_harness_review"
+    : !hasConnectionContext
+      ? "needs_harness_context"
+      : "needs_key_clarification";
+
+  const knownRequirements: Record<string, FieldValue> = {};
+  if (quantity) knownRequirements.quantity = valueField(quantity, "local_draft_builder", "confirmed");
+  if (length) knownRequirements.harness_length = valueField(length, "local_draft_builder", "confirmed");
+  if (endA) knownRequirements.connector_end_a = valueField(endA, "local_draft_builder", "partial");
+  if (endB) knownRequirements.connector_end_b = valueField(endB, "local_draft_builder", "partial");
+  if (environment) knownRequirements.environment = valueField(environment, "local_draft_builder", "partial");
+  if (voltage) knownRequirements.voltage = valueField(voltage, "local_draft_builder", "partial");
+  if (current) knownRequirements.current = valueField(current, "local_draft_builder", "partial");
+  if (power) knownRequirements.power = valueField(power, "local_draft_builder", "partial");
+  if (signalOnly) knownRequirements.power = valueField("none (signal only)", "local_draft_builder", "confirmed");
+  if (isCan) knownRequirements.signal_type = valueField("CAN bus", "local_draft_builder", "partial");
+  if (ipRating) knownRequirements.ip_rating = valueField(ipRating.replace(/\s+/g, ""), "local_draft_builder", "partial");
+
+  const compactDetails = [
+    length,
+    quantity,
+    signalOnly ? "signal only, no power" : "",
+    isCan ? "CAN signal" : "",
+    environment,
+    ipRating ? `${ipRating.replace(/\s+/g, "")} preferred` : "",
+  ].filter(Boolean).slice(0, 6);
+  const whatWeHave = [
+    endA ? `End A: ${endA}` : "",
+    endB ? `End B: ${endB}` : "",
+    length ? `Length: ${length}` : "",
+    quantity ? `Quantity: ${quantity}` : "",
+    signalOnly ? "Signal only / no power" : "",
+    pinout.length ? "Pinout details provided" : "",
+  ].filter(Boolean).slice(0, 6);
+  const connectionGoal = endA && endB
+    ? `Connect ${endA} to ${endB}.`
+    : oldHarnessCopy
+      ? "Copy or replace an existing harness based on the provided sample/photos."
+      : hasConnectionContext
+        ? cleanExtractedText(text.split("\n").find((line) => /\b(harness|cable|connect|adapter|copy|replace)\b/i.test(line)) || requestRow.customer_summary || requestRow.title)
+        : "";
+  const requestLine = [length, isCan ? "CAN signal harness" : "harness request", quantity].filter(Boolean).join(", ") || requestRow.title || "Harness request";
+
+  const easyHarnessReview: UnknownItem[] = [];
+  if (canClose) {
+    if (/\bconnector|m\d+\b/i.test(text) || endA || endB) {
+      easyHarnessReview.push({
+        field: "connector_selection_or_verification",
+        reason: "Verify connector type, orientation, and suitable part selection from the request details and files.",
+      });
+    }
+    if (isCan || /\bshield|drain\b/i.test(text)) {
+      easyHarnessReview.push({
+        field: "signal_and_shielding_review",
+        reason: "Review CAN signal cable, shielding, drain connection, and continuity expectations.",
+      });
+    }
+    if (environment || /\bwaterproof|IP\s*6[56789]\b/i.test(text)) {
+      easyHarnessReview.push({
+        field: "environmental_sealing_review",
+        reason: "Review waterproofing and sealing approach against the stated environment/IP preference.",
+      });
+    }
+    if (attachments.length) {
+      easyHarnessReview.push({
+        field: "attachment_review",
+        reason: "Review uploaded files for connector orientation, layout, pinout, and sample details.",
+      });
+    }
+  }
+
+  const notApplicable: UnknownItem[] = signalOnly
+    ? [
+        {
+          field: "voltage_current_for_load",
+          reason: "Not needed at intake because the customer specified signal only / no power.",
+        },
+      ]
+    : [];
+
+  const rawDraft = {
+    schema_version: schemaVersion,
+    draft_meta: {
+      draft_status: closureStatus,
+      draft_maturity_level: canClose ? 0.75 : hasConnectionContext ? 0.45 : 0.2,
+      last_updated_reason: primaryAgentIssue
+        ? "Primary agent run did not complete; Easy Harness generated a safe draft path from the submitted request details."
+        : trigger,
+    },
+    user_intent: {
+      intent_type: oldHarnessCopy ? "copy_old_harness" : hasConnectionContext ? "new_custom_harness" : "unknown",
+      connection_goal: connectionGoal,
+      from_side: endA || "unknown",
+      to_side: endB ? [endB] : [],
+      desired_outcome: requestLine,
+      intent_confidence: hasConnectionContext ? "partial" : "vague",
+    },
+    provided_evidence: attachments.map((attachment) => ({
+      type: attachment.mime_type || "attachment",
+      filename: attachment.name,
+      content_summary: `${attachment.name} uploaded by the customer`,
+      relevance: hasConnectionContext ? "likely_relevant" : "unclear",
+      what_it_may_show: "Reference material for Easy Harness review",
+      used_in_draft: false,
+      needs_review: true,
+    })),
+    known_requirements: knownRequirements,
+    captured_professional_details: {
+      connectors: [
+        endA ? { end: "A", value: endA, source: "local_draft_builder" } : null,
+        endB ? { end: "B", value: endB, source: "local_draft_builder" } : null,
+      ].filter(Boolean),
+      terminals: [],
+      wire_gauge: null,
+      pinout,
+      materials: [],
+      shielding: /\bshield|drain\b/i.test(text)
+        ? valueField("shield/drain mentioned", "local_draft_builder", "partial")
+        : null,
+      testing_requirements: [],
+    },
+    ai_interpretation: {
+      short_understanding: requestLine,
+      likely_harness_type: isCan ? "CAN signal harness" : oldHarnessCopy ? "old harness copy" : "custom harness",
+      likely_use: signalOnly || isCan ? "signal" : hasPowerLoad ? "power" : "unknown",
+      complexity_estimate: "simple_to_moderate",
+      do_not_assume: [],
+    },
+    unknowns: {
+      ask_user_now: questions.map((question) => ({ field: "draft_blocking_detail", reason: question, question })),
+      ask_user_if_likely_known: [],
+      easy_harness_review: easyHarnessReview,
+      later_supplier_or_engineering_confirmation: canClose
+        ? [
+            {
+              field: "production_details",
+              reason: "Production-level material, crimp, and test details can be confirmed after Easy Harness review.",
+            },
+          ]
+        : [],
+      not_applicable: notApplicable,
+    },
+    risk_flags: [],
+    user_facing_summary: {
+      request_line: requestLine,
+      compact_details: compactDetails,
+      what_we_have: whatWeHave,
+      needed_next: questions.slice(0, 3),
+      next_step: canClose
+        ? "Easy Harness will review connector selection, files, and remaining technical details."
+        : "Reply with the missing detail so Easy Harness can prepare the Draft.",
+    },
+    draft_closure: {
+      can_close_user_draft: canClose,
+      closure_status: closureStatus,
+      closure_reason: canClose
+        ? "The submitted request has enough user-side information to prepare an Easy Harness Draft."
+        : hasConnectionContext
+          ? "The request is real but one or two draft-blocking basics are still needed."
+          : "A harness/cable connection goal is needed before a Draft can be prepared.",
+      next_action: canClose ? "easy_harness_review" : "ask_user",
+      questions_to_ask: questions.slice(0, 3),
+      customer_message_type: canClose
+        ? "ready_for_review"
+        : hasConnectionContext
+          ? "ask_key_details"
+          : "needs_harness_context",
+    },
+  };
+
+  return normalizeDraft(rawDraft, "easy_harness", "local-draft-builder", trigger);
+}
+
 function summarizeRequestForModel(
   requestRow: RequestRow,
   messages: MessageRow[],
@@ -1824,10 +2107,10 @@ Deno.serve(async (request) => {
     });
   } catch (error) {
     const message =
-      error instanceof Error ? error.message : "Unknown checking error";
+      error instanceof Error ? error.message : "Unknown draft agent error";
     await supabase.from("integration_events").insert({
       adapter: adapterId,
-      action: "draft_failed",
+      action: "primary_agent_failed_local_draft_used",
       target_type: "request",
       target_id: requestRow.id,
       detail: message,
@@ -1836,46 +2119,100 @@ Deno.serve(async (request) => {
         trigger: payload.trigger || "manual",
       },
     });
+
+    const checkedAt = new Date().toISOString();
+    const draft = buildLocalDraftFromRequest(
+      requestRow,
+      messages || [],
+      attachmentsWithStorage,
+      payload.trigger || "manual",
+      message,
+    );
+    const nextStatus = requestStatusFor(draft);
+    const customerMessage = buildCustomerMessage(draft);
+    const messageBlocks = buildMessageBlocks(draft, customerMessage, requestRow);
+    const checkResult = buildCheckResult(draft, {
+      model: "local-draft-builder",
+      provider: "easy_harness",
+      reasoning_effort: "fallback",
+      usage: null,
+      reason: checkReasonFor(draft),
+      checkedAt,
+      trigger: payload.trigger || "manual",
+      version: 2,
+      source: {
+        request_id: requestRow.id,
+        request_number: requestRow.request_number,
+        message_count: messages?.length || 0,
+        attachment_count: attachments?.length || 0,
+        image_count_sent_to_model: 0,
+      },
+      agent_runtime: {
+        primary_agent_completed: false,
+        local_draft_builder_used: true,
+      },
+    });
+
+    const { data: latestRows } = await supabase
+      .from("request_messages")
+      .select("id,author_role,created_at")
+      .eq("request_id", requestRow.id)
+      .order("created_at", { ascending: false })
+      .limit(1);
+    const latestRole = latestRows?.[0]?.author_role || "";
+    let insertedMessage = false;
+    if (latestRole === "customer") {
+      const { error: messageInsertError } = await supabase
+        .from("request_messages")
+        .insert({
+          request_id: requestRow.id,
+          author_id: null,
+          author_role: "easy_harness",
+          body: customerMessage,
+          blocks: messageBlocks,
+          visibility: "thread",
+        });
+
+      insertedMessage = !messageInsertError;
+      if (messageInsertError) {
+        await supabase.from("integration_events").insert({
+          adapter: adapterId,
+          action: "local_draft_message_insert_failed",
+          target_type: "request",
+          target_id: requestRow.id,
+          detail: messageInsertError.message,
+          payload: {
+            requestNumber: requestRow.request_number,
+            trigger: payload.trigger || "manual",
+          },
+        });
+      }
+    }
+
     await supabase
       .from("requests")
       .update({
-        status: "needs_info",
-        check_status: "needs_info",
-        check_result: {
-          schema_version: schemaVersion,
-          status: "needs_info",
-          adapter: adapterId,
-          reason:
-            "Easy Harness could not finish this intake check. Add one more note or resend the last detail so Easy Harness can continue in this thread.",
-          missing: ["continue request"],
-          checkedAt: new Date().toISOString(),
-          error: message,
-        },
+        status: nextStatus,
+        check_status: legacyStatusFor(draft),
+        check_result: checkResult,
+        customer_summary:
+          draft.ai_interpretation.short_understanding ||
+          draft.user_facing_summary.request_line ||
+          requestRow.customer_summary ||
+          "",
       })
       .eq("id", requestRow.id);
 
-    await supabase.from("request_messages").insert({
-      request_id: requestRow.id,
-      author_id: null,
-      author_role: "easy_harness",
-      body: "Easy Harness could not finish checking this request. Add one more note or resend the last detail, and Easy Harness will continue here.",
-      blocks: [
-        {
-          type: "text",
-          text: "Easy Harness could not finish checking this request. Add one more note or resend the last detail, and Easy Harness will continue here.",
-        },
-      ],
-      visibility: "thread",
+    return jsonResponse({
+      ok: true,
+      requestId: requestRow.id,
+      requestNumber: requestRow.request_number,
+      status: nextStatus,
+      checkStatus: legacyStatusFor(draft),
+      readiness: legacyReadinessFor(draft),
+      draftStatus: draft.draft_meta.draft_status,
+      checkResult,
+      message: insertedMessage ? customerMessage : "",
     });
-
-    return jsonResponse(
-      {
-        ok: false,
-        code: "ai_checking_failed",
-        requestId: requestRow.id,
-        message,
-      },
-      500,
-    );
   }
 });

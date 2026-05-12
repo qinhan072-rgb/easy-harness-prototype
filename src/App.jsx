@@ -2510,6 +2510,10 @@ function App() {
       "easy-harness.notificationDeliveries",
       seedNotificationDeliveryRecords,
     );
+  const [readNotificationIds, setReadNotificationIds] = useStoredState(
+    "easy-harness.readNotificationIds",
+    [],
+  );
   const [auditLogs, setAuditLogs] = useStoredState(
     "easy-harness.auditLogs",
     seedAuditLogs,
@@ -3551,16 +3555,48 @@ function App() {
 
   function markVisibleNotificationsRead() {
     if (!currentUser) return;
-    setNotifications((current) =>
-      current.map((notification) => {
-        const visible =
-          notification.userId === currentUser.id ||
-          notification.role === currentUser.role;
-        return visible && !notification.readAt
-          ? { ...notification, readAt: "Now" }
-          : notification;
-      }),
+    const nowIso = new Date().toISOString();
+    const visibleUnreadIds = notifications
+      .filter(
+        (notification) =>
+          !notification.readAt &&
+          (notification.userId === currentUser.id ||
+            notification.role === currentUser.role),
+      )
+      .map((notification) => notification.id)
+      .filter(Boolean);
+
+    if (!visibleUnreadIds.length) return;
+
+    setReadNotificationIds((current) =>
+      [...new Set([...current, ...visibleUnreadIds])].slice(-300),
     );
+    setNotifications((current) =>
+      current.map((notification) =>
+        visibleUnreadIds.includes(notification.id)
+          ? { ...notification, readAt: "Now" }
+          : notification,
+      ),
+    );
+
+    const remoteIds = visibleUnreadIds.filter(isUuidLike);
+    if (supabaseConfigured && supabase && remoteIds.length) {
+      supabase
+        .from("notifications")
+        .update({ read_at: nowIso })
+        .in("id", remoteIds)
+        .then(({ error }) => {
+          if (error) {
+            recordServiceEvent(
+              "supabase-database",
+              "notifications_mark_read_failed",
+              "user",
+              currentUser.id,
+              error.message,
+            );
+          }
+        });
+    }
   }
 
   function appendAttachmentRecords(
@@ -3749,7 +3785,14 @@ function App() {
       return;
     }
 
-    const remoteNotifications = (data || []).map(localNotificationFromSupabase);
+    const readSet = new Set(readNotificationIds || []);
+    const remoteNotifications = (data || [])
+      .map(localNotificationFromSupabase)
+      .map((notification) =>
+        readSet.has(notification.id) && !notification.readAt
+          ? { ...notification, readAt: "Read" }
+          : notification,
+      );
     setNotifications(remoteNotifications);
     setNotificationDeliveryRecords(
       remoteNotifications.flatMap(buildNotificationDeliveryRecords),
@@ -4109,25 +4152,34 @@ function App() {
           blocks: [
             {
               type: "text",
-              text: "Easy Harness could not finish this check. Please resend the last detail or add one more note, and Easy Harness will retry in this thread.",
+              text: "Easy Harness has the request details and files. No action is needed right now; Easy Harness will continue from here.",
             },
           ],
         };
+        const fallbackCheckResult = {
+          status: "in_review",
+          adapter: platformAdapters.checking.id,
+          reason:
+            "The automated draft check did not complete. The request remains queued for Easy Harness review.",
+          missing: [],
+          checkedAt: new Date().toISOString(),
+          error: failureMessage,
+        };
+        const fallbackRequest = {
+          ...request,
+          status: "in_review",
+          checkResult: fallbackCheckResult,
+          updated: "Just now",
+          messages: appendMessageIfMissing(request.messages || [], fallbackMessage),
+        };
         updateRequest(request.id, (current) => ({
           ...current,
-          status: "needs_info",
-          checkResult: {
-            schema_version: "easy_harness_draft_v0_1",
-            status: "needs_info",
-            adapter: platformAdapters.checking.id,
-            reason: "Easy Harness could not finish this intake check. Customer can resend the last detail or add one more note to retry in this thread.",
-            missing: ["continue request"],
-            checkedAt: new Date().toISOString(),
-            error: failureMessage,
-          },
+          status: "in_review",
+          checkResult: fallbackCheckResult,
           updated: "Just now",
           messages: appendMessageIfMissing(current.messages || [], fallbackMessage),
         }));
+        await updateSupabaseRequestFromLocal(fallbackRequest, [fallbackMessage]);
         return null;
       }
 
@@ -7371,8 +7423,15 @@ function UserComposer({
   );
 }
 
+function isCompleteDraftV01(checkResult) {
+  return (
+    checkResult?.schema_version === "easy_harness_draft_v0_1" &&
+    Boolean(checkResult?.draft_meta && checkResult?.user_facing_summary)
+  );
+}
+
 function isDraftV01(checkResult) {
-  return checkResult?.schema_version === "easy_harness_draft_v0_1";
+  return isCompleteDraftV01(checkResult);
 }
 
 function normalizeDraftForView(checkResult = {}, request = {}) {
@@ -7611,14 +7670,16 @@ function unknownsByOwner(draft) {
 
 function IntakeDraftCard({ checkResult, request }) {
   const hasDraft = Boolean(
-    checkResult?.schema_version ||
+    isCompleteDraftV01(checkResult) ||
     checkResult?.adapter === "ai-intake-agent-v1" ||
     checkResult?.adapter === "deepseek-intake-agent-v1" ||
-    checkResult?.adapter === "deepseek-draft-closing-agent-v0-1" ||
     checkResult?.factory_draft ||
     checkResult?.customer_summary ||
     checkResult?.confirmed_facts?.length ||
-    checkResult?.missing?.length,
+    checkResult?.questions?.length ||
+    checkResult?.questions_for_user?.length ||
+    checkResult?.missing?.length ||
+    checkResult?.missing_information?.length,
   );
 
   if (!hasDraft) {
@@ -8088,11 +8149,11 @@ function OrderWorkspace({
           <section className="order-card">
             <div className="order-section-title">
               <CheckCircle2 size={18} />
-              <h2>Before payment</h2>
+              <h2>Payment confirmation</h2>
             </div>
             <div className="policy-list">
               <p>
-                <strong>Final confirmation:</strong> Payment confirms the
+                <strong>What payment confirms:</strong> Payment confirms the
                 harness request, latest Easy Harness update, delivery address,
                 selected shipping method, and DAP import-tax boundary.
               </p>
@@ -8102,9 +8163,9 @@ function OrderWorkspace({
                 to change.
               </p>
               <p>
-                <strong>Payment timing:</strong> Card and wallet orders move
-                forward after provider confirmation. Bank transfer orders move
-                forward after receipt is confirmed.
+                <strong>When production moves forward:</strong> Card and wallet
+                orders move forward after provider confirmation. Bank transfer
+                orders move forward after receipt is confirmed.
               </p>
               <p>
                 <strong>Cancellation:</strong> You can ask to cancel before
