@@ -33,7 +33,8 @@ platform yet.
 - Staff order updates write order, shipment, and tracking metadata.
 - In-app notifications and audit records have Supabase write paths.
 - `run-checking` Edge Function exists for AI intake and Easy Harness Draft
-  generation.
+  generation. It can run through Qwen or DeepSeek; Qwen is the recommended
+  first live provider for the next deployment pass.
 - AI intake currently receives customer text, conversation history, and
   attachment metadata. It does not yet receive reliable visual/OCR/document
   observations from uploaded files.
@@ -76,6 +77,9 @@ Current Agent rules:
 - The Agent may refuse to close Draft when the connection goal is not clear.
 - The Agent must not claim to visually inspect files unless a separate
   vision/OCR/document parser provides that evidence.
+- Model provider is an adapter choice. The platform contract stays the Easy
+  Harness Draft, whether the runtime model is Qwen, DeepSeek, or another
+  compatible provider.
 
 ## Main Product Rules
 

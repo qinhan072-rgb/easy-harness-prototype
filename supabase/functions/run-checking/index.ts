@@ -182,9 +182,9 @@ type EasyHarnessDraft = {
   };
 };
 
-// Legacy smoke-test compatibility: previous implementation checked OPENAI_API_KEY; this function now uses DEEPSEEK_API_KEY.
+// Provider adapter: Easy Harness Draft can run on Qwen first, with DeepSeek kept as fallback.
 const schemaVersion = "easy_harness_draft_v0_1";
-const adapterId = "deepseek-draft-closing-agent-v0-1";
+const adapterId = "easy-harness-draft-agent-v0-2";
 const supportedStatus = new Set([
   "draft_saved",
   "checking",
@@ -1782,7 +1782,7 @@ function summarizeRequestForModel(
 
 function extractJsonObject(text: string) {
   const trimmed = text.trim();
-  if (!trimmed) throw new Error("DeepSeek returned an empty draft result.");
+  if (!trimmed) throw new Error("The draft model returned an empty result.");
   if (trimmed.startsWith("```")) {
     const withoutFence = trimmed
       .replace(/^```(?:json)?\s*/i, "")
@@ -1796,14 +1796,53 @@ function extractJsonObject(text: string) {
   return trimmed;
 }
 
-async function callDeepSeek(inputText: string, trigger = "manual") {
-  const apiKey = Deno.env.get("DEEPSEEK_API_KEY") || "";
-  const baseUrl = (
-    Deno.env.get("DEEPSEEK_BASE_URL") || "https://api.deepseek.com"
-  ).replace(/\/$/, "");
-  const model = Deno.env.get("DEEPSEEK_MODEL") || "deepseek-v4-pro";
-  const reasoningEffort = Deno.env.get("DEEPSEEK_REASONING_EFFORT") || "max";
-  const maxTokens = Number(Deno.env.get("DEEPSEEK_MAX_TOKENS") || "12000");
+function selectedDraftProvider() {
+  const requested = (Deno.env.get("AI_DRAFT_PROVIDER") || "").toLowerCase();
+  if (requested === "qwen" || requested === "deepseek") return requested;
+  if (Deno.env.get("QWEN_API_KEY")) return "qwen";
+  return "deepseek";
+}
+
+function draftModelMissingEnv() {
+  const baseMissing = requiredEnv(["SUPABASE_URL", "SUPABASE_SERVICE_ROLE_KEY"]);
+  const provider = selectedDraftProvider();
+  if (provider === "qwen")
+    return [...baseMissing, ...requiredEnv(["QWEN_API_KEY"])];
+  if (provider === "deepseek")
+    return [...baseMissing, ...requiredEnv(["DEEPSEEK_API_KEY"])];
+  return baseMissing;
+}
+
+function draftModelConfig() {
+  const provider = selectedDraftProvider();
+  if (provider === "qwen") {
+    return {
+      provider,
+      apiKey: Deno.env.get("QWEN_API_KEY") || "",
+      baseUrl: (
+        Deno.env.get("QWEN_BASE_URL") ||
+        "https://dashscope.aliyuncs.com/compatible-mode/v1"
+      ).replace(/\/$/, ""),
+      model: Deno.env.get("QWEN_MODEL") || "qwen-plus",
+      reasoningEffort: Deno.env.get("QWEN_REASONING_EFFORT") || "provider_default",
+      maxTokens: Number(Deno.env.get("QWEN_MAX_TOKENS") || "12000"),
+    };
+  }
+  return {
+    provider,
+    apiKey: Deno.env.get("DEEPSEEK_API_KEY") || "",
+    baseUrl: (
+      Deno.env.get("DEEPSEEK_BASE_URL") || "https://api.deepseek.com"
+    ).replace(/\/$/, ""),
+    model: Deno.env.get("DEEPSEEK_MODEL") || "deepseek-v4-pro",
+    reasoningEffort: Deno.env.get("DEEPSEEK_REASONING_EFFORT") || "max",
+    maxTokens: Number(Deno.env.get("DEEPSEEK_MAX_TOKENS") || "12000"),
+  };
+}
+
+async function callDraftModel(inputText: string, trigger = "manual") {
+  const { provider, apiKey, baseUrl, model, reasoningEffort, maxTokens } =
+    draftModelConfig();
 
   const jsonShape = JSON.stringify(draftSchema, null, 2);
   const response = await fetch(`${baseUrl}/chat/completions`, {
@@ -1816,10 +1855,14 @@ async function callDeepSeek(inputText: string, trigger = "manual") {
       model,
       stream: false,
       max_tokens: maxTokens,
-      thinking: {
-        type: "enabled",
-        reasoning_effort: reasoningEffort === "high" ? "high" : "max",
-      },
+      ...(provider === "deepseek"
+        ? {
+            thinking: {
+              type: "enabled",
+              reasoning_effort: reasoningEffort === "high" ? "high" : "max",
+            },
+          }
+        : {}),
       response_format: { type: "json_object" },
       messages: [
         {
@@ -1868,20 +1911,20 @@ async function callDeepSeek(inputText: string, trigger = "manual") {
   const raw = await response.text();
   if (!response.ok) {
     throw new Error(
-      `DeepSeek request failed (${response.status}): ${raw.slice(0, 1200)}`,
+      `${provider} request failed (${response.status}): ${raw.slice(0, 1200)}`,
     );
   }
 
   const data = JSON.parse(raw);
   const content = data?.choices?.[0]?.message?.content;
-  if (!content) throw new Error("DeepSeek returned an empty draft result.");
+  if (!content) throw new Error(`${provider} returned an empty draft result.`);
   const parsed = JSON.parse(extractJsonObject(content));
   return {
     model,
-    provider: "deepseek",
+    provider,
     reasoningEffort,
     usage: data?.usage || null,
-    draft: normalizeDraft(parsed, "deepseek", model, trigger),
+    draft: normalizeDraft(parsed, provider, model, trigger),
   };
 }
 
@@ -1902,11 +1945,7 @@ Deno.serve(async (request) => {
     );
   }
 
-  const missing = requiredEnv([
-    "SUPABASE_URL",
-    "SUPABASE_SERVICE_ROLE_KEY",
-    "DEEPSEEK_API_KEY",
-  ]);
+  const missing = draftModelMissingEnv();
   if (missing.length)
     return integrationNotConfigured("ai_intake_checking", missing);
 
@@ -2068,7 +2107,7 @@ Deno.serve(async (request) => {
       attachmentsWithStorage,
     );
     const { model, provider, reasoningEffort, usage, draft } =
-      await callDeepSeek(modelInput, payload.trigger || "manual");
+      await callDraftModel(modelInput, payload.trigger || "manual");
     const checkedAt = new Date().toISOString();
     const nextStatus = requestStatusFor(draft);
     const customerMessage = buildCustomerMessage(draft);

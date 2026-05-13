@@ -443,7 +443,17 @@ const checks = [
       shippingFunction.includes("DHL_ACCOUNT_NUMBER") &&
       shipmentFunction.includes("customs_data_required") &&
       storageFunction.includes("signed_upload_call_not_enabled") &&
-      checkingFunction.includes("OPENAI_API_KEY")
+      checkingFunction.includes("AI_DRAFT_PROVIDER") &&
+      checkingFunction.includes("QWEN_API_KEY") &&
+      checkingFunction.includes("DEEPSEEK_API_KEY")
+  },
+  {
+    name: "ai draft model adapter supports qwen",
+    pass: checkingFunction.includes("draftModelConfig") &&
+      checkingFunction.includes("dashscope.aliyuncs.com/compatible-mode/v1") &&
+      checkingFunction.includes("callDraftModel") &&
+      envExample.includes("AI_DRAFT_PROVIDER=qwen") &&
+      envExample.includes("QWEN_API_KEY=")
   },
   {
     name: "ai agent forbids keyword workflows",

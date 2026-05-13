@@ -37,7 +37,9 @@ Important boundary:
 Model choice is secondary to the Agent contract.
 ```
 
-DeepSeek, Qwen, OpenAI, or another model can sit behind the same contract. The
-platform should not depend on a keyword script or a provider-specific prompt.
-For multimodal work, add an attachment-observation layer first, then feed those
-observations into the Draft Agent.
+Qwen, DeepSeek, OpenAI, or another model can sit behind the same contract. The
+current `run-checking` implementation supports Qwen first and DeepSeek fallback
+through environment configuration. The platform should not depend on a keyword
+script or a provider-specific prompt. For multimodal work, add an
+attachment-observation layer first, then feed those observations into the Draft
+Agent.

@@ -71,7 +71,8 @@ Implemented:
 - Staff order updates for production, payment, shipment, and tracking metadata.
 - In-app notifications, notification delivery records, audit logs, and service
   events.
-- `run-checking` Supabase Edge Function for Easy Harness Draft intake.
+- `run-checking` Supabase Edge Function for Easy Harness Draft intake, with a
+  configurable Qwen/DeepSeek model adapter.
 
 Still not live:
 
@@ -113,6 +114,17 @@ Key principles:
   production".
 - Do not expose "manual review", "human review", "prototype", "mock", or
   implementation details in customer UI.
+
+Live AI provider settings:
+
+```text
+AI_DRAFT_PROVIDER=qwen
+QWEN_API_KEY=...
+QWEN_MODEL=qwen-plus
+QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+```
+
+Keep DeepSeek secrets only if it is used as a fallback.
 
 ## Important Docs
 
