@@ -456,6 +456,17 @@ const checks = [
       envExample.includes("QWEN_API_KEY=")
   },
   {
+    name: "ai agent does not title requests from one keyword",
+    pass: !app.includes('if (value.includes("battery")) return "Battery Pack Adapter Harness"') &&
+      app.includes("firstLine") &&
+      checkingFunction.includes("Do not rename the request based on a single keyword")
+  },
+  {
+    name: "ai agent softens file-review claims",
+    pass: checkingFunction.includes("Do not phrase review items as if this run already inspected the image") &&
+      checkingFunction.includes("Inspect uploaded files during Easy Harness review before relying on connector")
+  },
+  {
     name: "ai agent forbids keyword workflows",
     pass: aiAgentPrinciples.includes("关键词只能作为证据，不能作为流程开关") &&
       checkingFunction.includes("Do not use keyword workflows or case-specific scripts") &&

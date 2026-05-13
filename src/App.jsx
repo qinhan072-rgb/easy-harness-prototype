@@ -883,12 +883,22 @@ function makeRequestId(existingRequests = []) {
 }
 
 function inferTitle(text) {
-  const value = text.toLowerCase();
-  if (value.includes("battery")) return "Battery Pack Adapter Harness";
-  if (value.includes("old") || value.includes("remake"))
-    return "Old Harness Remake for Field Equipment";
-  if (value.includes("sensor"))
-    return "Controller-to-Dual-Sensor Harness Assembly";
+  const value = String(text || "").toLowerCase();
+  const firstLine = String(text || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .find((line) => line.length >= 18 && /\b(harness|cable|wire|connector|adapter|loom)\b/i.test(line));
+  if (firstLine) {
+    return firstLine
+      .replace(/^i\s+(need|want|am looking for)\s+(a|an|the)?\s*/i, "")
+      .replace(/\s+/g, " ")
+      .slice(0, 72)
+      .replace(/[.,;:!?]+$/, "");
+  }
+  if (/\b(copy|replace|replacement|remake|replicate)\b/.test(value))
+    return "Replacement Harness Request";
+  if (/\b(sensor|controller)\b/.test(value))
+    return "Sensor Harness Request";
   return "Uploaded Harness Design Request";
 }
 

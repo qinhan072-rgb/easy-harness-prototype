@@ -417,6 +417,28 @@ function normalizeString(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
+function softenEvidenceBoundaryText(value = "") {
+  return value
+    .replace(
+      /\bvisual identification and confirmation of connector housing and terminal models from photos\b/gi,
+      "Inspect uploaded photos during Easy Harness review before confirming connector housing or terminal details",
+    )
+    .replace(
+      /\bvisual identification\b/gi,
+      "photo review during Easy Harness review",
+    )
+    .replace(
+      /\bpinout verification and mapping validation against the uploaded CSV\b/gi,
+      "Review the uploaded pinout file during Easy Harness review before relying on pinout mapping",
+    )
+    .replace(
+      /\bagainst the uploaded CSV\b/gi,
+      "during Easy Harness review",
+    )
+    .replace(/\bfrom photos\b/gi, "during Easy Harness review")
+    .replace(/\boptimized for\b/gi, "selected for");
+}
+
 function normalizeList(value: unknown, limit = 12) {
   return Array.isArray(value)
     ? value
@@ -838,12 +860,34 @@ function deriveMissingKnownRequirements(draft: EasyHarnessDraft) {
       addUnknownOnce(
         draft.unknowns.easy_harness_review,
         "attachment_review",
-        "Review uploaded files for connector orientation, pinout, layout, and missing visual details.",
+        "Inspect uploaded files during Easy Harness review before relying on connector, pinout, layout, or other file details.",
       );
     }
   }
 
   return draft;
+}
+
+function softenEasyHarnessReviewLanguage(draft: EasyHarnessDraft): EasyHarnessDraft {
+  const softenItem = (item: UnknownItem) => ({
+    ...item,
+    reason: softenEvidenceBoundaryText(item.reason || ""),
+    question: item.question
+      ? softenEvidenceBoundaryText(item.question)
+      : item.question,
+  });
+
+  return {
+    ...draft,
+    unknowns: {
+      ...draft.unknowns,
+      easy_harness_review: draft.unknowns.easy_harness_review.map(softenItem),
+      later_supplier_or_engineering_confirmation:
+        draft.unknowns.later_supplier_or_engineering_confirmation.map(
+          softenItem,
+        ),
+    },
+  };
 }
 
 function hasExplicitSignalOnlyNoPower(draft: EasyHarnessDraft) {
@@ -1170,7 +1214,9 @@ function normalizeDraft(
       customer_message_type: messageType,
     },
   };
-  return enforceDraftReadiness(deriveMissingKnownRequirements(draft));
+  return enforceDraftReadiness(
+    softenEasyHarnessReviewLanguage(deriveMissingKnownRequirements(draft)),
+  );
 }
 
 function legacyStatusFor(draft: EasyHarnessDraft) {
@@ -1875,6 +1921,7 @@ async function callDraftModel(inputText: string, trigger = "manual") {
             "Core promise: Upload what you have. We'll build the harness you need. This means accept user-native expression and structure it. It does not mean fake certainty.",
             "The user should feel that Easy Harness organized their real need, not that they were forced to fill a factory questionnaire.",
             "First decide what the user already provided, what the user likely knows and must answer now, what Easy Harness can evaluate from files/photos/samples later, what supplier/manufacturing should confirm later, and what is not applicable.",
+            "Do not rename the request based on a single keyword. The request line should come from the customer's actual connection goal and confirmed constraints. If a word like battery appears only in a negative constraint such as 'no battery power', do not turn the draft into a battery harness.",
             "Do not use keyword workflows or case-specific scripts. Words like old harness, battery, sensor, pinout, photo, sample, CAN, or connector are evidence only. They are not instructions to enter a fixed questionnaire or fixed reply path.",
             "Use the whole conversation to judge intent, evidence, missing blockers, and next action. A keyword may support the judgment, but it must not determine the workflow by itself.",
             "Capture all explicit details. If the user provides connector model, connector type, terminal, wire gauge, length, quantity, voltage, current, pinout, material, shielding, environment, IP rating, test requirement, BOM, drawing, or compliance detail, preserve it in known_requirements and/or captured_professional_details.",
@@ -1884,7 +1931,7 @@ async function callDraftModel(inputText: string, trigger = "manual") {
             "Run a strict relevance gate first. Do not prepare or close a draft if there is no harness/cable connection goal. A real connection goal can be device A to device B, copy/replace an old harness, make an adapter between ports, named connector ends, a pinout, cable routing, or another clear harness context.",
             "Messages like 'Is this file ok?', 'I need a cable', or an unrelated/reference image are not enough to close a draft unless they also state what needs to connect, copy, or replace.",
             "Evidence boundary: this intake run receives attachment metadata and conversation text, not reliable image pixels, OCR, PDF text, spreadsheet rows, CAD geometry, or visual observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, or document contents from attachments unless those details are explicitly present in the text or provided observations.",
-            "If photos/samples/files are attached, treat them as received evidence for Easy Harness review. Route visual identification, connector selection, pinout verification, layout, document extraction, and wire-detail verification to Easy Harness review unless those details are stated in text.",
+            "If photos/samples/files are attached, treat them as received evidence for Easy Harness review. Do not phrase review items as if this run already inspected the image, CSV, PDF, CAD, spreadsheet, or document contents. Say Easy Harness will inspect/review the uploaded files before relying on connector, pinout, layout, or other file-derived details.",
             "General Draft gate: close the draft when connection goal, endpoints or samples/photos, use/function, quantity or approximate quantity, length or measurement basis, environment/use context, and critical safety info are sufficient. Remaining professional unknowns should move to Easy Harness review or supplier/manufacturing confirmation.",
             "Do not close the draft when there is no harness/cable connection goal, the user only asks whether an unrelated file is ok, Easy Harness cannot tell what should be built, or a power-carrying harness lacks basic voltage/current/power and no safe approximation is possible.",
             "For power-carrying requests, voltage and expected current or power are functional/safety basics. Ask one concise question only when the whole request indicates a real power-carrying load and the customer is likely to know an approximate answer. Do not ask because a single word appeared.",
