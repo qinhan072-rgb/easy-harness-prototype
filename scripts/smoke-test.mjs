@@ -279,6 +279,13 @@ const checks = [
       app.includes("openAuthModal")
   },
   {
+    name: "home screen keeps ai-first intake concise",
+    pass: app.includes("Tell us what should connect. Upload any files you already have.") &&
+      app.includes("Describe the harness you need...") &&
+      !app.includes("Describe the connection, upload photos, old samples, sketches, pinouts, or BOM files.") &&
+      !app.includes("Old harness samples")
+  },
+  {
     name: "request submit gates authentication while preserving draft",
     pass: app.includes("Sign in or create an account to submit this request.") &&
       app.includes("submit_request") &&
@@ -531,8 +538,8 @@ const checks = [
       app.includes("Confirmed order")
   },
   {
-    name: "orders list separates payment-needed from active orders",
-    pass: app.includes("Payment needed") && app.includes("Active orders") && app.includes("Completed")
+    name: "orders list separates ready-for-payment from active orders",
+    pass: app.includes("Ready for payment") && app.includes("Active orders") && app.includes("Completed")
   }
 ];
 

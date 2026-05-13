@@ -3920,19 +3920,28 @@ button:disabled {
 
 /* UX polish v1: calmer home, auth, and customer request summary */
 .start-copy.clean {
-  max-width: 720px;
+  max-width: 640px;
 }
 
 .start-copy.clean h1 {
-  font-size: clamp(32px, 3.2vw, 46px);
+  font-size: clamp(31px, 3vw, 43px);
   font-weight: 720;
-  letter-spacing: -0.035em;
+  letter-spacing: 0;
 }
 
 .start-copy.clean p {
-  max-width: 660px;
+  max-width: 520px;
+  margin-top: 10px;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.start-screen .upload-composer {
+  margin-top: 28px;
+}
+
+.start-screen .start-actions {
   margin-top: 14px;
-  font-size: 16px;
 }
 
 .auth-provider-list {
@@ -4095,7 +4104,7 @@ button:disabled {
   margin: 0;
   font-size: 20px;
   line-height: 1.18;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .summary-next-action,
@@ -4217,16 +4226,16 @@ button:disabled {
 
 /* UX polish v2: sharper hero and cleaner account provider choices */
 .start-copy.clean {
-  max-width: 760px;
+  max-width: 640px;
 }
 
 .start-copy.clean h1 {
-  max-width: 760px;
+  max-width: 640px;
   margin: 0 auto;
-  font-size: clamp(35px, 4vw, 56px);
+  font-size: clamp(31px, 3vw, 43px);
   font-weight: 760;
-  line-height: 1.04;
-  letter-spacing: -0.055em;
+  line-height: 1.08;
+  letter-spacing: 0;
 }
 
 .auth-provider-list.streamlined {
@@ -4505,14 +4514,14 @@ button:disabled {
 
 /* Real persistence fix UI polish: calmer landing headline */
 .start-copy.clean {
-  max-width: 700px;
+  max-width: 640px;
 }
 
 .start-copy.clean h1 {
-  max-width: 700px;
-  font-size: clamp(30px, 3.15vw, 44px);
+  max-width: 640px;
+  font-size: clamp(31px, 3vw, 43px);
   line-height: 1.08;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 @media (max-width: 560px) {

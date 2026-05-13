@@ -40,7 +40,7 @@ import {
 const processingSteps = [
   "Upload received",
   "Request prepared",
-  "Files checked",
+  "Files received",
   "Thread created",
 ];
 
@@ -50,7 +50,7 @@ const statusCopy = {
   needs_info: "Need your reply",
   not_supported: "Need connection goal",
   in_review: "Easy Harness review",
-  ready_to_confirm: "Price ready",
+  ready_to_confirm: "Quote ready",
   confirmed: "Request confirmed",
   paid: "Payment received",
 };
@@ -66,7 +66,7 @@ const statusRank = {
   paid: 5,
 };
 
-const workflowSteps = ["Received", "Draft", "Review", "Price"];
+const workflowSteps = ["Received", "Draft", "Review", "Quote"];
 
 const intakeOutcomeCopy = {
   needs_info: "More details needed",
@@ -5278,8 +5278,8 @@ function App() {
       addNotification({
         userId: activeRequest.customerId,
         requestId: activeRequest.id,
-        title: "Price ready",
-        body: `${activeRequest.id} is ready for confirmation at $${price}.`,
+        title: "Quote ready",
+        body: `${activeRequest.id} is ready for quote confirmation at $${price}.`,
       });
       recordAudit(
         "price_updated",
@@ -6409,12 +6409,7 @@ function StartScreen({
     <section className="start-screen">
       <div className="start-copy clean">
         <h1>Upload what you have. We’ll build the harness you need.</h1>
-        <p>Describe the connection, upload photos, old samples, sketches, pinouts, or BOM files. Easy Harness will organize them into a clear harness request.</p>
-        <div className="start-helper-row" aria-label="Supported request inputs">
-          <span>Photos</span>
-          <span>Old harness samples</span>
-          <span>Pinouts or sketches</span>
-        </div>
+        <p>Tell us what should connect. Upload any files you already have.</p>
       </div>
 
       <div className="upload-composer">
@@ -6428,7 +6423,7 @@ function StartScreen({
         <textarea
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          placeholder="Tell us what should connect, or upload the files you already have..."
+          placeholder="Describe the harness you need..."
           rows={1}
           disabled={submittingRequest}
         />
@@ -6621,7 +6616,7 @@ function OrdersList({ orders, openOrder, openRequests, startNewRequest }) {
         {orders.length ? (
           <>
             <OrderListGroup
-              title="Payment needed"
+              title="Ready for payment"
               orders={paymentNeeded}
               openOrder={openOrder}
             />
@@ -7258,7 +7253,7 @@ function ContentBlock({ block, request }) {
       <div className="event-note price-note">
         <CircleDollarSign size={16} />
         <div>
-          <strong>Price ready</strong>
+          <strong>Quote ready</strong>
           <p>${block.amount} - Review and confirm the request when it looks correct.</p>
         </div>
       </div>
@@ -7834,8 +7829,8 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
             {linkedOrder
               ? "Open order"
               : ready
-                ? "Accept price and create order"
-                : "Price not ready"}
+                ? "Confirm quote and create order"
+                : "Quote not ready"}
           </button>
         </div>
       )}
