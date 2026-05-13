@@ -4,7 +4,7 @@ Copy the prompt below into a new AI/Codex conversation for this project.
 
 ---
 
-You are taking over the Easy Harness platform prototype.
+You are taking over the Easy Harness platform.
 
 Work in:
 
@@ -15,8 +15,12 @@ D:\Harness\easy-harness-prototype
 Before changing anything, read these files:
 
 ```text
-PROJECT_HANDOFF.md
 README.md
+PROJECT_HANDOFF.md
+docs/current/CURRENT_PLATFORM_BASELINE.md
+docs/ai-agent/AI_AGENT_PRINCIPLES.md
+docs/setup/STAGE_2A_BACKEND_READINESS.md
+docs/setup/AUTH_EMAIL_AND_GOOGLE_SETUP.md
 package.json
 src/App.jsx
 src/supabaseClient.js
@@ -31,7 +35,13 @@ npm.cmd run build
 npm.cmd run test
 ```
 
-If the local browser URL is needed, start:
+Hosted staging app:
+
+```text
+https://easy-harness-prototype.vercel.app
+```
+
+Local development:
 
 ```bash
 npm.cmd run dev
@@ -45,116 +55,44 @@ http://127.0.0.1:5173
 
 Important context:
 
-- This is not a static screenshot prototype anymore. Treat it as an early local
-  platform prototype moving toward real deployment.
-- Current data is localStorage, but it is shaped like future backend tables.
-- Local adapters mark future service boundaries for auth/session, database,
-  checking, storage, payment, shipping/tracking, and multi-channel notifications.
-- Backend-shaped local ledgers exist for auth session, request messages, quotes,
-  storage objects, payments, shipments, order messages, notification deliveries,
-  and service events.
-- Stage 2A backend direction is selected: Supabase Auth, Supabase PostgreSQL,
-  Supabase Storage private buckets, Supabase Edge Functions, Stripe Checkout,
-  PayPal, bank transfer, DHL Express API first, and DAP checkout.
-- Supabase Auth is partially wired on the front end: when Vercel/Supabase
-  public environment variables are present, email login and customer
-  registration use Supabase Auth and load role/status from `public.profiles`.
-  The local auth adapter remains an offline fallback.
-- Stage 2A backend-readiness files exist in `supabase/migrations`,
-  `supabase/functions`, `.env.example`, and
-  `docs/STAGE_2A_BACKEND_READINESS.md`. They stop at provider boundaries until
-  PayPal/DHL/domain/email/legal/customs resources are available.
+- This is not a static screenshot prototype anymore.
+- Treat it as an early real platform: Vercel frontend, Supabase Auth,
+  PostgreSQL, Storage, and Edge Function paths are already present.
+- The current authoritative baseline is
+  `docs/current/CURRENT_PLATFORM_BASELINE.md`.
+- The current AI Agent behavior baseline is
+  `docs/ai-agent/AI_AGENT_PRINCIPLES.md`.
+- Archived README files under `docs/archive/change-notes/` are history, not the
+  current source of truth.
 - Preserve role separation:
-  - customer@example.com = customer app
-  - staff@easyharness.com = ops console
-  - admin@easyharness.com = admin console
+  - customer = customer workspace
+  - staff = ops console
+  - admin = admin console
 - Customer, staff, and admin should not share a visible shortcut between roles.
-  They are separate users.
-- Visitors should land in the customer workspace before login. The top-right
-  action is Log in / Create account until a session exists. Private request and
-  order history must stay hidden until login.
-- Public registration creates customer accounts only. Staff and admin accounts
-  must be invited or created by admin.
-- Submitting a request should require login or registration while preserving the
-  visitor's draft.
-- Customer registration is personal-user first: email plus optional nickname.
-  Do not add company, legal name, country, or phone fields to public signup.
-- User-facing text must be written for real customers, not for the project owner
-  or developer.
-- Do not expose words such as prototype, mock, Auth provider, human review, or
-  similar implementation details in customer-facing UI.
+- Visitors should land in the customer workspace before login.
+- Login or customer account creation is required when saving/submitting private
+  work.
+- Public registration creates customer accounts only.
+- Staff/admin accounts must be invited or created by admin.
+- User-facing text must be written for real customers.
+- Do not expose words such as prototype, mock, Auth provider, human review,
+  manual review, or implementation fallback in customer-facing UI.
 - The visible system identity in customer conversations is always Easy Harness.
-- Requests are for communication, uploaded material, draft confirmation, and
-  price confirmation.
-- Orders are for checkout, payment, production, shipping, and tracking.
+- Requests are for communication, uploaded material, AI intake, draft, price
+  release, and customer confirmation.
+- Orders are for checkout, payment, production, shipping, tracking, and
+  after-sales contact.
 - Do not collapse request and order into one concept.
-- Checkout is personal-user first. Business import details are optional and
-  collapsed. Keep final confirmation, address-change, cancellation, payment
-  timing, DAP import-tax boundary, and after-sales wording visible before
-  payment.
-- If checking finds missing details, the customer thread should ask for those
-  details clearly in the same conversation.
-- Do not optimize only for a pretty screenshot. Make the interaction, state
-  changes, and data flow feel like a real platform.
+- The AI Agent's current job is Easy Harness Draft closure, not final BOM,
+  supplier RFQ, automatic quote, or production package generation.
+- Ask customers only for the 1-3 details that truly block Draft closure.
+- Do not force customers into a long industrial questionnaire.
+- Payment, DHL logistics, email/WhatsApp delivery, and the deeper AI file
+  parsing/engineering pipeline are not live yet.
 
-First, perform your own review before proposing changes:
+Before proposing changes:
 
 1. Run build and smoke test.
-2. Use the customer flow:
-   - create a request
-   - upload at least one file
-   - submit
-   - use login or customer registration when prompted
-   - pass the checking transition
-   - inspect the request thread
-3. Use the staff flow:
-   - open the new request
-   - reply as Easy Harness
-   - add an attachment/preview/table if relevant
-   - set a price
-4. Return to customer:
-   - confirm the request
-   - open the created order
-   - inspect checkout, delivery address, shipping, DAP tax boundary, payment
-     route, and after-sales policy
-5. Complete the local hosted-payment callback path.
-6. Inspect the paid order view:
-   - confirmed order
-   - payment received
-   - production state
-   - shipping/tracking
-   - delivery information
-   - order message thread
-7. Use staff order console:
-   - update payment state if needed
-   - update production status
-   - update tracking number/link/events
-   - inspect or reply to order messages
-8. Use admin:
-   - inspect users
-   - inspect requests
-   - inspect orders
-   - inspect audit log
-   - inspect service adapter events
-   - inspect data model
-   - inspect API replacement map and schema blueprint
-
-After this review, summarize:
-
-- what currently works
-- what feels fake or confusing
-- what would block real deployment
-- what you recommend changing next
-
-Only then start implementation unless the user explicitly asks you to implement
-immediately.
-
-Implementation rules:
-
-- Keep edits scoped.
-- Use existing React/CSS patterns.
-- Run `npm.cmd run build` and `npm.cmd run test` after meaningful changes.
-- If you add or change core flow behavior, also update `scripts/smoke-test.mjs`
-  and documentation.
-- Preserve the product decisions in `PROJECT_HANDOFF.md` unless the user
-  explicitly changes them.
+2. Review the current Supabase/Vercel/Auth/AI state from code and docs.
+3. If changing a core flow, update tests and current docs.
+4. Keep edits scoped and preserve product decisions unless explicitly changed.
