@@ -2156,6 +2156,53 @@ button:disabled {
   color: var(--text);
 }
 
+.confirmation-points {
+  display: grid;
+  gap: 8px;
+}
+
+.confirmation-points span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfdfc;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 720;
+  line-height: 1.35;
+}
+
+.confirmation-points span::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  background: var(--teal);
+}
+
+.compact-policy-copy {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.compact-policy-list {
+  margin-top: 10px;
+}
+
+.compact-policy-list p {
+  padding: 10px 0 0;
+  border: 0;
+  border-top: 1px solid var(--line);
+  border-radius: 0;
+  background: transparent;
+}
+
 .order-message-card {
   display: grid;
   gap: 12px;
@@ -2249,6 +2296,18 @@ button:disabled {
   gap: 4px;
   padding: 12px 0 14px;
   border-bottom: 1px solid var(--line);
+}
+
+.summary-status {
+  width: fit-content;
+  padding: 4px 8px;
+  border: 1px solid rgba(18, 153, 139, 0.2);
+  border-radius: 999px;
+  background: var(--teal-tint);
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 780;
+  letter-spacing: 0;
 }
 
 .summary-product strong {

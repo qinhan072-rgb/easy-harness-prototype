@@ -95,6 +95,21 @@ Current Agent rules:
 - First checkout incoterm remains DAP.
 - Shipping/tax wording must be clear but not alarming.
 
+## UX Review Baseline
+
+UX is part of product development, not decoration after engineering is done.
+Easy Harness should borrow from two references at the same time:
+
+- AI-first tools such as modern chat interfaces: calm first screen, one obvious
+  input, short guidance, strong next action, and progressive disclosure.
+- Real trade/customization platforms: clear quote acceptance, order basis,
+  delivery details, payment boundary, DAP tax boundary, and operational status.
+
+Do not over-explain every future capability to the customer. Keep payment,
+shipping, and tracking states because they are real platform paths, but show
+them as order preparation and fulfillment steps until live provider APIs are
+connected.
+
 ## Recommended Next Baseline Work
 
 Before starting another feature line, keep this state stable and verify with

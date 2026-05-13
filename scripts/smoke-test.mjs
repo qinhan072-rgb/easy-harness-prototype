@@ -218,7 +218,8 @@ const checks = [
   },
   {
     name: "order checkout includes DAP tax boundary",
-    pass: app.includes("Import duties / taxes are not collected at checkout")
+    pass: app.includes("Import duties and taxes are handled on delivery") &&
+      app.includes("DAP import-duty and tax boundary")
   },
   {
     name: "checkout exposes provider-specific payment paths",
@@ -245,7 +246,8 @@ const checks = [
   },
   {
     name: "order page includes after-sales policy",
-    pass: app.includes("After-sales policy")
+    pass: app.includes("After-sales support") &&
+      app.includes("Custom-made harnesses are covered")
   },
   {
     name: "order includes lightweight message thread",
@@ -330,10 +332,10 @@ const checks = [
   },
   {
     name: "checkout includes clear payment confirmation rules",
-    pass: app.includes("Payment confirmation") &&
-      app.includes("What payment confirms") &&
-      app.includes("Address changes") &&
-      app.includes("Cancellation")
+    pass: app.includes("What payment will confirm") &&
+      app.includes("Production is scheduled after payment is received") &&
+      app.includes("Waiting for payment confirmation") &&
+      !app.includes("Before you pay")
   },
   {
     name: "large files are rejected",

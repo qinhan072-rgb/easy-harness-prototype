@@ -96,8 +96,8 @@ const orderStatusCopy = {
 };
 
 const paymentStatusCopy = {
-  unpaid: "Payment not started",
-  payment_pending: "Payment in progress",
+  unpaid: "Ready for payment",
+  payment_pending: "Waiting for payment confirmation",
   bank_transfer_pending: "Bank transfer pending",
   paid: "Payment received",
   failed: "Payment failed",
@@ -7906,7 +7906,7 @@ function OrderWorkspace({
                 <span className="eyebrow">Order</span>
                 <h1>{isPaid ? "Order details" : "Order in preparation"}</h1>
                 <p>
-                  {order.id} from {order.requestId}. Complete delivery, shipping, and payment when everything looks correct.
+                  {order.id} from {order.requestId}. Review the confirmed harness quote, add delivery details, then choose how to complete payment.
                 </p>
               </div>
               <StatusBadge status={order.status} />
@@ -8108,7 +8108,7 @@ function OrderWorkspace({
           <section className="order-card">
             <div className="order-section-title">
               <Truck size={18} />
-              <h2>Shipping method</h2>
+              <h2>Estimated shipping option</h2>
             </div>
             <div className="origin-row">
               <span>
@@ -8145,13 +8145,12 @@ function OrderWorkspace({
               ))}
             </div>
             <div className="duties-note">
-              <strong>
-                Import duties / taxes are not collected at checkout
-              </strong>
+              <strong>Import duties and taxes are handled on delivery</strong>
               <p>
                 Ships under DAP from Shenzhen, China. Customs, VAT, duties, or
                 carrier brokerage may be collected by the carrier or local
-                authority before delivery.
+                authority before delivery. Easy Harness will keep the shipping
+                option clear before payment.
               </p>
             </div>
           </section>
@@ -8159,28 +8158,22 @@ function OrderWorkspace({
           <section className="order-card">
             <div className="order-section-title">
               <CheckCircle2 size={18} />
-              <h2>Payment confirmation</h2>
+              <h2>What payment will confirm</h2>
             </div>
-            <div className="policy-list">
+            <div className="confirmation-points">
+              <span>Harness quote and latest Easy Harness update</span>
+              <span>Delivery address and selected shipping option</span>
+              <span>DAP import-duty and tax boundary</span>
+            </div>
+            <p className="compact-policy-copy">
+              Production is scheduled after payment is received. If something
+              needs to change, message Easy Harness before production starts.
+            </p>
+            <div className="policy-list compact-policy-list">
               <p>
-                <strong>What payment confirms:</strong> Payment confirms the
-                harness request, latest Easy Harness update, delivery address,
-                selected shipping method, and DAP import-tax boundary.
-              </p>
-              <p>
-                <strong>Address changes:</strong> Ask Easy Harness in the order
-                messages before production starts if the delivery address needs
-                to change.
-              </p>
-              <p>
-                <strong>When production moves forward:</strong> Card and wallet
-                orders move forward after provider confirmation. Bank transfer
-                orders move forward after receipt is confirmed.
-              </p>
-              <p>
-                <strong>Cancellation:</strong> You can ask to cancel before
-                production starts. Once production starts, the harness is made
-                to the confirmed request.
+                Card and wallet orders move forward after provider
+                confirmation. Bank transfer orders move forward after receipt is
+                confirmed.
               </p>
             </div>
           </section>
@@ -8188,28 +8181,18 @@ function OrderWorkspace({
           <section className="order-card">
             <div className="order-section-title">
               <PackageCheck size={18} />
-              <h2>After-sales policy</h2>
+              <h2>After-sales support</h2>
             </div>
-            <div className="policy-list">
+            <div className="policy-list compact-policy-list">
               <p>
-                <strong>Before production:</strong> You can request small
-                corrections after payment before the order enters production.
+                Custom-made harnesses are covered for confirmed Easy Harness
+                production faults. Change requests are available before
+                production starts.
               </p>
               <p>
-                <strong>Custom-made item:</strong> Change-of-mind returns are
-                not available once production starts because the harness is made
-                to the confirmed request.
-              </p>
-              <p>
-                <strong>Quality support:</strong> Report manufacturing defects,
-                wrong assembly, or shipping damage within 7 days of delivery
-                with photos or video.
-              </p>
-              <p>
-                <strong>Resolution:</strong> Confirmed Easy Harness production
-                faults are eligible for repair, remake, or replacement shipment.
-                Customer-supplied specification errors are handled as paid
-                revisions.
+                After delivery, report defects, wrong assembly, or shipping
+                damage with photos or video so Easy Harness can review the
+                fastest resolution.
               </p>
             </div>
           </section>
@@ -8229,7 +8212,12 @@ function OrderWorkspace({
               <CircleDollarSign size={19} />
             </div>
             <div className="summary-product">
+              <span className="summary-status">Order in preparation</span>
               <strong>{order.title}</strong>
+              <small>
+                Add delivery details and choose a payment method when everything
+                looks correct.
+              </small>
               <small>Production lead time: {order.productionLeadTime}</small>
               <small>
                 Estimated completion: {order.estimatedProductionComplete}
