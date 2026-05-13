@@ -14,6 +14,9 @@ My evaluation:
   known.
 - It also prevents a common failure mode: forcing users to provide connector,
   terminal, material, and test details they may not know.
+- It now explicitly treats keywords as evidence only, not workflow triggers.
+- It also defines the evidence boundary: attachment metadata is not the same as
+  visual/OCR/document understanding.
 
 Implementation implication:
 
@@ -27,3 +30,14 @@ User input + uploaded material metadata
 
 The next AI work should improve Draft quality and judgment boundaries before
 building a larger file-parsing or production-data pipeline.
+
+Important boundary:
+
+```text
+Model choice is secondary to the Agent contract.
+```
+
+DeepSeek, Qwen, OpenAI, or another model can sit behind the same contract. The
+platform should not depend on a keyword script or a provider-specific prompt.
+For multimodal work, add an attachment-observation layer first, then feed those
+observations into the Draft Agent.

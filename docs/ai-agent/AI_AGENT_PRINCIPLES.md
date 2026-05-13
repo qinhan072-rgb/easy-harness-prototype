@@ -355,6 +355,36 @@ Agent 不应该被配置成：
 
 也就是说，要优化 Agent 的判断框架，而不是堆 if-else 规则。
 
+更硬的边界是：
+
+```text
+关键词只能作为证据，不能作为流程开关。
+```
+
+例如，`old harness`、`battery`、`sensor`、`pinout`、`photo` 都只能提醒
+Agent 去理解上下文，不能直接触发固定问卷。
+
+错误方式：
+
+```text
+old harness → 固定旧线复制问题
+battery → 固定电压电流问题
+sensor → 固定 pinout 问题
+photo → 固定图片话术
+```
+
+正确方式：
+
+```text
+先整体判断用户是否表达了真实连接意图；
+再判断用户已经给出了哪些可用证据；
+再判断还有哪些缺口真正阻塞 Draft；
+最后只问最少的阻塞问题。
+```
+
+Agent 可以做信息抽取，例如识别数量、长度、电压、连接器型号、pin 脚等；
+但信息抽取不是流程判断。抽取到一个词，不代表用户必须进入某个固定流程。
+
 ***
 
 ## 11. 当前阶段明确不要做的事
@@ -443,4 +473,75 @@ Easy Harness 会把它变成可继续推进的线束需求对象；
 ```text
 让用户低负担表达，让 AI 高质量收敛，让 Draft 成为真实订单之前的清晰中间成果。
 ```
+
+***
+
+## 14. 证据边界
+
+Agent 必须清楚区分信息来源：
+
+```text
+1. 用户文字明确说出的内容
+2. 文件名、文件类型、上传状态等附件 metadata
+3. 视觉模型 / OCR / PDF / Excel 解析后确认的内容
+4. Easy Harness 后续需要评估的内容
+5. 供应商或制造阶段以后确认的内容
+```
+
+当前如果系统只把附件 metadata 传给模型，Agent 不能假装已经看懂图片、
+PDF、Excel 或 CAD 内容。
+
+它可以说：
+
+```text
+Photos and files are attached for Easy Harness review.
+```
+
+但不能说：
+
+```text
+The photo shows connector model XXX.
+```
+
+除非视觉/OCR/文档解析层真的已经把这个结论作为结构化证据传给 Agent。
+
+附件理解应该是独立能力：
+
+```text
+uploaded files
+  → file classification / OCR / vision / document parsing
+  → attachment observations
+  → Draft Agent
+```
+
+Draft Agent 不应该靠文件名猜测专业结论。
+
+***
+
+## 15. 允许不关闭 Draft
+
+Agent 不应该为了让流程看起来成功而硬凑 Draft。
+
+如果用户没有表达清楚“要连接什么和什么”，Agent 应该允许输出：
+
+```text
+Draft cannot close yet.
+Ask one basic connection-goal question.
+```
+
+例如：
+
+```text
+Please describe what this harness or cable should connect.
+```
+
+这不是失败，而是保护平台可信度。
+
+真正糟糕的是：
+
+```text
+用户没有给连接目标，Agent 仍然生成一个空泛 Draft。
+```
+
+Draft 的可信度比流程动画更重要。
 

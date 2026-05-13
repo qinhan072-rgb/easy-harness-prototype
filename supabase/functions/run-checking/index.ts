@@ -1445,6 +1445,54 @@ function customerConversationText(requestRow: RequestRow, messages: MessageRow[]
     .trim();
 }
 
+function hasMeasurementReference(
+  text: string,
+  attachments: Array<AttachmentRow & { storage?: StorageRow }>,
+) {
+  const hasTextReference = matchesAny(text, [
+    /\b(old|existing|original|reference|sample)\s+(harness|cable|loom|assembly)\b/i,
+    /\b(harness|cable|loom|assembly)\s+(sample|reference)\b/i,
+    /\b(can be measured|available to measure|same length|copy the length)\b/i,
+  ]);
+  const hasFileReference = attachments.some((attachment) =>
+    /\b(old|existing|sample|reference|harness|cable|loom|photo|image|picture)\b/i.test(
+      attachment.name || "",
+    ),
+  );
+  return hasTextReference || hasFileReference;
+}
+
+function hasActionableConnectionGoal(
+  text: string,
+  endA: string,
+  endB: string,
+  attachments: Array<AttachmentRow & { storage?: StorageRow }>,
+) {
+  if (endA && endB) return true;
+  const directConnection = matchesAny(text, [
+    /\b(connect|wire|link|join|adapt|convert)\b[\s\S]{0,120}\b(to|with|between)\b/i,
+    /\bfrom\b[\s\S]{1,120}\bto\b/i,
+    /\bbetween\b[\s\S]{1,120}\band\b/i,
+  ]);
+  const copyOrReplaceReference =
+    matchesAny(text, [
+      /\b(copy|replicate|remake|replace|duplicate|recreate)\b[\s\S]{0,80}\b(harness|cable|loom|assembly|sample)\b/i,
+      /\b(harness|cable|loom|assembly|sample)\b[\s\S]{0,80}\b(copy|replicate|remake|replace|duplicate|recreate)\b/i,
+    ]) && (attachments.length > 0 || hasMeasurementReference(text, attachments));
+  const adapterReference = matchesAny(text, [
+    /\b(adapter|pigtail|extension|conversion cable|adapter cable)\b[\s\S]{0,120}\b(to|for|between|from)\b/i,
+  ]);
+  return directConnection || copyOrReplaceReference || adapterReference;
+}
+
+function hasBasicUseContext(text: string) {
+  return matchesAny(text, [
+    /\b(for|used in|use in|application|equipment|machine|vehicle|robot|field equipment|agricultural|industrial|outdoor|indoor)\b/i,
+    /\b(power|supply|signal|data|can\b|rs485|sensor|controller|motor|battery|actuator|pump)\b/i,
+    /\b(waterproof|moisture|vibration|high temperature|low temperature|IP\s*6[56789])\b/i,
+  ]);
+}
+
 function extractPinoutDetails(text: string) {
   const assignments: Array<Record<string, unknown>> = [];
   const pattern = /\bpin\s*(\d{1,3})\s*(?:[:=\-]|\s+)\s*([A-Za-z0-9+/_\- ]{1,40})(?=\s*(?:,|;|\||$|\.))/gi;
@@ -1483,14 +1531,7 @@ function buildLocalDraftFromRequest(
   const signalOnly = /\b(signal[-\s]?only|no\s+power|does\s+not\s+carry\s+power|not\s+carry\s+power|without\s+power|data[-\s]?only)\b/i.test(text);
   const isCan = /\b(can[-\s]?h|can[-\s]?l|can\s*bus|can\s+signal)\b/i.test(text);
   const oldHarnessCopy = /\b(copy|replicate|remake|replace)\b.+\b(old\s+)?(harness|cable|loom|sample)\b/i.test(text);
-  const hasConnectorOrEndpoint = Boolean(endA || endB || /\b(m\d+|jst|molex|te\s+connectivity|deutsch|connector|socket|plug|controller|sensor|battery|motor|device|port|pinout)\b/i.test(text));
-  const hasBuildIntent = /\b(harness|cable|loom|wire\s+assembly|adapter|pigtail|connect|copy|replace|remake|replicate)\b/i.test(text);
-  const hasConnectionContext = Boolean(
-    (hasBuildIntent && hasConnectorOrEndpoint) ||
-      oldHarnessCopy ||
-      (endA && endB) ||
-      /\bconnect\b.+\b(to|with)\b/i.test(text),
-  );
+  const hasConnectionContext = hasActionableConnectionGoal(text, endA, endB, attachments);
 
   const envParts: string[] = [];
   if (/\boutdoor\b/i.test(text)) envParts.push("outdoor");
@@ -1509,15 +1550,22 @@ function buildLocalDraftFromRequest(
   const power = firstCapture(text, [/\b(\d+(?:\.\d+)?\s*(?:w|watt|watts|kw))\b/i]);
   const hasPowerLoad = /\b(battery|motor|heater|actuator|pump|inverter|driver|motor controller|power line|power load|high current)\b/i.test(text);
   const pinout = extractPinoutDetails(text);
+  const measurementBasis = length || (hasMeasurementReference(text, attachments) ? "reference sample or file available" : "");
+  const hasUseContext = Boolean(environment || signalOnly || isCan || hasBasicUseContext(text));
 
   const questions: string[] = [];
   if (!hasConnectionContext) {
     questions.push("What should this harness or cable connect, copy, or replace?");
   } else if (hasPowerLoad && !signalOnly && !current && !power) {
-    questions.push("What maximum current or power is expected on the power line? Approximate is fine.");
+    questions.push(
+      voltage
+        ? "What maximum current or power is expected on the power line? Approximate is fine."
+        : "What voltage and maximum current or power will this harness carry? Approximate is fine.",
+    );
   } else {
     if (!quantity) questions.push("How many harnesses do you need?");
-    if (!length && !oldHarnessCopy) questions.push("What is the approximate full length, or is there a full sample that can be measured?");
+    if (!measurementBasis) questions.push("What is the approximate full length, or is there a full sample that can be measured?");
+    if (!hasUseContext && questions.length < 3) questions.push("Where will this harness be used, or what equipment is it for?");
   }
 
   const canClose = hasConnectionContext && questions.length === 0;
@@ -1541,7 +1589,7 @@ function buildLocalDraftFromRequest(
   if (ipRating) knownRequirements.ip_rating = valueField(ipRating.replace(/\s+/g, ""), "local_draft_builder", "partial");
 
   const compactDetails = [
-    length,
+    measurementBasis,
     quantity,
     signalOnly ? "signal only, no power" : "",
     isCan ? "CAN signal" : "",
@@ -1551,7 +1599,7 @@ function buildLocalDraftFromRequest(
   const whatWeHave = [
     endA ? `End A: ${endA}` : "",
     endB ? `End B: ${endB}` : "",
-    length ? `Length: ${length}` : "",
+    measurementBasis ? `Length/reference: ${measurementBasis}` : "",
     quantity ? `Quantity: ${quantity}` : "",
     signalOnly ? "Signal only / no power" : "",
     pinout.length ? "Pinout details provided" : "",
@@ -1608,7 +1656,7 @@ function buildLocalDraftFromRequest(
       draft_status: closureStatus,
       draft_maturity_level: canClose ? 0.75 : hasConnectionContext ? 0.45 : 0.2,
       last_updated_reason: primaryAgentIssue
-        ? "Primary agent run did not complete; Easy Harness generated a safe draft path from the submitted request details."
+        ? "Primary agent run did not complete; Easy Harness generated a safe draft path from the submitted text and attachment metadata."
         : trigger,
     },
     user_intent: {
@@ -1648,7 +1696,10 @@ function buildLocalDraftFromRequest(
       likely_harness_type: isCan ? "CAN signal harness" : oldHarnessCopy ? "old harness copy" : "custom harness",
       likely_use: signalOnly || isCan ? "signal" : hasPowerLoad ? "power" : "unknown",
       complexity_estimate: "simple_to_moderate",
-      do_not_assume: [],
+      do_not_assume: [
+        "Attachment metadata is not visual or document evidence.",
+        "A keyword is only a clue, not a workflow trigger.",
+      ],
     },
     unknowns: {
       ask_user_now: questions.map((question) => ({ field: "draft_blocking_detail", reason: question, question })),
@@ -1720,7 +1771,8 @@ function summarizeRequestForModel(
         size_bytes: attachment.size_bytes,
         purpose: attachment.purpose,
         storage_status: attachment.storage?.status || "metadata_only",
-        note: "DeepSeek V1 receives attachment metadata and conversation text. It must not claim it visually identified connector details unless those details are described in text or filename.",
+        evidence_boundary:
+          "This intake run receives attachment metadata and conversation text only. It does not receive reliable image pixels, PDF text, spreadsheet rows, CAD geometry, OCR, or visual observations unless those observations appear explicitly in the conversation. Do not claim visual or document identification from this metadata alone.",
       })),
     },
     null,
@@ -1778,16 +1830,21 @@ async function callDeepSeek(inputText: string, trigger = "manual") {
             "You are not a general chatbot, not a sales assistant, and not a traditional factory questionnaire.",
             "The draft closes at Ready for Easy Harness Review. This means a user-side and platform-side requirement object is clear enough for Easy Harness review, quote-path evaluation, and supplier/manufacturing follow-up. It does NOT mean final BOM, supplier RFQ, automatic quote, material confirmation, or production readiness.",
             "Core promise: Upload what you have. We'll build the harness you need. This means accept user-native expression and structure it. It does not mean fake certainty.",
+            "The user should feel that Easy Harness organized their real need, not that they were forced to fill a factory questionnaire.",
             "First decide what the user already provided, what the user likely knows and must answer now, what Easy Harness can evaluate from files/photos/samples later, what supplier/manufacturing should confirm later, and what is not applicable.",
+            "Do not use keyword workflows or case-specific scripts. Words like old harness, battery, sensor, pinout, photo, sample, CAN, or connector are evidence only. They are not instructions to enter a fixed questionnaire or fixed reply path.",
+            "Use the whole conversation to judge intent, evidence, missing blockers, and next action. A keyword may support the judgment, but it must not determine the workflow by itself.",
             "Capture all explicit details. If the user provides connector model, connector type, terminal, wire gauge, length, quantity, voltage, current, pinout, material, shielding, environment, IP rating, test requirement, BOM, drawing, or compliance detail, preserve it in known_requirements and/or captured_professional_details.",
             "Do not ask for terminal part numbers, exact wire gauge, strip length, crimp details, connector brand, IPC class, FAI, packaging, test fixture, controlled drawing revision, or factory production details unless they truly block the Draft stage.",
             "Ask at most three customer-facing questions, and prefer one or two. Only ask questions that block Draft closure and that the user is likely to know.",
+            "It is acceptable not to close a Draft. If the connection goal is not clear, do not invent a Draft; ask the smallest connection-goal question.",
             "Run a strict relevance gate first. Do not prepare or close a draft if there is no harness/cable connection goal. A real connection goal can be device A to device B, copy/replace an old harness, make an adapter between ports, named connector ends, a pinout, cable routing, or another clear harness context.",
             "Messages like 'Is this file ok?', 'I need a cable', or an unrelated/reference image are not enough to close a draft unless they also state what needs to connect, copy, or replace.",
-            "DeepSeek currently receives attachment metadata and conversation text, not reliable visual pixels. Do not claim to visually identify connector models from attachments. If photos/samples are attached, route visual identification, connector selection, pinout verification, layout, and wire-detail verification to Easy Harness review unless those details are stated in text.",
+            "Evidence boundary: this intake run receives attachment metadata and conversation text, not reliable image pixels, OCR, PDF text, spreadsheet rows, CAD geometry, or visual observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, or document contents from attachments unless those details are explicitly present in the text or provided observations.",
+            "If photos/samples/files are attached, treat them as received evidence for Easy Harness review. Route visual identification, connector selection, pinout verification, layout, document extraction, and wire-detail verification to Easy Harness review unless those details are stated in text.",
             "General Draft gate: close the draft when connection goal, endpoints or samples/photos, use/function, quantity or approximate quantity, length or measurement basis, environment/use context, and critical safety info are sufficient. Remaining professional unknowns should move to Easy Harness review or supplier/manufacturing confirmation.",
             "Do not close the draft when there is no harness/cable connection goal, the user only asks whether an unrelated file is ok, Easy Harness cannot tell what should be built, or a power-carrying harness lacks basic voltage/current/power and no safe approximation is possible.",
-            "For power-carrying requests, voltage and expected current or power are functional/safety basics. If a supply pin, battery, motor, heater, actuator, pump, inverter, driver, controller power line, or other load is involved and current or power is not known, ask one concise question before closing the draft.",
+            "For power-carrying requests, voltage and expected current or power are functional/safety basics. Ask one concise question only when the whole request indicates a real power-carrying load and the customer is likely to know an approximate answer. Do not ask because a single word appeared.",
             "If the user clearly says signal only, no power, data only, or no load current, voltage/current is not applicable and must not be asked as a blocking question. Put this in unknowns.not_applicable if useful.",
             "If the user wants to copy an old harness and provides photos/sample plus quantity and approximate or measurable length, connector part numbers, terminal choices, wire construction, and visual pinout verification usually belong to Easy Harness review, not ask_user_now.",
             "If a draft is ready, user_facing_summary.needed_next must be empty. Put Easy Harness-owned work in easy_harness_review, later production details in later_supplier_or_engineering_confirmation, and irrelevant/not-needed items in not_applicable.",

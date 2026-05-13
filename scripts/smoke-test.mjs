@@ -18,6 +18,7 @@ const storagePolicyPath = resolve(root, "supabase", "migrations", "202605100006_
 const envExamplePath = resolve(root, ".env.example");
 const stage2DocPath = resolve(root, "docs", "setup", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "setup", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
+const aiAgentPrinciplesPath = resolve(root, "docs", "ai-agent", "AI_AGENT_PRINCIPLES.md");
 const paymentFunctionPath = resolve(root, "supabase", "functions", "create-payment-session", "index.ts");
 const shippingFunctionPath = resolve(root, "supabase", "functions", "quote-shipping-rates", "index.ts");
 const shipmentFunctionPath = resolve(root, "supabase", "functions", "create-shipment", "index.ts");
@@ -43,6 +44,7 @@ const storagePolicySql = readIfExists(storagePolicyPath);
 const envExample = readIfExists(envExamplePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
+const aiAgentPrinciples = readIfExists(aiAgentPrinciplesPath);
 const paymentFunction = readIfExists(paymentFunctionPath);
 const shippingFunction = readIfExists(shippingFunctionPath);
 const shipmentFunction = readIfExists(shipmentFunctionPath);
@@ -442,6 +444,30 @@ const checks = [
       shipmentFunction.includes("customs_data_required") &&
       storageFunction.includes("signed_upload_call_not_enabled") &&
       checkingFunction.includes("OPENAI_API_KEY")
+  },
+  {
+    name: "ai agent forbids keyword workflows",
+    pass: aiAgentPrinciples.includes("关键词只能作为证据，不能作为流程开关") &&
+      checkingFunction.includes("Do not use keyword workflows or case-specific scripts") &&
+      checkingFunction.includes("A keyword may support the judgment, but it must not determine the workflow by itself")
+  },
+  {
+    name: "ai agent preserves attachment evidence boundary",
+    pass: (
+      aiAgentPrinciples.includes("附件 metadata 不等于视觉/OCR/文档理解") ||
+      (
+        aiAgentPrinciples.includes("附件 metadata") &&
+        aiAgentPrinciples.includes("不能假装已经看懂图片")
+      )
+    ) &&
+      checkingFunction.includes("Evidence boundary: this intake run receives attachment metadata") &&
+      checkingFunction.includes("Do not claim to visually identify connector models")
+  },
+  {
+    name: "ai agent can refuse unsafe draft closure",
+    pass: aiAgentPrinciples.includes("允许不关闭 Draft") &&
+      checkingFunction.includes("It is acceptable not to close a Draft") &&
+      checkingFunction.includes("do not invent a Draft")
   },
   {
     name: "stage 2A env template names offline credentials",

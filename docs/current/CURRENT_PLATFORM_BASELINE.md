@@ -34,6 +34,9 @@ platform yet.
 - In-app notifications and audit records have Supabase write paths.
 - `run-checking` Edge Function exists for AI intake and Easy Harness Draft
   generation.
+- AI intake currently receives customer text, conversation history, and
+  attachment metadata. It does not yet receive reliable visual/OCR/document
+  observations from uploaded files.
 
 ## What Is Still Modeled, Not Live
 
@@ -65,6 +68,14 @@ It does not mean:
 final BOM, supplier RFQ, material confirmation, test spec, factory work order,
 or automatic price.
 ```
+
+Current Agent rules:
+
+- Keywords are evidence, not workflow triggers.
+- The Agent should not become a fixed questionnaire.
+- The Agent may refuse to close Draft when the connection goal is not clear.
+- The Agent must not claim to visually inspect files unless a separate
+  vision/OCR/document parser provides that evidence.
 
 ## Main Product Rules
 
@@ -100,3 +111,11 @@ After this, choose one focused integration line:
 - logistics,
 - notification delivery,
 - or AI file/knowledge pipeline.
+
+## Deployment Note
+
+GitHub/Vercel redeploys update the frontend only.
+
+When `supabase/functions/run-checking/index.ts` changes, also deploy the
+Supabase Edge Function `run-checking`; otherwise the hosted site may still call
+the old Agent prompt/logic.
