@@ -2728,6 +2728,40 @@ button:disabled {
   text-align: right;
 }
 
+.marketplace-payment-state {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+  padding: 12px;
+  border: 1px solid rgba(18, 153, 139, 0.22);
+  border-radius: var(--radius);
+  background: rgba(240, 253, 250, 0.72);
+}
+
+.marketplace-payment-state .payment-state {
+  margin-top: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.marketplace-payment-state p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.marketplace-checkout-link {
+  justify-content: center;
+  width: 100%;
+}
+
+.marketplace-ops-card {
+  border-color: rgba(18, 153, 139, 0.24);
+  background: rgba(250, 255, 253, 0.96);
+}
+
 .checkout-note {
   margin: 12px 0 0;
   color: var(--muted);

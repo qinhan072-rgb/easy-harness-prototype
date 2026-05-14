@@ -14,6 +14,8 @@ Use this folder as the project knowledge base.
 ## Setup
 
 - `setup/AUTH_EMAIL_AND_GOOGLE_SETUP.md` - Supabase email and Google setup.
+- `setup/MARKETPLACE_PROTECTED_PAYMENT.md` - protected marketplace payment
+  handoff path.
 - `setup/STAGE_2A_BACKEND_READINESS.md` - backend readiness and offline resource
   checklist.
 

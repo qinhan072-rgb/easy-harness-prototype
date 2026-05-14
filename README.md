@@ -45,8 +45,8 @@ policy.
 - AI intake: Supabase Edge Function `run-checking`, configured around Easy
   Harness Draft closure, with Qwen as the recommended first live provider and
   DeepSeek kept as an optional fallback.
-- Payment: Stripe, PayPal, and bank transfer are modeled, but live provider
-  calls are not implemented yet.
+- Payment: Stripe, PayPal, bank transfer, and a protected marketplace payment
+  handoff are modeled, but live provider/API calls are not implemented yet.
 - Logistics: DHL Express is the first target, but live rate, shipment, label,
   and tracking calls are not implemented yet.
 - Notifications: in-app notifications exist; email/WhatsApp provider routing is

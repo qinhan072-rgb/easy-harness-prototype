@@ -68,6 +68,9 @@ Implemented:
 - Staff request replies and quote persistence.
 - Customer quote confirmation through a persisted order RPC.
 - Payment state records for modeled Stripe/PayPal/bank transfer flows.
+- Protected marketplace payment handoff: customer can request a matching
+  protected checkout link, and staff can paste the external marketplace order
+  link back into the order.
 - Staff order updates for production, payment, shipment, and tracking metadata.
 - In-app notifications, notification delivery records, audit logs, and service
   events.
@@ -77,6 +80,8 @@ Implemented:
 Still not live:
 
 - Stripe/PayPal hosted payment session calls and webhooks.
+- Marketplace seller account/API automation; the current path is staff-prepared
+  link handoff for a matching protected order.
 - DHL Express live rate, shipment, label, invoice, pickup, and tracking calls.
 - Email/WhatsApp provider delivery.
 - Production custom domain and company email sender.

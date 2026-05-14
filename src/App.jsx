@@ -360,6 +360,12 @@ const paymentMethods = [
     label: "Bank transfer",
     detail: "Use a reference code; production starts after receipt",
   },
+  {
+    id: "marketplace_protected",
+    provider: "Alibaba.com Trade Assurance",
+    label: "Marketplace protected payment",
+    detail: "Request a matching protected checkout link",
+  },
 ];
 
 const bankTransferDetails = {
@@ -368,6 +374,26 @@ const bankTransferDetails = {
   memo: "Use the order ID as the payment reference.",
   note: "Wire instructions are issued on the pro forma invoice.",
 };
+
+const marketplacePaymentDefaults = {
+  provider: "Alibaba.com Trade Assurance",
+  note:
+    "Open this protected checkout only after the marketplace order matches the Easy Harness order summary.",
+};
+
+function marketplacePaymentDetails(order = {}) {
+  return {
+    provider: marketplacePaymentDefaults.provider,
+    checkoutUrl: "",
+    reference: "",
+    note: marketplacePaymentDefaults.note,
+    status: "",
+    requestedAt: "",
+    updatedAt: "",
+    ...(order.snapshot?.marketplacePayment || {}),
+    ...(order.marketplacePayment || {}),
+  };
+}
 
 const platformAdapters = {
   auth: {
@@ -2375,10 +2401,24 @@ function quoteShippingRatesAdapter(packageEstimate) {
 
 function createPaymentSessionAdapter(order, method) {
   const isBankTransfer = method.id === "bank_transfer";
+  const isMarketplace = method.id === "marketplace_protected";
+  const marketplacePayment = isMarketplace
+    ? {
+        ...marketplacePaymentDetails(order),
+        provider: method.provider,
+        status: "requested",
+        requestedAt: "Now",
+        updatedAt: "Now",
+      }
+    : null;
   const session = {
-    id: `${isBankTransfer ? "bank" : "pay"}_${method.id}_${order.id}`,
+    id: `${isBankTransfer ? "bank" : isMarketplace ? "marketplace" : "pay"}_${method.id}_${order.id}`,
     provider: method.provider,
-    status: isBankTransfer ? "awaiting_receipt" : "awaiting_callback",
+    status: isBankTransfer
+      ? "awaiting_receipt"
+      : isMarketplace
+        ? "link_requested"
+        : "awaiting_callback",
     amount: orderTotal(order),
     currency: order.currency,
     createdAt: "Now",
@@ -2396,16 +2436,27 @@ function createPaymentSessionAdapter(order, method) {
       paymentProvider: method.provider,
       paymentReference: isBankTransfer
         ? order.bankTransferReference || `BT-${order.id}`
-        : order.paymentReference || "",
+        : marketplacePayment?.reference || order.paymentReference || "",
       paymentSession: session,
+      marketplacePayment: marketplacePayment || order.marketplacePayment || {},
+      snapshot: marketplacePayment
+        ? {
+            ...(order.snapshot || {}),
+            marketplacePayment,
+          }
+        : order.snapshot,
       updated: "Just now",
     },
     eventAction: isBankTransfer
       ? "bank_transfer_reference_created"
-      : "payment_session_created",
+      : isMarketplace
+        ? "marketplace_payment_link_requested"
+        : "payment_session_created",
     eventDetail: isBankTransfer
       ? "Bank transfer reference issued."
-      : `${method.provider} hosted session created.`,
+      : isMarketplace
+        ? "Marketplace protected payment link requested."
+        : `${method.provider} hosted session created.`,
   };
 }
 
@@ -2671,6 +2722,7 @@ function createOrderFromRequest(request, user) {
     trackingEvents: [],
     supportMessages: [],
     bankTransferReference: `BT-${orderId}`,
+    marketplacePayment: {},
     internalNotes: "",
     snapshot: {
       requestTitle: request.title,
@@ -2695,6 +2747,7 @@ function localOrderFromSupabase(row, currentUser) {
   );
   const requestNumber =
     row.requests?.request_number || row.snapshot?.requestNumber || "";
+  const marketplacePayment = row.snapshot?.marketplacePayment || {};
   const supportMessages = [...(row.order_messages || [])]
     .sort(
       (a, b) =>
@@ -2713,10 +2766,18 @@ function localOrderFromSupabase(row, currentUser) {
     title: row.title,
     status: row.status,
     paymentStatus: row.payment_status,
-    paymentMethodId: "",
-    paymentProvider: "",
-    paymentReference: "",
-    paymentSession: null,
+    paymentMethodId: marketplacePayment.status ? "marketplace_protected" : "",
+    paymentProvider: marketplacePayment.provider || "",
+    paymentReference: marketplacePayment.reference || "",
+    paymentSession: marketplacePayment.status
+      ? {
+          id: `marketplace_${row.order_number}`,
+          provider: marketplacePayment.provider || marketplacePaymentDefaults.provider,
+          status: marketplacePayment.status,
+          checkoutUrl: marketplacePayment.checkoutUrl || "",
+          reference: marketplacePayment.reference || "",
+        }
+      : null,
     paidAt: "",
     productionStatus: row.production_status,
     fulfillmentStatus: row.fulfillment_status,
@@ -2738,6 +2799,7 @@ function localOrderFromSupabase(row, currentUser) {
     trackingEvents: [],
     supportMessages,
     bankTransferReference: `BT-${row.order_number}`,
+    marketplacePayment,
     internalNotes: "",
     snapshot: row.snapshot || {},
     updated: displayTime(row.updated_at || row.created_at),
@@ -2814,7 +2876,16 @@ function normalizeOrderShape(order) {
     trackingEvents: order.trackingEvents || [],
     supportMessages: order.supportMessages || [],
     bankTransferReference: order.bankTransferReference || `BT-${order.id}`,
+    marketplacePayment: marketplacePaymentDetails(order),
     internalNotes: order.internalNotes || "",
+    snapshot: {
+      requestTitle: "",
+      customerSummary: "",
+      requestFiles: [],
+      latestEasyBlocks: [],
+      ...(order.snapshot || {}),
+      marketplacePayment: marketplacePaymentDetails(order),
+    },
     address: {
       name: "",
       company: "",
@@ -2841,6 +2912,7 @@ function paymentMethodById(methodId) {
 function paymentProviderKey(method) {
   if (method?.id === "paypal") return "paypal";
   if (method?.id === "bank_transfer") return "bank_transfer";
+  if (method?.id === "marketplace_protected") return "marketplace";
   return "stripe";
 }
 
@@ -3616,6 +3688,8 @@ function App() {
         provider: method.provider,
         methodId: method.id,
         session: session || {},
+        marketplacePayment:
+          patch.marketplacePayment || patch.snapshot?.marketplacePayment || {},
         orderNumber: order.id,
       },
     });
@@ -3665,6 +3739,7 @@ function App() {
         total_due: orderTotal(nextOrder),
         address: nextOrder.address || {},
         package_estimate: nextOrder.packageEstimate || {},
+        snapshot: nextOrder.snapshot || {},
         production_lead_time: nextOrder.productionLeadTime || "",
         estimated_production_complete:
           nextOrder.estimatedProductionComplete || null,
@@ -5943,6 +6018,44 @@ function App() {
         "order",
         activeOrder.id,
         `${method.provider} selected for checkout.`,
+      );
+      recordServiceEvent(
+        sessionResult.adapter,
+        sessionResult.eventAction,
+        "order",
+        activeOrder.id,
+        sessionResult.eventDetail,
+      );
+      await persistSupabasePayment(
+        activeOrder,
+        method,
+        sessionResult.session,
+        sessionResult.orderPatch,
+        "pending",
+      );
+      return;
+    }
+
+    if (methodId === "marketplace_protected") {
+      updateOrder(activeOrder.id, (order) => ({
+        ...order,
+        ...sessionResult.orderPatch,
+      }));
+      writePaymentLedger({
+        ...activeOrder,
+        ...sessionResult.orderPatch,
+      });
+      addNotification({
+        role: "staff",
+        requestId: activeOrder.requestId,
+        title: "Protected payment link requested",
+        body: `${activeOrder.id} is waiting for a matching marketplace checkout link.`,
+      });
+      recordAudit(
+        "marketplace_payment_requested",
+        "order",
+        activeOrder.id,
+        `${method.provider} protected payment requested.`,
       );
       recordServiceEvent(
         sessionResult.adapter,
@@ -8583,8 +8696,13 @@ function OrderWorkspace({
   const total = orderTotal(order);
   const isPaid = order.paymentStatus === "paid";
   const transferPending = order.paymentStatus === "bank_transfer_pending";
-  const providerPending = order.paymentStatus === "payment_pending";
-  const canPay = completeAddress && shipping && !isPaid;
+  const marketplacePending =
+    order.paymentStatus === "payment_pending" &&
+    order.paymentMethodId === "marketplace_protected";
+  const providerPending =
+    order.paymentStatus === "payment_pending" && !marketplacePending;
+  const paymentInProgress = transferPending || providerPending || marketplacePending;
+  const canPay = completeAddress && shipping && !isPaid && !paymentInProgress;
   const [showBusinessFields, setShowBusinessFields] = useState(
     Boolean(order.address.company || order.address.taxId),
   );
@@ -8991,6 +9109,9 @@ function OrderWorkspace({
             ) : (
               <>
                 {transferPending && <BankTransferInstructions order={order} />}
+                {marketplacePending && (
+                  <MarketplacePaymentState order={order} />
+                )}
                 {providerPending && (
                   <div className="payment-state">
                     <Clock3 size={18} />
@@ -9539,6 +9660,8 @@ function PaymentMethodButton({ method, disabled, onClick }) {
   const Icon =
     method.id === "bank_transfer"
       ? ReceiptText
+      : method.id === "marketplace_protected"
+        ? ShieldCheck
       : method.id === "paypal"
         ? CircleDollarSign
         : CreditCard;
@@ -9578,6 +9701,48 @@ function BankTransferInstructions({ order }) {
       <p>
         {bankTransferDetails.memo} {bankTransferDetails.note}
       </p>
+    </div>
+  );
+}
+
+function MarketplacePaymentState({ order }) {
+  const payment = marketplacePaymentDetails(order);
+  const hasLink = Boolean(payment.checkoutUrl);
+
+  return (
+    <div className="marketplace-payment-state">
+      <div className="payment-state">
+        <ShieldCheck size={18} />
+        <div>
+          <strong>
+            {hasLink
+              ? "Protected marketplace checkout ready"
+              : "Protected marketplace checkout requested"}
+          </strong>
+          <span>
+            {hasLink
+              ? `Open the ${payment.provider} checkout only if it matches this Easy Harness order.`
+              : "Easy Harness will prepare a matching protected checkout link for this confirmed order."}
+          </span>
+        </div>
+      </div>
+      {hasLink ? (
+        <a
+          className="secondary-action marketplace-checkout-link"
+          href={payment.checkoutUrl}
+          rel="noreferrer"
+          target="_blank"
+        >
+          Open protected checkout <ArrowRight size={15} />
+        </a>
+      ) : null}
+      {payment.reference ? (
+        <div className="bank-row">
+          <span>Marketplace reference</span>
+          <b>{payment.reference}</b>
+        </div>
+      ) : null}
+      {payment.note ? <p>{payment.note}</p> : null}
     </div>
   );
 }
@@ -10599,6 +10764,14 @@ function requestNextAction(request) {
 }
 
 function orderNextAction(order) {
+  if (
+    order.paymentStatus === "payment_pending" &&
+    order.paymentMethodId === "marketplace_protected"
+  ) {
+    return marketplacePaymentDetails(order).checkoutUrl
+      ? "Wait for marketplace payment confirmation"
+      : "Prepare protected marketplace checkout link";
+  }
   if (order.paymentStatus === "bank_transfer_pending")
     return "Confirm transfer receipt or message customer";
   if (order.paymentStatus !== "paid")
@@ -10792,6 +10965,18 @@ function StaffOrderDetail({
   const [internalNotes, setInternalNotes] = useState(
     order?.internalNotes || "",
   );
+  const [marketplaceProvider, setMarketplaceProvider] = useState(
+    marketplacePaymentDetails(order).provider,
+  );
+  const [marketplaceUrl, setMarketplaceUrl] = useState(
+    marketplacePaymentDetails(order).checkoutUrl,
+  );
+  const [marketplaceReference, setMarketplaceReference] = useState(
+    marketplacePaymentDetails(order).reference,
+  );
+  const [marketplaceNote, setMarketplaceNote] = useState(
+    marketplacePaymentDetails(order).note,
+  );
 
   useEffect(() => {
     setProductionStatus(
@@ -10815,6 +11000,11 @@ function StaffOrderDetail({
     setPackageDraft(order?.packageEstimate || {});
     setSelectedShippingId(order?.selectedShippingId || "");
     setInternalNotes(order?.internalNotes || "");
+    const marketplacePayment = marketplacePaymentDetails(order);
+    setMarketplaceProvider(marketplacePayment.provider);
+    setMarketplaceUrl(marketplacePayment.checkoutUrl);
+    setMarketplaceReference(marketplacePayment.reference);
+    setMarketplaceNote(marketplacePayment.note);
   }, [order?.id]);
 
   if (!order) {
@@ -10890,6 +11080,8 @@ function StaffOrderDetail({
           : "scheduled"
         : paymentStatus === "bank_transfer_pending"
           ? "awaiting_bank_transfer"
+          : paymentStatus === "payment_pending"
+            ? "checkout"
           : "checkout";
     updateOrderFromStaff(
       order.id,
@@ -10900,9 +11092,57 @@ function StaffOrderDetail({
         paymentProvider:
           paymentStatus === "bank_transfer_pending"
             ? "Bank transfer"
+            : paymentStatus === "payment_pending" &&
+                order.paymentMethodId === "marketplace_protected"
+              ? marketplaceProvider || order.paymentProvider
             : order.paymentProvider,
       },
       `Payment state changed to ${paymentStatusCopy[paymentStatus]}.`,
+    );
+  };
+
+  const saveMarketplaceLink = () => {
+    const checkoutUrl = marketplaceUrl.trim();
+    const provider =
+      marketplaceProvider.trim() || marketplacePaymentDefaults.provider;
+    const marketplacePayment = {
+      provider,
+      checkoutUrl,
+      reference: marketplaceReference.trim(),
+      note: marketplaceNote.trim() || marketplacePaymentDefaults.note,
+      status: checkoutUrl ? "link_ready" : "requested",
+      requestedAt:
+        order.marketplacePayment?.requestedAt ||
+        order.snapshot?.marketplacePayment?.requestedAt ||
+        "Now",
+      updatedAt: "Now",
+    };
+    updateOrderFromStaff(
+      order.id,
+      {
+        paymentStatus: "payment_pending",
+        paymentMethodId: "marketplace_protected",
+        paymentProvider: provider,
+        paymentReference:
+          marketplacePayment.reference || order.paymentReference || "",
+        paymentSession: {
+          ...(order.paymentSession || {}),
+          id: order.paymentSession?.id || `marketplace_${order.id}`,
+          provider,
+          status: marketplacePayment.status,
+          checkoutUrl,
+          reference: marketplacePayment.reference,
+          updatedAt: "Now",
+        },
+        marketplacePayment,
+        snapshot: {
+          ...(order.snapshot || {}),
+          marketplacePayment,
+        },
+      },
+      checkoutUrl
+        ? "Marketplace protected checkout link is ready for the customer."
+        : "Marketplace protected payment path prepared.",
     );
   };
 
@@ -11180,6 +11420,52 @@ function StaffOrderDetail({
         </div>
 
         <aside className="staff-price-pane">
+          <div className="side-card price-card marketplace-ops-card">
+            <h2>Marketplace protected payment</h2>
+            <p>
+              Use this when the customer wants to complete payment through a
+              protected marketplace order. Create a matching order for this
+              Easy Harness quote, then paste the checkout link here.
+            </p>
+            <label className="field">
+              <span>Provider</span>
+              <input
+                value={marketplaceProvider}
+                onChange={(event) => setMarketplaceProvider(event.target.value)}
+                placeholder="Alibaba.com Trade Assurance"
+              />
+            </label>
+            <label className="field">
+              <span>Protected checkout link</span>
+              <input
+                value={marketplaceUrl}
+                onChange={(event) => setMarketplaceUrl(event.target.value)}
+                placeholder="https://..."
+              />
+            </label>
+            <label className="field">
+              <span>Marketplace reference</span>
+              <input
+                value={marketplaceReference}
+                onChange={(event) =>
+                  setMarketplaceReference(event.target.value)
+                }
+                placeholder="Marketplace order or quote number"
+              />
+            </label>
+            <label className="field">
+              <span>Customer note</span>
+              <input
+                value={marketplaceNote}
+                onChange={(event) => setMarketplaceNote(event.target.value)}
+                placeholder="Shown on the customer order page"
+              />
+            </label>
+            <button className="secondary-action" onClick={saveMarketplaceLink}>
+              Save protected payment link
+            </button>
+          </div>
+
           <div className="side-card price-card">
             <h2>Payment</h2>
             <label className="field">
@@ -11189,6 +11475,7 @@ function StaffOrderDetail({
                 onChange={(event) => setPaymentStatus(event.target.value)}
               >
                 <option value="unpaid">Unpaid</option>
+                <option value="payment_pending">Payment pending</option>
                 <option value="bank_transfer_pending">Transfer pending</option>
                 <option value="paid">Paid</option>
                 <option value="failed">Failed</option>
@@ -11196,7 +11483,8 @@ function StaffOrderDetail({
             </label>
             <p>
               Card and PayPal should normally be confirmed by provider callback.
-              Bank transfer can be marked after receipt is verified.
+              Bank transfer and marketplace payments can be marked after
+              receipt is verified.
             </p>
             <button className="secondary-action" onClick={savePayment}>
               Save payment state

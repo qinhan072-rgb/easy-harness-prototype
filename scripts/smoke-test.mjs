@@ -13,6 +13,7 @@ const rlsGrantPath = resolve(root, "supabase", "migrations", "202605100001_stage
 const checkingRpcPath = resolve(root, "supabase", "migrations", "202605100002_complete_request_check_rpc.sql");
 const confirmOrderRpcPath = resolve(root, "supabase", "migrations", "202605100003_confirm_request_order_rpc.sql");
 const paymentRpcPath = resolve(root, "supabase", "migrations", "202605100004_order_payment_rpc.sql");
+const marketplacePaymentRpcPath = resolve(root, "supabase", "migrations", "202605140002_marketplace_protected_payment.sql");
 const notificationAuditRpcPath = resolve(root, "supabase", "migrations", "202605100005_notifications_audit_rpc.sql");
 const storagePolicyPath = resolve(root, "supabase", "migrations", "202605100006_storage_upload_policies.sql");
 const attachmentPathRpcPath = resolve(root, "supabase", "migrations", "202605140001_workspace_attachment_storage_paths.sql");
@@ -40,6 +41,7 @@ const rlsGrantSql = readIfExists(rlsGrantPath);
 const checkingRpcSql = readIfExists(checkingRpcPath);
 const confirmOrderRpcSql = readIfExists(confirmOrderRpcPath);
 const paymentRpcSql = readIfExists(paymentRpcPath);
+const marketplacePaymentRpcSql = readIfExists(marketplacePaymentRpcPath);
 const notificationAuditRpcSql = readIfExists(notificationAuditRpcPath);
 const storagePolicySql = readIfExists(storagePolicyPath);
 const attachmentPathRpcSql = readIfExists(attachmentPathRpcPath);
@@ -226,7 +228,18 @@ const checks = [
   },
   {
     name: "checkout exposes provider-specific payment paths",
-    pass: app.includes("Pay with card") && app.includes("PayPal") && app.includes("Bank transfer")
+    pass: app.includes("Pay with card") &&
+      app.includes("PayPal") &&
+      app.includes("Bank transfer") &&
+      app.includes("Marketplace protected payment")
+  },
+  {
+    name: "checkout supports protected marketplace payment handoff",
+    pass: app.includes("marketplace_protected") &&
+      app.includes("MarketplacePaymentState") &&
+      app.includes("Protected marketplace checkout requested") &&
+      app.includes("Open protected checkout") &&
+      app.includes("marketplace_payment_requested")
   },
   {
     name: "payment uses provider session shape before confirmation",
@@ -472,6 +485,13 @@ const checks = [
       paymentRpcSql.includes("insert into public.payments") &&
       paymentRpcSql.includes("insert into public.payment_events") &&
       paymentRpcSql.includes("grant execute on function public.record_order_payment")
+  },
+  {
+    name: "marketplace protected payment rpc extends payment provider contract",
+    pass: marketplacePaymentRpcSql.includes("'marketplace'") &&
+      marketplacePaymentRpcSql.includes("payments_provider_check") &&
+      marketplacePaymentRpcSql.includes("marketplacePayment") &&
+      marketplacePaymentRpcSql.includes("jsonb_set")
   },
   {
     name: "stage 2A notification and audit rpcs record platform events",

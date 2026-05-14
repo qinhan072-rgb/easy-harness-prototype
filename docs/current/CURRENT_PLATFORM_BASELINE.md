@@ -37,6 +37,8 @@ platform yet.
   and the frontend creates short-lived signed URLs for reload-stable previews.
 - Customer quote confirmation creates a persisted order.
 - Payment route selection and payment state write payment records.
+- Customers can request a matching protected marketplace checkout path, and
+  staff can attach the marketplace order link back to the Easy Harness order.
 - Staff order updates write order, shipment, and tracking metadata.
 - In-app notifications and audit records have Supabase write paths.
 - Customer-facing legal and trade policy pages now exist for Terms, Privacy,
@@ -57,6 +59,8 @@ platform yet.
 - Stripe and PayPal live hosted payment sessions.
 - Stripe/PayPal webhooks.
 - Bank transfer reconciliation beyond recorded state.
+- Marketplace seller account/API automation. The current protected marketplace
+  payment path is a staff-prepared link for a matching external protected order.
 - DHL Express live rate calls.
 - DHL shipment creation, label, commercial invoice, pickup, and tracking.
 - Email and WhatsApp delivery provider calls.
@@ -144,6 +148,7 @@ real user testing:
 After this, choose one focused integration line:
 
 - payment,
+- protected marketplace order handoff,
 - logistics,
 - notification delivery,
 - or AI file/knowledge pipeline.
