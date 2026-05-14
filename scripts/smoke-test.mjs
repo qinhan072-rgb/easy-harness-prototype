@@ -15,6 +15,7 @@ const confirmOrderRpcPath = resolve(root, "supabase", "migrations", "20260510000
 const paymentRpcPath = resolve(root, "supabase", "migrations", "202605100004_order_payment_rpc.sql");
 const notificationAuditRpcPath = resolve(root, "supabase", "migrations", "202605100005_notifications_audit_rpc.sql");
 const storagePolicyPath = resolve(root, "supabase", "migrations", "202605100006_storage_upload_policies.sql");
+const attachmentPathRpcPath = resolve(root, "supabase", "migrations", "202605140001_workspace_attachment_storage_paths.sql");
 const envExamplePath = resolve(root, ".env.example");
 const stage2DocPath = resolve(root, "docs", "setup", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "setup", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
@@ -41,6 +42,7 @@ const confirmOrderRpcSql = readIfExists(confirmOrderRpcPath);
 const paymentRpcSql = readIfExists(paymentRpcPath);
 const notificationAuditRpcSql = readIfExists(notificationAuditRpcPath);
 const storagePolicySql = readIfExists(storagePolicyPath);
+const attachmentPathRpcSql = readIfExists(attachmentPathRpcPath);
 const envExample = readIfExists(envExamplePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
@@ -87,6 +89,7 @@ const checks = [
       app.includes("supabaseMessageInsertFromLocal") &&
       app.includes("updateSupabaseRequestFromLocal") &&
       app.includes('supabase.rpc("complete_request_check"') &&
+      app.includes("rowsWithSignedAttachmentUrls") &&
       app.includes("requests (Supabase live)") &&
       app.includes("attachments (Supabase live metadata)")
   },
@@ -340,9 +343,30 @@ const checks = [
   {
     name: "checkout includes clear payment confirmation rules",
     pass: app.includes("What payment will confirm") &&
-      app.includes("Production is scheduled after payment is received") &&
+      app.includes("Production starts after provider or bank-transfer confirmation.") &&
       app.includes("Waiting for payment confirmation") &&
       !app.includes("Before you pay")
+  },
+  {
+    name: "file and folder drag upload is wired",
+    pass: app.includes("collectDroppedFileItems") &&
+      app.includes("webkitGetAsEntry") &&
+      app.includes("drop-active") &&
+      app.includes("handleDropUpload")
+  },
+  {
+    name: "conversation attachments can render inline visuals",
+    pass: app.includes("AttachmentGallery") &&
+      app.includes("attachment-image-preview") &&
+      app.includes("attachment-pdf-preview") &&
+      app.includes("attachment-table-preview") &&
+      app.includes("createSignedUrl")
+  },
+  {
+    name: "staff updates support visual evidence blocks",
+    pass: app.includes("Visual preview") &&
+      app.includes("Table") &&
+      app.includes("attachmentBlockFile(file, true)")
   },
   {
     name: "large files are rejected",
@@ -444,6 +468,13 @@ const checks = [
       storagePolicySql.includes("'request-attachments'") &&
       storagePolicySql.includes("on storage.objects for insert") &&
       storagePolicySql.includes("storage_objects_customer_insert_own_path")
+  },
+  {
+    name: "workspace request rpc returns storage preview paths",
+    pass: attachmentPathRpcSql.includes("object_path") &&
+      attachmentPathRpcSql.includes("storage_object_id") &&
+      attachmentPathRpcSql.includes("left join public.storage_objects") &&
+      attachmentPathRpcSql.includes("list_workspace_requests")
   },
   {
     name: "stage 2A edge function contracts exist",

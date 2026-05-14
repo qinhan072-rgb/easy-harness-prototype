@@ -954,11 +954,59 @@ function fileName(file) {
   return file?.name || "file";
 }
 
+function attachmentKey(file, index = 0) {
+  if (typeof file === "string") return `${file}-${index}`;
+  return file?.id || file?.name || file?.url || `attachment-${index}`;
+}
+
 function fileSizeLabel(file) {
   if (!file || typeof file === "string" || !file.size) return "";
   if (file.size < 1024 * 1024)
     return `${Math.max(1, Math.round(file.size / 1024))} KB`;
   return `${(file.size / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function fileTypeLabel(file) {
+  const name = fileName(file).toLowerCase();
+  const type = typeof file === "object" ? file.type || file.mime_type || "" : "";
+  if (type.startsWith("image/") || /\.(png|jpe?g|webp|gif|bmp|svg)$/i.test(name))
+    return "Image";
+  if (type.includes("pdf") || /\.pdf$/i.test(name)) return "PDF";
+  if (/\.csv$/i.test(name) || type.includes("csv")) return "CSV";
+  if (/\.(xlsx?|xlsm)$/i.test(name)) return "Spreadsheet";
+  if (/\.(step|stp|stl|obj|iges|igs)$/i.test(name)) return "3D file";
+  return "File";
+}
+
+function isImageFile(file) {
+  return fileTypeLabel(file) === "Image";
+}
+
+function isPdfFile(file) {
+  return fileTypeLabel(file) === "PDF";
+}
+
+function isCsvFile(file) {
+  return fileTypeLabel(file) === "CSV";
+}
+
+function attachmentUrl(file) {
+  if (!file || typeof file === "string") return "";
+  return file.previewUrl || file.signedUrl || file.downloadUrl || file.url || "";
+}
+
+function attachmentBlockFile(file, includeSource = false) {
+  if (typeof file === "string") return { name: file, type: "legacy", size: 0 };
+  const payload = {
+    id: file.id,
+    name: fileName(file),
+    displayName: file.displayName || fileName(file),
+    relativePath: file.relativePath || "",
+    size: file.size || 0,
+    type: file.type || "application/octet-stream",
+  };
+  if (includeSource && file.sourceFile) payload.sourceFile = file.sourceFile;
+  return payload;
 }
 
 function displayTime(value) {
@@ -1035,15 +1083,103 @@ function normalizeWorkspaceOrderRow(row = {}) {
   };
 }
 
-function draftFileFromBrowser(file) {
+function draftFileFromBrowser(fileLike) {
+  const file = fileLike?.file || fileLike;
+  const relativePath = fileLike?.relativePath || file.webkitRelativePath || "";
   return {
     id: attachmentId(),
-    name: file.name,
+    name: relativePath || file.name,
+    displayName: file.name,
+    relativePath,
     size: file.size,
     type: file.type || "application/octet-stream",
     source: "browser",
     sourceFile: file,
   };
+}
+
+function prepareDraftFiles(fileItems, currentCount = 0) {
+  const draftFiles = fileItems.map(draftFileFromBrowser);
+  const oversized = draftFiles.filter((file) => file.size > maxFileSizeBytes);
+  const accepted = draftFiles.filter((file) => file.size <= maxFileSizeBytes);
+  const slots = Math.max(maxFilesPerUpload - currentCount, 0);
+  const nextFiles = accepted.slice(0, slots);
+  let error = "";
+  if (oversized.length) {
+    error = `${fileName(oversized[0])} is larger than 25 MB.`;
+  } else if (accepted.length > nextFiles.length) {
+    error = `Each update can include up to ${maxFilesPerUpload} files.`;
+  }
+  return { nextFiles, error };
+}
+
+function readDirectoryEntries(reader) {
+  return new Promise((resolve, reject) => {
+    const entries = [];
+    const readBatch = () => {
+      reader.readEntries(
+        (batch) => {
+          if (!batch.length) {
+            resolve(entries);
+            return;
+          }
+          entries.push(...batch);
+          readBatch();
+        },
+        (error) => reject(error),
+      );
+    };
+    readBatch();
+  });
+}
+
+function entryFile(entry, relativePath) {
+  return new Promise((resolve) => {
+    entry.file(
+      (file) => resolve({ file, relativePath }),
+      () => resolve(null),
+    );
+  });
+}
+
+async function collectEntryFiles(entry, prefix = "") {
+  if (!entry) return [];
+  if (entry.isFile) {
+    const result = await entryFile(entry, `${prefix}${entry.name}`);
+    return result ? [result] : [];
+  }
+  if (entry.isDirectory) {
+    const reader = entry.createReader();
+    const entries = await readDirectoryEntries(reader);
+    const nested = await Promise.all(
+      entries.map((item) => collectEntryFiles(item, `${prefix}${entry.name}/`)),
+    );
+    return nested.flat();
+  }
+  return [];
+}
+
+async function collectDroppedFileItems(dataTransfer) {
+  const items = Array.from(dataTransfer?.items || []).filter(
+    (item) => item.kind === "file",
+  );
+  if (items.length) {
+    const collected = [];
+    for (const item of items) {
+      const entry = item.webkitGetAsEntry?.();
+      if (entry) {
+        collected.push(...(await collectEntryFiles(entry)));
+      } else {
+        const file = item.getAsFile?.();
+        if (file) collected.push({ file, relativePath: file.webkitRelativePath || "" });
+      }
+    }
+    if (collected.length) return collected;
+  }
+  return Array.from(dataTransfer?.files || []).map((file) => ({
+    file,
+    relativePath: file.webkitRelativePath || "",
+  }));
 }
 
 function sampleFileDraft(name) {
@@ -1106,11 +1242,26 @@ function requestBodyFromBlocks(blocks = []) {
   const textBlock = blocks.find((block) => block.type === "text");
   const eventBlock = blocks.find((block) => block.type === "event");
   const priceBlock = blocks.find((block) => block.type === "price");
+  const attachmentBlock = blocks.find((block) => block.type === "attachments");
   if (textBlock?.text) return textBlock.text;
   if (eventBlock?.body) return eventBlock.body;
   if (priceBlock?.amount)
     return `Harness price released: $${priceBlock.amount}`;
+  if (attachmentBlock?.files?.length)
+    return `${attachmentBlock.files.length} file${attachmentBlock.files.length > 1 ? "s" : ""} attached.`;
+  if (blocks.some((block) => block.type === "preview" || block.type === "table"))
+    return "Visual update added.";
   return "";
+}
+
+function sanitizeBlocksForStorage(blocks = []) {
+  return blocks.map((block) => {
+    if (block.type !== "attachments") return block;
+    return {
+      ...block,
+      files: (block.files || []).map((file) => attachmentBlockFile(file, false)),
+    };
+  });
 }
 
 function authorRoleToSupabase(role) {
@@ -1166,7 +1317,7 @@ function supabaseMessageInsertFromLocal(message, requestUuid, authorId) {
       authorRole === "customer" || isUuidLike(authorId) ? authorId : null,
     author_role: authorRole,
     body: requestBodyFromBlocks(message.blocks),
-    blocks: message.blocks || [],
+    blocks: sanitizeBlocksForStorage(message.blocks || []),
     visibility: "thread",
   };
 }
@@ -1176,7 +1327,7 @@ function supabaseSystemMessageFromLocal(message) {
   return {
     author_role: authorRole,
     body: requestBodyFromBlocks(message.blocks),
-    blocks: message.blocks || [],
+    blocks: sanitizeBlocksForStorage(message.blocks || []),
   };
 }
 
@@ -1212,6 +1363,105 @@ function supabaseStorageObjectInsertFromAttachment(attachment) {
   };
 }
 
+function localAttachmentFromSupabase(attachment = {}) {
+  const name = attachment.name || "file";
+  return {
+    id: attachment.id,
+    name,
+    displayName: name.split("/").pop() || name,
+    relativePath: name,
+    size: attachment.size_bytes || attachment.size || 0,
+    type:
+      attachment.mime_type ||
+      attachment.content_type ||
+      attachment.type ||
+      "application/octet-stream",
+    storageObjectId: attachment.storage_object_id || "",
+    bucket: attachment.bucket || "request-attachments",
+    objectPath: attachment.object_path || "",
+    storageStatus: attachment.storage_status || "",
+    signedUrl: attachment.signed_url || "",
+    downloadUrl: attachment.signed_url || "",
+    purpose: attachment.purpose || "request_upload",
+    ownerId: attachment.owner_id || "",
+    messageId: attachment.request_message_id || "",
+    createdAt: displayTime(attachment.created_at),
+  };
+}
+
+function attachmentBaseName(value = "") {
+  return String(value).split("/").pop() || String(value);
+}
+
+function attachmentMatchesBlockFile(attachment, file) {
+  const blockName = fileName(file);
+  return (
+    attachment.name === blockName ||
+    attachment.displayName === blockName ||
+    attachmentBaseName(attachment.name) === attachmentBaseName(blockName)
+  );
+}
+
+function enrichAttachmentBlockFiles(files = [], messageAttachments = []) {
+  return files.map((file) => {
+    const match = messageAttachments.find((attachment) =>
+      attachmentMatchesBlockFile(attachment, file),
+    );
+    if (!match) return file;
+    return {
+      ...attachmentBlockFile(file, false),
+      ...match,
+      displayName:
+        (typeof file === "object" && file.displayName) ||
+        match.displayName ||
+        fileName(file),
+    };
+  });
+}
+
+function enrichBlocksWithAttachments(blocks = [], messageId = "", attachments = []) {
+  const messageAttachments = attachments.filter(
+    (attachment) => !attachment.messageId || attachment.messageId === messageId,
+  );
+  return blocks.map((block) => {
+    if (block.type !== "attachments") return block;
+    return {
+      ...block,
+      files: enrichAttachmentBlockFiles(block.files || [], messageAttachments),
+    };
+  });
+}
+
+async function rowsWithSignedAttachmentUrls(rows = []) {
+  if (!supabase) return rows;
+  const nextRows = rows.map((row) => ({
+    ...row,
+    attachments: (row.attachments || []).map((attachment) => ({
+      ...attachment,
+    })),
+  }));
+
+  const signingJobs = nextRows.flatMap((row) =>
+    (row.attachments || [])
+      .filter((attachment) => attachment.object_path && !attachment.signed_url)
+      .map((attachment) => ({ row, attachment })),
+  );
+
+  await Promise.all(
+    signingJobs.map(async ({ attachment }) => {
+      const bucket = attachment.bucket || "request-attachments";
+      const { data } = await supabase.storage
+        .from(bucket)
+        .createSignedUrl(attachment.object_path, 60 * 60);
+      if (data?.signedUrl) {
+        attachment.signed_url = data.signedUrl;
+      }
+    }),
+  );
+
+  return nextRows;
+}
+
 function localQuoteFromSupabase(row) {
   return {
     id: row.id,
@@ -1243,6 +1493,7 @@ function supabaseQuoteInsertFromLocal(quote, requestUuid, releasedBy) {
 }
 
 function localRequestFromSupabase(row, currentUser) {
+  const attachments = (row.attachments || []).map(localAttachmentFromSupabase);
   const quotes = [...(row.quotes || [])]
     .sort((a, b) => (a.version || 0) - (b.version || 0))
     .map(localQuoteFromSupabase);
@@ -1261,12 +1512,12 @@ function localRequestFromSupabase(row, currentUser) {
       createdAt: displayTime(message.created_at),
       blocks:
         Array.isArray(message.blocks) && message.blocks.length
-          ? message.blocks
+          ? enrichBlocksWithAttachments(message.blocks, message.id, attachments)
           : [{ type: "text", text: message.body || "" }],
     }));
-  const files = [
-    ...new Set((row.attachments || []).map((attachment) => attachment.name)),
-  ];
+  const files = attachments.length
+    ? attachments
+    : [...new Set((row.attachments || []).map((attachment) => attachment.name))];
   return normalizeRequestShape({
     id: row.request_number,
     supabaseId: row.id,
@@ -2242,7 +2493,7 @@ function createOrderFromRequest(request, user) {
       requestTitle: request.title,
       customerSummary: firstCustomerText,
       requestFiles: collectRequestFileNames(request),
-      latestEasyBlocks: lastEasyMessage?.blocks || [],
+      latestEasyBlocks: sanitizeBlocksForStorage(lastEasyMessage?.blocks || []),
       confirmedQuote: quote,
       confirmedAt: "Now",
     },
@@ -3683,7 +3934,9 @@ function App() {
       return;
     }
 
-    const rows = (data || []).map(normalizeWorkspaceRequestRow);
+    const rows = await rowsWithSignedAttachmentUrls(
+      (data || []).map(normalizeWorkspaceRequestRow),
+    );
     const remoteRequests = dedupeRequestsByIdentity(
       rows.map((row) => localRequestFromSupabase(row, user)),
     );
@@ -3693,24 +3946,53 @@ function App() {
       ),
     );
     const remoteAttachments = rows.flatMap((row) =>
-      (row.attachments || []).map((attachment) => ({
-        id: attachment.id,
-        requestId: row.request_number,
-        supabaseRequestId: row.id,
-        messageId: attachment.request_message_id || "",
-        uploadedBy: attachment.owner_id,
-        name: attachment.name,
-        size: attachment.size_bytes || 0,
-        type: attachment.mime_type || "application/octet-stream",
-        storageObjectId: "",
-        objectPath: "",
-        createdAt: displayTime(attachment.created_at),
-      })),
+      (row.attachments || []).map((attachment) => {
+        const localAttachment = localAttachmentFromSupabase(attachment);
+        return {
+          id: localAttachment.id,
+          requestId: row.request_number,
+          supabaseRequestId: row.id,
+          messageId: localAttachment.messageId,
+          uploadedBy: localAttachment.ownerId,
+          name: localAttachment.name,
+          size: localAttachment.size,
+          type: localAttachment.type,
+          storageObjectId: localAttachment.storageObjectId,
+          objectPath: localAttachment.objectPath,
+          bucket: localAttachment.bucket,
+          signedUrl: localAttachment.signedUrl,
+          downloadUrl: localAttachment.downloadUrl,
+          storageStatus: localAttachment.storageStatus,
+          createdAt: localAttachment.createdAt,
+        };
+      }),
     );
+    const remoteStorageObjects = remoteAttachments
+      .filter((attachment) => attachment.storageObjectId)
+      .map((attachment) => ({
+        id: attachment.storageObjectId,
+        attachmentId: attachment.id,
+        requestId: attachment.requestId,
+        messageId: attachment.messageId,
+        uploadedBy: attachment.uploadedBy,
+        bucket: attachment.bucket,
+        objectPath: attachment.objectPath,
+        fileName: attachment.name,
+        contentType: attachment.type,
+        size: attachment.size,
+        status: attachment.storageStatus || "uploaded",
+        uploadMode: "supabase_storage",
+        signedUploadUrl: "",
+        downloadUrl: attachment.signedUrl,
+        accessScope: "request_participants",
+        adapter: platformAdapters.storage.id,
+        createdAt: attachment.createdAt,
+      }));
 
     setRequests(remoteRequests);
     setRequestMessageRecords(remoteMessages);
     setAttachmentRecords(remoteAttachments);
+    setStorageObjectRecords(remoteStorageObjects);
     setActiveRequestId((current) => {
       if (current && remoteRequests.some((request) => request.id === current))
         return current;
@@ -4717,29 +4999,16 @@ function App() {
     setUserView("thread");
   }
 
-  function handleUpload(event, target = "start") {
-    const selectedFiles = Array.from(event.target.files || []);
-    const oversized = selectedFiles.filter(
-      (file) => file.size > maxFileSizeBytes,
-    );
-    const accepted = selectedFiles
-      .filter((file) => file.size <= maxFileSizeBytes)
-      .map(draftFileFromBrowser);
+  function addUploadFiles(fileItems, target = "start") {
     const currentFiles =
       target === "composer" ? userComposerFiles : uploadFiles;
-    const slots = Math.max(maxFilesPerUpload - currentFiles.length, 0);
-    const nextFiles = accepted.slice(0, slots);
-
-    if (oversized.length) {
-      setFileError(`${oversized[0].name} is larger than 25 MB.`);
-    } else if (accepted.length > nextFiles.length) {
-      setFileError(`Each update can include up to ${maxFilesPerUpload} files.`);
-    } else {
-      setFileError("");
-    }
+    const { nextFiles, error } = prepareDraftFiles(
+      fileItems,
+      currentFiles.length,
+    );
+    setFileError(error);
 
     if (!nextFiles.length) {
-      event.target.value = "";
       return;
     }
     if (target === "composer") {
@@ -4747,7 +5016,27 @@ function App() {
     } else {
       setUploadFiles((current) => [...current, ...nextFiles]);
     }
+  }
+
+  function handleUpload(event, target = "start") {
+    const selectedFiles = Array.from(event.target.files || []).map((file) => ({
+      file,
+      relativePath: file.webkitRelativePath || "",
+    }));
+    addUploadFiles(selectedFiles, target);
     event.target.value = "";
+  }
+
+  async function handleDropUpload(event, target = "start") {
+    event.preventDefault();
+    event.stopPropagation();
+    if (submittingRequest || sendingUserMessage) return;
+    try {
+      const droppedFiles = await collectDroppedFileItems(event.dataTransfer);
+      addUploadFiles(droppedFiles, target);
+    } catch {
+      setFileError("Files could not be added from this drop.");
+    }
   }
 
   function removePendingUpload(target, fileKey) {
@@ -5156,6 +5445,9 @@ function App() {
   async function sendStaffUpdate() {
     const text = staffComposer.trim();
     const attachmentFiles = staffAttachment;
+    const attachmentBlocks = attachmentFiles.map((file) =>
+      attachmentBlockFile(file, true),
+    );
     const attachmentNames = attachmentFiles.map(fileName);
     const price = staffPrice.trim();
     const hasContent =
@@ -5185,8 +5477,8 @@ function App() {
             ...(text ? [{ type: "text", text }] : []),
             ...(includeTable ? [{ type: "table" }] : []),
             ...(includePreview ? [{ type: "preview" }] : []),
-            ...(attachmentNames.length
-              ? [{ type: "attachments", files: attachmentNames }]
+            ...(attachmentBlocks.length
+              ? [{ type: "attachments", files: attachmentBlocks }]
               : []),
           ],
         }
@@ -5250,12 +5542,51 @@ function App() {
     });
 
     if (attachmentFiles.length) {
-      appendAttachmentRecords(
-        attachmentFiles,
-        activeRequest.id,
-        staffMessageId,
-        currentUser.id,
-      );
+      const savedStaffMessageId =
+        staffMessage && saved?.savedMessages?.[0]?.id
+          ? saved.savedMessages[0].id
+          : staffMessageId;
+      if (activeRequest.supabaseId && isUuidLike(savedStaffMessageId)) {
+        const savedAttachments = await persistSupabaseAttachments(
+          attachmentFiles,
+          activeRequest.id,
+          activeRequest.supabaseId,
+          savedStaffMessageId,
+          currentUser.id,
+        );
+        if (savedAttachments?.length) {
+          setAttachmentRecords((current) => [
+            ...savedAttachments.map((attachment) => ({
+              id: attachment.id,
+              requestId: activeRequest.id,
+              supabaseRequestId: activeRequest.supabaseId,
+              messageId: savedStaffMessageId,
+              uploadedBy: currentUser.id,
+              name: attachment.name,
+              size: attachment.size_bytes || 0,
+              type: attachment.mime_type || "application/octet-stream",
+              storageObjectId: attachment.storage_object_id || "",
+              objectPath: attachment.object_path || "",
+              createdAt: displayTime(attachment.created_at),
+            })),
+            ...current,
+          ]);
+        } else {
+          appendAttachmentRecords(
+            attachmentFiles,
+            activeRequest.id,
+            savedStaffMessageId,
+            currentUser.id,
+          );
+        }
+      } else {
+        appendAttachmentRecords(
+          attachmentFiles,
+          activeRequest.id,
+          staffMessageId,
+          currentUser.id,
+        );
+      }
     }
     if (staffMessage) {
       writeRequestMessageLedger(activeRequest, staffMessage);
@@ -5683,6 +6014,7 @@ function App() {
             files={uploadFiles}
             uploadRef={uploadRef}
             handleUpload={handleUpload}
+            handleDrop={(event) => handleDropUpload(event, "start")}
             removeFile={(fileKey) => removePendingUpload("start", fileKey)}
             fillSampleRequest={fillSampleRequest}
             startRequest={startRequest}
@@ -5727,6 +6059,7 @@ function App() {
               files={uploadFiles}
               uploadRef={uploadRef}
               handleUpload={handleUpload}
+              handleDrop={(event) => handleDropUpload(event, "start")}
               removeFile={(fileKey) => removePendingUpload("start", fileKey)}
               fillSampleRequest={fillSampleRequest}
               startRequest={startRequest}
@@ -5751,6 +6084,7 @@ function App() {
               composerFiles={userComposerFiles}
               uploadRef={userComposerUploadRef}
               handleUpload={(event) => handleUpload(event, "composer")}
+              handleDrop={(event) => handleDropUpload(event, "composer")}
               removeFile={(fileKey) => removePendingUpload("composer", fileKey)}
               sendMessage={sendUserMessage}
               sendingMessage={sendingUserMessage}
@@ -6388,6 +6722,7 @@ function StartScreen({
   files,
   uploadRef,
   handleUpload,
+  handleDrop,
   removeFile,
   fillSampleRequest,
   startRequest,
@@ -6405,8 +6740,25 @@ function StartScreen({
     uploading: "Uploading files…",
     checking: "Easy Harness is checking your request…",
   };
+  const [dragActive, setDragActive] = useState(false);
   return (
-    <section className="start-screen">
+    <section
+      className={`start-screen ${dragActive ? "drop-active" : ""}`}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        if (!submittingRequest) setDragActive(true);
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setDragActive(false);
+        }
+      }}
+      onDrop={(event) => {
+        setDragActive(false);
+        handleDrop?.(event);
+      }}
+    >
       <div className="start-copy clean">
         <h1>Upload what you have. We’ll build the harness you need.</h1>
         <p>Tell us what should connect. Upload any files you already have.</p>
@@ -6884,6 +7236,7 @@ function RequestWorkspace({
   composerFiles,
   uploadRef,
   handleUpload,
+  handleDrop,
   removeFile,
   sendMessage,
   sendingMessage = false,
@@ -6927,6 +7280,7 @@ function RequestWorkspace({
             files={composerFiles}
             uploadRef={uploadRef}
             handleUpload={handleUpload}
+            handleDrop={handleDrop}
             removeFile={removeFile}
             sendMessage={sendMessage}
             sending={sendingMessage}
@@ -7205,11 +7559,9 @@ function ContentBlock({ block, request }) {
 
   if (block.type === "attachments") {
     return (
-      <div className="file-strip compact">
-        {block.files.map((file) => (
-          <FileChip file={file} key={file} />
-        ))}
-      </div>
+      <AttachmentGallery
+        files={enrichAttachmentBlockFiles(block.files || [], request?.files || [])}
+      />
     );
   }
 
@@ -7357,13 +7709,31 @@ function UserComposer({
   files,
   uploadRef,
   handleUpload,
+  handleDrop,
   removeFile,
   sendMessage,
   sending = false,
   fileError,
 }) {
+  const [dragActive, setDragActive] = useState(false);
   return (
-    <div className="composer-shell">
+    <div
+      className={`composer-shell ${dragActive ? "drop-active" : ""}`}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        if (!sending) setDragActive(true);
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setDragActive(false);
+        }
+      }}
+      onDrop={(event) => {
+        setDragActive(false);
+        handleDrop?.(event);
+      }}
+    >
       {!!files.length && (
         <div className="composer-files">
           {files.map((file) => (
@@ -8161,16 +8531,8 @@ function OrderWorkspace({
               <span>DAP import-duty and tax boundary</span>
             </div>
             <p className="compact-policy-copy">
-              Production is scheduled after payment is received. If something
-              needs to change, message Easy Harness before production starts.
+              Production starts after provider or bank-transfer confirmation.
             </p>
-            <div className="policy-list compact-policy-list">
-              <p>
-                Card and wallet orders move forward after provider
-                confirmation. Bank transfer orders move forward after receipt is
-                confirmed.
-              </p>
-            </div>
           </section>
 
           <section className="order-card">
@@ -10623,44 +10985,89 @@ function StaffComposer({
 }) {
   const staffUploadRef = useRef(null);
   const [uploadError, setUploadError] = useState("");
+  const [dragActive, setDragActive] = useState(false);
 
-  const handleStaffUpload = (event) => {
-    const selectedFiles = Array.from(event.target.files || []);
-    const oversized = selectedFiles.filter(
-      (file) => file.size > maxFileSizeBytes,
-    );
-    const accepted = selectedFiles
-      .filter((file) => file.size <= maxFileSizeBytes)
-      .map(draftFileFromBrowser);
-    const slots = Math.max(maxFilesPerUpload - attachment.length, 0);
-    const nextFiles = accepted.slice(0, slots);
-
-    if (oversized.length) {
-      setUploadError(`${oversized[0].name} is larger than 25 MB.`);
-    } else if (accepted.length > nextFiles.length) {
-      setUploadError(
-        `Each update can include up to ${maxFilesPerUpload} files.`,
-      );
-    } else {
-      setUploadError("");
-    }
+  const addStaffFiles = (fileItems) => {
+    const { nextFiles, error } = prepareDraftFiles(fileItems, attachment.length);
+    setUploadError(error);
 
     if (nextFiles.length) {
       setAttachment((current) => [...current, ...nextFiles]);
     }
+  };
+
+  const handleStaffUpload = (event) => {
+    const selectedFiles = Array.from(event.target.files || []).map((file) => ({
+      file,
+      relativePath: file.webkitRelativePath || "",
+    }));
+    addStaffFiles(selectedFiles);
     event.target.value = "";
   };
 
+  const handleStaffDrop = async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setDragActive(false);
+    try {
+      const droppedFiles = await collectDroppedFileItems(event.dataTransfer);
+      addStaffFiles(droppedFiles);
+    } catch {
+      setUploadError("Files could not be added from this drop.");
+    }
+  };
+
+  const removeStaffFile = (fileKey) => {
+    setAttachment((current) =>
+      current.filter((file) => (file.id || fileName(file)) !== fileKey),
+    );
+  };
+
   return (
-    <div className="staff-composer-shell">
+    <div
+      className={`staff-composer-shell ${dragActive ? "drop-active" : ""}`}
+      onDragEnter={(event) => {
+        event.preventDefault();
+        setDragActive(true);
+      }}
+      onDragOver={(event) => event.preventDefault()}
+      onDragLeave={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) {
+          setDragActive(false);
+        }
+      }}
+      onDrop={handleStaffDrop}
+    >
       {!!attachment.length && (
         <div className="composer-files staff-file-row">
           {attachment.map((file) => (
-            <FileChip file={file} key={file.id || fileName(file)} />
+            <FileChip
+              file={file}
+              key={file.id || fileName(file)}
+              onRemove={() => removeStaffFile(file.id || fileName(file))}
+            />
           ))}
         </div>
       )}
       {uploadError && <div className="composer-error">{uploadError}</div>}
+      <div className="staff-quick-tools">
+        <button
+          type="button"
+          className={`composer-toggle ${includePreview ? "active" : ""}`}
+          onClick={() => setIncludePreview((current) => !current)}
+        >
+          <Cable size={15} />
+          Visual preview
+        </button>
+        <button
+          type="button"
+          className={`composer-toggle ${includeTable ? "active" : ""}`}
+          onClick={() => setIncludeTable((current) => !current)}
+        >
+          <ClipboardCheck size={15} />
+          Table
+        </button>
+      </div>
       <div className="staff-composer">
         <button
           className="attach-button"
@@ -10718,6 +11125,161 @@ function StatusBadge({ status }) {
               ? "blocked"
               : "neutral";
   return <span className={`list-status ${className}`}>{label}</span>;
+}
+
+function useAttachmentPreviewUrl(file) {
+  const [url, setUrl] = useState(() => attachmentUrl(file));
+
+  useEffect(() => {
+    const explicitUrl = attachmentUrl(file);
+    if (explicitUrl) {
+      setUrl(explicitUrl);
+      return undefined;
+    }
+    if (!file || typeof file === "string" || !file.sourceFile) {
+      setUrl("");
+      return undefined;
+    }
+    try {
+      const objectUrl = URL.createObjectURL(file.sourceFile);
+      setUrl(objectUrl);
+      return () => URL.revokeObjectURL(objectUrl);
+    } catch {
+      setUrl("");
+      return undefined;
+    }
+  }, [file]);
+
+  return url;
+}
+
+function CsvAttachmentPreview({ file }) {
+  const [rows, setRows] = useState([]);
+  const url = attachmentUrl(file);
+
+  useEffect(() => {
+    let cancelled = false;
+    const parseText = (text) => {
+      const parsed = text
+        .split(/\r?\n/)
+        .map((row) => row.split(",").map((cell) => cell.trim()))
+        .filter((row) => row.some(Boolean))
+        .slice(0, 4);
+      setRows(parsed);
+    };
+
+    if (file && typeof file !== "string" && file.sourceFile?.text) {
+      file.sourceFile.text().then((text) => {
+        if (!cancelled) parseText(text);
+      });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (url) {
+      fetch(url)
+        .then((response) => (response.ok ? response.text() : ""))
+        .then((text) => {
+          if (!cancelled && text) parseText(text);
+        })
+        .catch(() => {
+          if (!cancelled) setRows([]);
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    if (!file || typeof file === "string" || !file.sourceFile?.text) {
+      setRows([]);
+      return undefined;
+    }
+
+    return () => {
+      cancelled = true;
+    };
+  }, [file, url]);
+
+  if (!rows.length) return null;
+
+  return (
+    <div className="attachment-table-preview">
+      {rows.map((row, rowIndex) => (
+        <div className="attachment-table-row" key={`${fileName(file)}-${rowIndex}`}>
+          {row.slice(0, 4).map((cell, cellIndex) => (
+            <span key={`${rowIndex}-${cellIndex}`}>{cell || "-"}</span>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AttachmentPreviewCard({ file }) {
+  const url = useAttachmentPreviewUrl(file);
+  const typeLabel = fileTypeLabel(file);
+  const canShowImage = isImageFile(file) && url;
+  const canShowPdf = isPdfFile(file) && url;
+  const showCsv = isCsvFile(file);
+
+  return (
+    <div className={`attachment-preview-card type-${typeLabel.toLowerCase().replace(/\s+/g, "-")}`}>
+      <FileChip file={file} />
+      {canShowImage && (
+        <img
+          className="attachment-image-preview"
+          src={url}
+          alt={fileName(file)}
+          loading="lazy"
+        />
+      )}
+      {canShowPdf && (
+        <iframe
+          className="attachment-pdf-preview"
+          src={url}
+          title={fileName(file)}
+        />
+      )}
+      {showCsv && <CsvAttachmentPreview file={file} />}
+      {!canShowImage && !canShowPdf && !showCsv && (
+        <div className="attachment-file-preview">
+          <FileText size={18} />
+          <span>{typeLabel}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AttachmentGallery({ files = [] }) {
+  if (!files.length) return null;
+  const hasVisual = files.some(
+    (file) =>
+      isImageFile(file) ||
+      isPdfFile(file) ||
+      isCsvFile(file) ||
+      fileTypeLabel(file) === "Spreadsheet" ||
+      fileTypeLabel(file) === "3D file",
+  );
+
+  if (!hasVisual) {
+    return (
+      <div className="file-strip compact">
+        {files.map((file, index) => (
+          <FileChip file={file} key={attachmentKey(file, index)} />
+        ))}
+      </div>
+    );
+  }
+
+  return (
+    <div className="attachment-gallery">
+      {files.map((file, index) => (
+        <AttachmentPreviewCard file={file} key={attachmentKey(file, index)} />
+      ))}
+    </div>
+  );
 }
 
 function FileChip({ file, onRemove }) {

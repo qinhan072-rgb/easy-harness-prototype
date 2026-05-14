@@ -28,6 +28,13 @@ platform yet.
 - Real browser files upload to Supabase Storage bucket `request-attachments`.
 - Attachment and storage metadata write to Supabase.
 - Staff replies and released harness quotes write to Supabase.
+- Home, customer thread, and staff thread accept drag-and-drop file upload;
+  dropped folders are expanded in browsers that expose folder entries.
+- Conversation attachment blocks can show inline image/PDF/CSV previews when
+  the browser has the file content available or when Supabase returns a private
+  storage object path that can be signed for the current user.
+- Workspace request reads return storage object paths for persisted attachments,
+  and the frontend creates short-lived signed URLs for reload-stable previews.
 - Customer quote confirmation creates a persisted order.
 - Payment route selection and payment state write payment records.
 - Staff order updates write order, shipment, and tracking metadata.
@@ -47,7 +54,9 @@ platform yet.
 - DHL Express live rate calls.
 - DHL shipment creation, label, commercial invoice, pickup, and tracking.
 - Email and WhatsApp delivery provider calls.
-- Signed download/preview UX for uploaded files.
+- Full document extraction from PDF/Excel/CAD files. The UI can preview or
+  frame files; it does not yet parse these documents into structured harness
+  evidence for the AI Agent.
 - Production domain, production SMTP sender, and company legal documents.
 - Full AI engineering pipeline for file parsing, vision extraction, Harness
   JSON, catalog matching, rule validation, and production package generation.

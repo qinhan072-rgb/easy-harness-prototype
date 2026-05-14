@@ -904,6 +904,111 @@ button:disabled {
   font-size: 11px;
 }
 
+.start-screen.drop-active::after,
+.composer-shell.drop-active::after,
+.staff-composer-shell.drop-active::after {
+  position: absolute;
+  inset: 18px;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  border: 1px dashed rgba(18, 153, 139, 0.55);
+  border-radius: var(--radius);
+  background: rgba(240, 250, 248, 0.82);
+  color: var(--teal);
+  content: "Drop files or folders";
+  font-weight: 820;
+}
+
+.composer-shell.drop-active::after,
+.staff-composer-shell.drop-active::after {
+  inset: -8px;
+  border-radius: 999px;
+}
+
+.attachment-gallery {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+  gap: 10px;
+  margin-top: 10px;
+}
+
+.attachment-preview-card {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fbfdfc;
+}
+
+.attachment-preview-card .file-chip {
+  width: fit-content;
+  max-width: 100%;
+}
+
+.attachment-image-preview,
+.attachment-pdf-preview {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 2px);
+  background: #fff;
+}
+
+.attachment-image-preview {
+  aspect-ratio: 16 / 10;
+  object-fit: cover;
+}
+
+.attachment-pdf-preview {
+  height: 220px;
+}
+
+.attachment-file-preview {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 64px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 2px);
+  background: #fff;
+  color: var(--muted);
+  font-size: 13px;
+  font-weight: 760;
+}
+
+.attachment-table-preview {
+  display: grid;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) - 2px);
+  background: #fff;
+  font-size: 12px;
+}
+
+.attachment-table-row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.attachment-table-row + .attachment-table-row {
+  border-top: 1px solid var(--line);
+}
+
+.attachment-table-row span {
+  overflow: hidden;
+  padding: 7px 8px;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.attachment-table-row span + span {
+  border-left: 1px solid var(--line);
+}
+
 .processing-shell {
   display: grid;
   justify-items: center;
@@ -3532,9 +3637,21 @@ button:disabled {
   left: 314px;
 }
 
+.staff-quick-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: min(100%, 780px);
+  margin: 0 auto 8px;
+}
+
+.staff-quick-tools .composer-toggle {
+  background: rgba(255, 255, 255, 0.92);
+}
+
 .staff-composer {
   display: grid;
-  grid-template-columns: 44px minmax(320px, 1fr) auto auto 44px;
+  grid-template-columns: 44px minmax(320px, 1fr) 44px;
   gap: 10px;
   align-items: center;
   padding: 9px;
