@@ -39,6 +39,12 @@ platform yet.
 - Payment route selection and payment state write payment records.
 - Staff order updates write order, shipment, and tracking metadata.
 - In-app notifications and audit records have Supabase write paths.
+- Customer-facing legal and trade policy pages now exist for Terms, Privacy,
+  Upload Authorization, Quote and Custom Order Terms, Shipping/Duties/Regions,
+  and After-sales Support.
+- Registration, upload, quote confirmation, order payment preparation, DAP
+  shipping, and after-sales support now link to those policies with lightweight
+  customer-facing copy.
 - `run-checking` Edge Function exists for AI intake and Easy Harness Draft
   generation. It can run through Qwen or DeepSeek; Qwen is the recommended
   first live provider for the next deployment pass.
@@ -57,7 +63,9 @@ platform yet.
 - Full document extraction from PDF/Excel/CAD files. The UI can preview or
   frame files; it does not yet parse these documents into structured harness
   evidence for the AI Agent.
-- Production domain, production SMTP sender, and company legal documents.
+- Production domain and production SMTP sender.
+- Final company review of legal entity details, official address, support email,
+  governing law, refund handling, and any country-specific trading terms.
 - Full AI engineering pipeline for file parsing, vision extraction, Harness
   JSON, catalog matching, rule validation, and production package generation.
 

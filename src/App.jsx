@@ -83,6 +83,189 @@ const checkoutSmokeCopy =
   "Only needed if the carrier or customs asks for a company or tax number.";
 void checkoutSmokeCopy;
 
+const defaultPolicyId = "terms";
+
+const policyPages = [
+  {
+    id: "terms",
+    shortTitle: "Terms",
+    title: "Terms of Service",
+    summary:
+      "The general rules for using Easy Harness, creating requests, reviewing quotes, and placing custom harness orders.",
+    sections: [
+      {
+        heading: "Using Easy Harness",
+        body:
+          "Easy Harness helps customers describe, organize, quote, and order custom wire harnesses. You are responsible for providing accurate request details, delivery information, and contact information.",
+      },
+      {
+        heading: "Accounts and roles",
+        body:
+          "Public accounts are customer accounts. Staff and admin accounts are created or invited by Easy Harness and may access operational tools based on their assigned role.",
+      },
+      {
+        heading: "Requests, quotes, and orders",
+        body:
+          "A request is used to collect information and prepare a harness quote. An order starts after you confirm the quoted harness basis. The harness quote covers the harness itself unless another item is clearly stated.",
+      },
+      {
+        heading: "Payments and providers",
+        body:
+          "Payments may be completed through supported card, PayPal, or bank-transfer routes. Easy Harness does not ask you to enter card details directly into this platform.",
+      },
+    ],
+  },
+  {
+    id: "privacy",
+    shortTitle: "Privacy",
+    title: "Privacy Policy",
+    summary:
+      "How Easy Harness uses account details, uploaded files, request content, delivery information, and order records.",
+    sections: [
+      {
+        heading: "Information we collect",
+        body:
+          "We collect the email address, nickname, request messages, uploaded files, quote decisions, order details, delivery address, payment status, and support messages needed to operate the service.",
+      },
+      {
+        heading: "How we use information",
+        body:
+          "We use this information to save your account, prepare harness requests, review and quote orders, arrange payment and delivery, send updates, and handle support.",
+      },
+      {
+        heading: "Service providers",
+        body:
+          "We may share only the required information with account, hosting, payment, storage, email, logistics, customs, and support providers so they can perform the requested service.",
+      },
+      {
+        heading: "Retention and requests",
+        body:
+          "We keep records needed for active requests, orders, legal, tax, security, and support purposes. You can contact Easy Harness to request access, correction, or deletion where applicable.",
+      },
+    ],
+  },
+  {
+    id: "uploads",
+    shortTitle: "Uploads",
+    title: "Upload and File Authorization",
+    summary:
+      "What you confirm when you upload photos, drawings, samples, pinouts, spreadsheets, or other harness materials.",
+    sections: [
+      {
+        heading: "Right to upload",
+        body:
+          "By uploading files or written details, you confirm that you have the right to share them with Easy Harness for request review, quoting, and order preparation.",
+      },
+      {
+        heading: "How files are used",
+        body:
+          "Easy Harness may use uploaded material to understand the connection goal, prepare drafts, review feasibility, quote the harness, plan production, and provide support for the related order.",
+      },
+      {
+        heading: "Sensitive material",
+        body:
+          "Do not upload files that you are not allowed to share. If a file contains sensitive or restricted information, remove it before uploading or contact Easy Harness first.",
+      },
+      {
+        heading: "File accuracy",
+        body:
+          "Uploaded files may be incomplete, unclear, or inconsistent with the written request. Easy Harness may ask for clarification before a quote or order can move forward.",
+      },
+    ],
+  },
+  {
+    id: "custom-orders",
+    shortTitle: "Custom orders",
+    title: "Quote and Custom Order Terms",
+    summary:
+      "How harness quotes, customer confirmation, production preparation, changes, and cancellations work.",
+    sections: [
+      {
+        heading: "Quote basis",
+        body:
+          "A quote is based on the current request thread, uploaded files, Easy Harness updates, and any confirmed details shown before you accept the quote.",
+      },
+      {
+        heading: "What the quote includes",
+        body:
+          "The harness quote covers the custom harness item. Shipping, import duties, taxes, carrier fees, and payment-provider fees are shown or handled separately when applicable.",
+      },
+      {
+        heading: "Changes and cancellation",
+        body:
+          "You can ask for changes before production starts. After production starts, changes or cancellation may not be possible because the harness is made to your confirmed request.",
+      },
+      {
+        heading: "Custom product boundary",
+        body:
+          "Custom harnesses are not standard shelf goods. Returns for preference, changed plans, or incorrect customer-provided details may not be available once production has started.",
+      },
+    ],
+  },
+  {
+    id: "shipping",
+    shortTitle: "Shipping",
+    title: "Shipping, Duties, and Regions",
+    summary:
+      "How Easy Harness handles international shipping estimates, DAP delivery, import duties, and supported destination regions.",
+    sections: [
+      {
+        heading: "Supported regions",
+        body:
+          "Easy Harness can prepare orders for major regions served by our payment and carrier partners, including the United States, Canada, Europe, the United Kingdom, Australia, New Zealand, selected Asian regions, and selected South American regions.",
+      },
+      {
+        heading: "Shipping estimates",
+        body:
+          "Shipping rates and delivery windows are estimates until confirmed by the carrier. Actual delivery can be affected by address accuracy, customs processing, remote-area rules, carrier delays, and local holidays.",
+      },
+      {
+        heading: "DAP import boundary",
+        body:
+          "Orders are shipped under DAP unless another term is shown. Easy Harness arranges shipping to the destination address, while import duties, VAT, customs charges, and local carrier brokerage are normally paid by the recipient.",
+      },
+      {
+        heading: "Unavailable destinations",
+        body:
+          "Some countries, regions, addresses, products, or restricted uses may be unavailable because of payment, carrier, customs, sanctions, or safety limitations.",
+      },
+    ],
+  },
+  {
+    id: "after-sales",
+    shortTitle: "After-sales",
+    title: "After-sales and Support Policy",
+    summary:
+      "How to contact Easy Harness after an order is placed or delivered, and what support normally covers.",
+    sections: [
+      {
+        heading: "Where to contact us",
+        body:
+          "Use the order message area for order questions. Easy Harness may also share an email address or WhatsApp contact when direct follow-up is the fastest way to resolve a case.",
+      },
+      {
+        heading: "Before production starts",
+        body:
+          "If a confirmed order still needs an address correction, delivery clarification, or design change, contact Easy Harness before production starts.",
+      },
+      {
+        heading: "After delivery",
+        body:
+          "If you receive a damaged, incorrect, or faulty harness, contact Easy Harness with the order ID plus photos or video so the case can be reviewed quickly.",
+      },
+      {
+        heading: "Resolution options",
+        body:
+          "Depending on the case, Easy Harness may offer guidance, correction, replacement, remake, partial refund, or another reasonable resolution. Issues caused by incorrect customer-provided details, misuse, or later modifications may be excluded.",
+      },
+    ],
+  },
+];
+
+const policyById = Object.fromEntries(
+  policyPages.map((policy) => [policy.id, policy]),
+);
+
 const orderStatusCopy = {
   checkout: "Order in preparation",
   awaiting_bank_transfer: "Bank transfer pending",
@@ -2812,6 +2995,8 @@ function App() {
     reason: "",
     after: "",
   });
+  const [activePolicyId, setActivePolicyId] = useState(defaultPolicyId);
+  const [policyReturnView, setPolicyReturnView] = useState("start");
   const [authProviderStatus, setAuthProviderStatus] = useState(
     supabaseConfigured
       ? "connecting"
@@ -3897,6 +4082,13 @@ function App() {
 
   function openAuthModal(mode = "login", reason = "", after = "") {
     setAuthModal({ open: true, mode, reason, after });
+  }
+
+  function openPolicy(policyId = defaultPolicyId) {
+    setActivePolicyId(policyById[policyId] ? policyId : defaultPolicyId);
+    setPolicyReturnView(userView === "policy" ? policyReturnView : userView);
+    setAuthModal((current) => ({ ...current, open: false }));
+    setUserView("policy");
   }
 
   function closeAuthModal() {
@@ -5988,6 +6180,7 @@ function App() {
         requireAuth={(reason, after = "") =>
           openAuthModal("login", reason, after)
         }
+        openPolicy={openPolicy}
       />
 
       <main className={`workspace workspace-${userView}`}>
@@ -6026,6 +6219,7 @@ function App() {
             setTermsChecked={setTermsChecked}
             termsError={termsError}
             fileError={fileError}
+            openPolicy={openPolicy}
           />
         )}
 
@@ -6051,6 +6245,7 @@ function App() {
               updateUser={(patch, action = "profile_updated") =>
                 updateUser(currentUser.id, patch, action)
               }
+              openPolicy={openPolicy}
             />
           ) : (
             <StartScreen
@@ -6071,8 +6266,17 @@ function App() {
               setTermsChecked={setTermsChecked}
               termsError={termsError}
               fileError={fileError}
+              openPolicy={openPolicy}
             />
           ))}
+
+        {userView === "policy" && (
+          <PolicyScreen
+            activePolicyId={activePolicyId}
+            setActivePolicyId={setActivePolicyId}
+            back={() => setUserView(policyReturnView || "start")}
+          />
+        )}
 
         {userView === "thread" &&
           (activeRequest ? (
@@ -6092,6 +6296,7 @@ function App() {
               confirmRequest={confirmRequest}
               fileError={fileError}
               openOrder={openOrder}
+              openPolicy={openPolicy}
               linkedOrder={orders.find(
                 (order) => order.requestId === activeRequest.id,
               )}
@@ -6110,6 +6315,7 @@ function App() {
               updateOrder={(updater) => updateOrder(activeOrder.id, updater)}
               startPayment={startPayment}
               sendOrderMessage={sendOrderMessage}
+              openPolicy={openPolicy}
             />
           ) : (
             <OrdersList orders={visibleOrders} openOrder={openOrder} openRequests={() => setUserView("requests")} startNewRequest={() => setUserView("start")} />
@@ -6140,6 +6346,7 @@ function App() {
           registerCustomer={registerCustomer}
           authUsesSupabase={supabaseConfigured}
           authProviderStatus={authProviderStatus}
+          openPolicy={openPolicy}
           switchMode={(mode) =>
             setAuthModal((current) => ({ ...current, mode }))
           }
@@ -6158,6 +6365,7 @@ function AuthModal({
   registerCustomer,
   authUsesSupabase,
   authProviderStatus,
+  openPolicy,
   switchMode,
 }) {
   const [loginEmail, setLoginEmail] = useState("");
@@ -6453,6 +6661,17 @@ function AuthModal({
             </button>
           </div>
         )}
+        <p className="auth-terms-line">
+          By continuing, you agree to the{" "}
+          <InlinePolicyLink openPolicy={openPolicy} policyId="terms">
+            Terms
+          </InlinePolicyLink>{" "}
+          and{" "}
+          <InlinePolicyLink openPolicy={openPolicy} policyId="privacy">
+            Privacy Policy
+          </InlinePolicyLink>
+          .
+        </p>
       </section>
     </div>
   );
@@ -6471,6 +6690,7 @@ function UserSidebar({
   openOrder,
   currentUser,
   requireAuth,
+  openPolicy,
 }) {
   const showPrivateNav = !!currentUser;
 
@@ -6582,6 +6802,13 @@ function UserSidebar({
             {sidebarOpen && <span>Log in</span>}
           </button>
         </div>
+      )}
+      {sidebarOpen && (
+        <PolicyLinks
+          openPolicy={openPolicy}
+          className="sidebar-policy-links"
+          compact
+        />
       )}
     </aside>
   );
@@ -6699,6 +6926,107 @@ function NotificationChannels({ notification }) {
   );
 }
 
+function PolicyLinks({ openPolicy, className = "", compact = false }) {
+  if (!openPolicy) return null;
+  const visible = compact
+    ? policyPages.filter((policy) =>
+        ["terms", "privacy", "shipping", "after-sales"].includes(policy.id),
+      )
+    : policyPages;
+  return (
+    <div className={`policy-links ${className}`}>
+      {visible.map((policy) => (
+        <button
+          type="button"
+          key={policy.id}
+          onClick={() => openPolicy(policy.id)}
+        >
+          {policy.shortTitle}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function InlinePolicyLink({ openPolicy, policyId, children }) {
+  return (
+    <button
+      type="button"
+      className="inline-policy-link"
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        openPolicy?.(policyId);
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function PolicyScreen({ activePolicyId, setActivePolicyId, back }) {
+  const activePolicy = policyById[activePolicyId] || policyPages[0];
+  return (
+    <section className="policy-screen">
+      <div className="policy-shell">
+        <header className="policy-hero">
+          <div>
+            <span className="eyebrow">Easy Harness policies</span>
+            <h1>Legal and trade terms</h1>
+            <p>
+              Core terms for account access, uploaded materials, custom harness
+              orders, international shipping, and after-sales support.
+            </p>
+          </div>
+          <button className="secondary-action" type="button" onClick={back}>
+            Back
+          </button>
+        </header>
+
+        <div className="policy-layout">
+          <nav className="policy-nav" aria-label="Policy pages">
+            {policyPages.map((policy) => (
+              <button
+                type="button"
+                key={policy.id}
+                className={policy.id === activePolicy.id ? "active" : ""}
+                onClick={() => setActivePolicyId(policy.id)}
+              >
+                {policy.shortTitle}
+              </button>
+            ))}
+          </nav>
+
+          <article className="policy-document">
+            <span className="eyebrow">Last updated May 14, 2026</span>
+            <h2>{activePolicy.title}</h2>
+            <p className="policy-summary">{activePolicy.summary}</p>
+            <div className="policy-section-list">
+              {activePolicy.sections.map((section) => (
+                <section key={section.heading}>
+                  <h3>{section.heading}</h3>
+                  <p>{section.body}</p>
+                </section>
+              ))}
+            </div>
+            <div className="policy-contact-card">
+              <ShieldCheck size={18} />
+              <div>
+                <strong>Questions about these terms?</strong>
+                <p>
+                  Contact Easy Harness before confirming a quote or completing
+                  payment if any request, order, shipping, or support detail is
+                  unclear.
+                </p>
+              </div>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function WiringBackdrop() {
   return (
     <svg className="wiring-backdrop" viewBox="0 0 1200 760" aria-hidden="true">
@@ -6734,6 +7062,7 @@ function StartScreen({
   setTermsChecked,
   termsError,
   fileError,
+  openPolicy,
 }) {
   const phaseCopy = {
     creating: "Creating your request…",
@@ -6845,7 +7174,10 @@ function StartScreen({
           />
           <span>
             I confirm that I have the right to upload these files and Easy
-            Harness may use them to review and prepare this request.
+            Harness may use them to review and prepare this request.{" "}
+            <InlinePolicyLink openPolicy={openPolicy} policyId="uploads">
+              Upload terms
+            </InlinePolicyLink>
           </span>
         </label>
       )}
@@ -7043,7 +7375,7 @@ function OrderListGroup({ title, orders, openOrder }) {
   );
 }
 
-function AccountScreen({ user, updateUser }) {
+function AccountScreen({ user, updateUser, openPolicy }) {
   const preferences = user.notificationPreferences || {};
   const [form, setForm] = useState({
     name: user.name || "",
@@ -7196,7 +7528,12 @@ function AccountScreen({ user, updateUser }) {
 
           <div className="side-card">
             <h2>Upload terms</h2>
-            <p>Required before submitting files or written request details.</p>
+            <p>
+              Required before submitting files or written request details.{" "}
+              <InlinePolicyLink openPolicy={openPolicy} policyId="uploads">
+                View terms
+              </InlinePolicyLink>
+            </p>
             {user.termsAccepted ? (
               <div className="event-note">
                 <Check size={16} />
@@ -7210,6 +7547,11 @@ function AccountScreen({ user, updateUser }) {
                 Accept terms
               </button>
             )}
+          </div>
+          <div className="side-card">
+            <h2>Policies</h2>
+            <p>Review Easy Harness account, privacy, order, shipping, and support terms.</p>
+            <PolicyLinks openPolicy={openPolicy} compact />
           </div>
         </aside>
       </div>
@@ -7244,6 +7586,7 @@ function RequestWorkspace({
   confirmRequest,
   fileError,
   openOrder,
+  openPolicy,
   linkedOrder,
 }) {
   const draftForView = normalizeDraftForView(request.checkResult || {}, request);
@@ -7292,6 +7635,7 @@ function RequestWorkspace({
           request={request}
           confirmRequest={confirmRequest}
           openOrder={openOrder}
+          openPolicy={openPolicy}
           linkedOrder={linkedOrder}
         />
       </div>
@@ -8145,7 +8489,13 @@ function IntakeDraftCard({ checkResult, request }) {
   );
 }
 
-function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
+function RequestSidePanel({
+  request,
+  confirmRequest,
+  openOrder,
+  openPolicy,
+  linkedOrder,
+}) {
   const ready = request.status === "ready_to_confirm";
   const confirmed = request.status === "confirmed";
   const paid = request.status === "paid";
@@ -8184,6 +8534,18 @@ function RequestSidePanel({ request, confirmRequest, openOrder, linkedOrder }) {
               <small>Valid until {quote.validUntil}</small>
             </div>
           )}
+          {ready && (
+            <p className="quote-terms-note">
+              By confirming, you accept the{" "}
+              <InlinePolicyLink
+                openPolicy={openPolicy}
+                policyId="custom-orders"
+              >
+                custom order terms
+              </InlinePolicyLink>
+              .
+            </p>
+          )}
           <button
             className="pay-button"
             disabled={!ready && !hasOrder}
@@ -8214,6 +8576,7 @@ function OrderWorkspace({
   updateOrder,
   startPayment,
   sendOrderMessage,
+  openPolicy,
 }) {
   const shipping = selectedShipping(order);
   const completeAddress = isAddressComplete(order.address);
@@ -8238,6 +8601,7 @@ function OrderWorkspace({
         order={order}
         request={request}
         sendOrderMessage={sendOrderMessage}
+        openPolicy={openPolicy}
       />
     );
   }
@@ -8515,7 +8879,10 @@ function OrderWorkspace({
                 Ships under DAP from Shenzhen, China. Customs, VAT, duties, or
                 carrier brokerage may be collected by the carrier or local
                 authority before delivery. Easy Harness will keep the shipping
-                option clear before payment.
+                option clear before payment.{" "}
+                <InlinePolicyLink openPolicy={openPolicy} policyId="shipping">
+                  Shipping terms
+                </InlinePolicyLink>
               </p>
             </div>
           </section>
@@ -8532,6 +8899,15 @@ function OrderWorkspace({
             </div>
             <p className="compact-policy-copy">
               Production starts after provider or bank-transfer confirmation.
+              Completing payment means the confirmed quote, delivery address,
+              shipping option, and{" "}
+              <InlinePolicyLink
+                openPolicy={openPolicy}
+                policyId="custom-orders"
+              >
+                custom order terms
+              </InlinePolicyLink>{" "}
+              are accepted.
             </p>
           </section>
 
@@ -8544,12 +8920,19 @@ function OrderWorkspace({
               <p>
                 Custom-made harnesses are covered for confirmed Easy Harness
                 production faults. Change requests are available before
-                production starts.
+                production starts.{" "}
+                <InlinePolicyLink
+                  openPolicy={openPolicy}
+                  policyId="after-sales"
+                >
+                  After-sales policy
+                </InlinePolicyLink>
               </p>
               <p>
                 After delivery, report defects, wrong assembly, or shipping
-                damage with photos or video so Easy Harness can review the
-                fastest resolution.
+                damage with photos or video in the order message area. Easy
+                Harness can also share email or WhatsApp details when that is
+                the fastest way to resolve the case.
               </p>
             </div>
           </section>
@@ -8718,7 +9101,7 @@ function OrderMessagePanel({
   );
 }
 
-function PaidOrderStatusView({ order, request, sendOrderMessage }) {
+function PaidOrderStatusView({ order, request, sendOrderMessage, openPolicy }) {
   const shipping = selectedShipping(order);
   const total = orderTotal(order);
   const production = productionStatusInfo(order);
@@ -8882,6 +9265,13 @@ function PaidOrderStatusView({ order, request, sendOrderMessage }) {
               )}
               <Readout label="Incoterm" value={order.incoterm} />
             </div>
+            <p className="compact-policy-copy">
+              Delivery follows the{" "}
+              <InlinePolicyLink openPolicy={openPolicy} policyId="shipping">
+                shipping and import-duty terms
+              </InlinePolicyLink>
+              .
+            </p>
           </section>
 
           <OrderMessagePanel
@@ -8934,12 +9324,24 @@ function PaidOrderStatusView({ order, request, sendOrderMessage }) {
               Use this order ID when contacting Easy Harness about address
               changes, production timing, or delivery support.
             </p>
+            <p className="checkout-note">
+              Order messages stay available for after-sales questions. Easy
+              Harness may share email or WhatsApp details when direct follow-up
+              is faster.
+            </p>
             <a
               className="secondary-action support-link"
               href={`mailto:support@easyharness.com?subject=${encodeURIComponent(order.id)}`}
             >
               Contact support
             </a>
+            <button
+              className="text-button left"
+              type="button"
+              onClick={() => openPolicy?.("after-sales")}
+            >
+              View after-sales policy
+            </button>
           </div>
         </aside>
       </div>

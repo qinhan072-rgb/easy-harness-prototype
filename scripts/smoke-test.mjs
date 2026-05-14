@@ -250,7 +250,26 @@ const checks = [
   {
     name: "order page includes after-sales policy",
     pass: app.includes("After-sales support") &&
-      app.includes("Custom-made harnesses are covered")
+      app.includes("Custom-made harnesses are covered") &&
+      app.includes("After-sales and Support Policy")
+  },
+  {
+    name: "legal and trade policy pages are available",
+    pass: app.includes("policyPages") &&
+      app.includes("Terms of Service") &&
+      app.includes("Privacy Policy") &&
+      app.includes("Upload and File Authorization") &&
+      app.includes("Quote and Custom Order Terms") &&
+      app.includes("Shipping, Duties, and Regions") &&
+      app.includes("After-sales and Support Policy")
+  },
+  {
+    name: "customer legal touchpoints are lightweight and linked",
+    pass: app.includes("By continuing, you agree to the") &&
+      app.includes("By confirming, you accept the") &&
+      app.includes("Completing payment means the confirmed quote") &&
+      app.includes("Upload terms") &&
+      app.includes("Shipping terms")
   },
   {
     name: "order includes lightweight message thread",
