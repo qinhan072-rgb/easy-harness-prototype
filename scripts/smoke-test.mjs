@@ -239,7 +239,10 @@ const checks = [
       app.includes("MarketplacePaymentState") &&
       app.includes("Protected marketplace checkout requested") &&
       app.includes("Open protected checkout") &&
-      app.includes("marketplace_payment_requested")
+      app.includes("marketplace_payment_requested") &&
+      app.includes("Your protected marketplace checkout is ready") &&
+      app.includes("MarketplaceWaitCard") &&
+      app.includes("You can leave this page and return to this order later")
   },
   {
     name: "payment uses provider session shape before confirmation",

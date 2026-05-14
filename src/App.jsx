@@ -6051,6 +6051,12 @@ function App() {
         title: "Protected payment link requested",
         body: `${activeOrder.id} is waiting for a matching marketplace checkout link.`,
       });
+      addNotification({
+        userId: activeOrder.customerId,
+        requestId: activeOrder.requestId,
+        title: "Protected checkout requested",
+        body: `${activeOrder.id}: Easy Harness is preparing your protected marketplace checkout link.`,
+      });
       recordAudit(
         "marketplace_payment_requested",
         "order",
@@ -8796,6 +8802,10 @@ function OrderWorkspace({
             )}
           </section>
 
+          {marketplacePending && !marketplacePaymentDetails(order).checkoutUrl && (
+            <MarketplaceWaitCard order={order} />
+          )}
+
           <section className="order-card">
             <div className="order-section-title">
               <MapPin size={18} />
@@ -9705,6 +9715,29 @@ function BankTransferInstructions({ order }) {
   );
 }
 
+function MarketplaceWaitCard({ order }) {
+  const payment = marketplacePaymentDetails(order);
+
+  return (
+    <section className="order-card marketplace-wait-card">
+      <div className="order-section-title">
+        <ShieldCheck size={18} />
+        <h2>Protected checkout link requested</h2>
+      </div>
+      <p>
+        Easy Harness is preparing a matching {payment.provider} checkout for
+        this confirmed order. This may take a little time because the
+        marketplace order must match your harness quote and delivery basis.
+      </p>
+      <div className="marketplace-next-steps">
+        <span>When ready, the button will appear in the order summary.</span>
+        <span>Easy Harness will also post an update in the order messages.</span>
+        <span>You can leave this page and return to this order later.</span>
+      </div>
+    </section>
+  );
+}
+
 function MarketplacePaymentState({ order }) {
   const payment = marketplacePaymentDetails(order);
   const hasLink = Boolean(payment.checkoutUrl);
@@ -9722,7 +9755,7 @@ function MarketplacePaymentState({ order }) {
           <span>
             {hasLink
               ? `Open the ${payment.provider} checkout only if it matches this Easy Harness order.`
-              : "Easy Harness will prepare a matching protected checkout link for this confirmed order."}
+              : "Easy Harness is preparing a matching protected checkout link. You can return to this order later."}
           </span>
         </div>
       </div>
@@ -11101,8 +11134,9 @@ function StaffOrderDetail({
     );
   };
 
-  const saveMarketplaceLink = () => {
+  const saveMarketplaceLink = async () => {
     const checkoutUrl = marketplaceUrl.trim();
+    const previousMarketplacePayment = marketplacePaymentDetails(order);
     const provider =
       marketplaceProvider.trim() || marketplacePaymentDefaults.provider;
     const marketplacePayment = {
@@ -11117,7 +11151,7 @@ function StaffOrderDetail({
         "Now",
       updatedAt: "Now",
     };
-    updateOrderFromStaff(
+    await updateOrderFromStaff(
       order.id,
       {
         paymentStatus: "payment_pending",
@@ -11144,6 +11178,13 @@ function StaffOrderDetail({
         ? "Marketplace protected checkout link is ready for the customer."
         : "Marketplace protected payment path prepared.",
     );
+    if (checkoutUrl && checkoutUrl !== previousMarketplacePayment.checkoutUrl) {
+      await sendOrderMessage(
+        order.id,
+        `Your protected marketplace checkout is ready. Open it from the order summary, and confirm that the marketplace order matches this Easy Harness order before paying.${marketplacePayment.reference ? ` Reference: ${marketplacePayment.reference}.` : ""}`,
+        "staff",
+      );
+    }
   };
 
   const saveProduction = () => {
