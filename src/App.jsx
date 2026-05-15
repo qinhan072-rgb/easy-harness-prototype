@@ -5420,6 +5420,7 @@ function App() {
         "I need a harness made from the uploaded design files.";
       const uploadDrafts = [...uploadFiles];
       const files = uploadDrafts.map(fileName);
+      const fileBlocks = uploadDrafts.map((file) => attachmentBlockFile(file, true));
       setDescription("");
       setUploadFiles([]);
       setFileError("");
@@ -5427,7 +5428,7 @@ function App() {
         supabase && isUuidLike(actor.id)
           ? `pending-${Date.now()}`
           : makeRequestId(requests);
-      const firstMessage = customerMessage(text, files);
+      const firstMessage = customerMessage(text, fileBlocks);
       const nextRequest = {
         id: nextId,
         customerId: actor.id,
@@ -5445,7 +5446,7 @@ function App() {
         activeQuoteId: "",
         confirmedQuoteId: "",
         price: "",
-        files,
+        files: fileBlocks,
         updated: "Just now",
         messages: [firstMessage],
       };
@@ -5550,6 +5551,9 @@ function App() {
     sendingUserMessageRef.current = true;
     setSendingUserMessage(true);
     const attachedNames = filesToSend.map(fileName);
+    const attachedBlocks = filesToSend.map((file) =>
+      attachmentBlockFile(file, true),
+    );
     setUserComposer("");
     setUserComposerFiles([]);
     setFileError("");
@@ -5567,8 +5571,8 @@ function App() {
       createdAt: "Now",
       blocks: [
         ...(text ? [{ type: "text", text }] : []),
-        ...(attachedNames.length
-          ? [{ type: "attachments", files: attachedNames }]
+        ...(attachedBlocks.length
+          ? [{ type: "attachments", files: attachedBlocks }]
           : []),
       ],
     };
@@ -5577,7 +5581,8 @@ function App() {
       updateRequest(activeRequest.id, (request) => {
         const baseMessages = [...request.messages, message];
         const nextFiles = [
-          ...new Set([...(request.files || []), ...attachedNames]),
+          ...(request.files || []),
+          ...attachedBlocks,
         ];
         if (remoteThread) {
           return {
@@ -7385,8 +7390,8 @@ function ProcessingScreen({ request, progressIndex }) {
 
         {!!request?.files?.length && (
           <div className="file-strip compact center">
-            {request.files.map((file) => (
-              <FileChip key={file} file={file} />
+            {request.files.map((file, index) => (
+              <FileChip key={attachmentKey(file, index)} file={file} />
             ))}
           </div>
         )}

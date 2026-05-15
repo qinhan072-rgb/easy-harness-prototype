@@ -409,7 +409,10 @@ const checks = [
       app.includes("attachment-image-preview") &&
       app.includes("attachment-pdf-preview") &&
       app.includes("attachment-table-preview") &&
-      app.includes("createSignedUrl")
+      app.includes("createSignedUrl") &&
+      app.includes("const fileBlocks = uploadDrafts.map") &&
+      app.includes("const attachedBlocks = filesToSend.map") &&
+      app.includes("attachmentKey(file, index)")
   },
   {
     name: "staff updates support visual evidence blocks",
