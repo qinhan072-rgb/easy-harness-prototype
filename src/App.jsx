@@ -1409,6 +1409,13 @@ function storageObjectId(attachmentIdValue) {
   return `obj_${attachmentIdValue}`;
 }
 
+function uuidValue() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return "";
+}
+
 function authSessionId(userId) {
   return `sess_${userId}_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 }
@@ -4494,7 +4501,7 @@ function App() {
     const saved = [];
 
     for (const attachment of localAttachments) {
-      let storageObjectId = "";
+      let storageObjectId = uuidValue();
       let uploaded = false;
 
       if (attachment.sourceFile) {
@@ -4518,16 +4525,16 @@ function App() {
         }
       }
 
-      const { data: storageRow, error: storageError } = await supabase
+      const { error: storageError } = await supabase
         .from("storage_objects")
         .insert({
+          ...(storageObjectId ? { id: storageObjectId } : {}),
           ...supabaseStorageObjectInsertFromAttachment(attachment),
           status: uploaded ? "uploaded" : "pending_upload",
-        })
-        .select("id,object_path,status")
-        .single();
+        });
 
       if (storageError) {
+        storageObjectId = "";
         recordServiceEvent(
           "supabase-database",
           "storage_object_insert_failed",
@@ -4536,7 +4543,6 @@ function App() {
           storageError.message,
         );
       } else {
-        storageObjectId = storageRow.id;
         setStorageObjectRecords((current) =>
           mergeById(current, [
             storageObjectRecordFromAttachment(

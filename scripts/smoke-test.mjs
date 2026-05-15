@@ -139,7 +139,10 @@ const checks = [
       app.includes(".storage") &&
       app.includes(".from(\"request-attachments\")") &&
       app.includes("supabaseStorageObjectInsertFromAttachment") &&
-      app.includes("storage_object_id")
+      app.includes("storage_object_id") &&
+      app.includes("function uuidValue") &&
+      app.includes("id: storageObjectId") &&
+      !app.includes(".select(\"id,object_path,status\")")
   },
   {
     name: "storage object ledger is present",
