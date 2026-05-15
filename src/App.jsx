@@ -51,7 +51,7 @@ const statusCopy = {
   not_supported: "Need connection goal",
   in_review: "Easy Harness review",
   ready_to_confirm: "Quote ready",
-  confirmed: "Request confirmed",
+  confirmed: "Order created",
   paid: "Payment received",
 };
 
@@ -2935,6 +2935,17 @@ function selectedShipping(order) {
 function orderTotal(order) {
   const shipping = selectedShipping(order);
   return Number(order.harnessPrice || 0) + Number(shipping?.price || 0);
+}
+
+function linkedOrderForRequest(request, orders = []) {
+  return orders.find((order) => order.requestId === request.id) || null;
+}
+
+function requestHasMovedToOrder(request, orders = []) {
+  return (
+    ["confirmed", "paid"].includes(request.status) ||
+    Boolean(linkedOrderForRequest(request, orders))
+  );
 }
 
 const seedOrders = [createOrderFromRequest(seedRequests[1], seedUsers[0])];
@@ -5976,7 +5987,7 @@ function App() {
     addNotification({
       role: "staff",
       requestId: activeRequest.id,
-      title: "Request confirmed",
+      title: "Order created",
       body: `${activeRequest.id} has been confirmed and opened as ${nextOrder.id}.`,
     });
     recordAudit(
@@ -6350,7 +6361,12 @@ function App() {
         )}
 
         {userView === "requests" && (
-          <RequestsList requests={visibleRequests} openRequest={openRequest} startNewRequest={() => setUserView("start")} />
+          <RequestsList
+            requests={visibleRequests}
+            orders={visibleOrders}
+            openRequest={openRequest}
+            startNewRequest={() => setUserView("start")}
+          />
         )}
 
         {userView === "orders" && (
@@ -6421,7 +6437,12 @@ function App() {
               )}
             />
           ) : (
-            <RequestsList requests={visibleRequests} openRequest={openRequest} startNewRequest={() => setUserView("start")} />
+            <RequestsList
+              requests={visibleRequests}
+              orders={visibleOrders}
+              openRequest={openRequest}
+              startNewRequest={() => setUserView("start")}
+            />
           ))}
 
         {userView === "order" &&
@@ -6820,6 +6841,9 @@ function UserSidebar({
     }
     setUserView(view);
   };
+  const activeSidebarRequests = dedupeRequestsByIdentity(requests).filter(
+    (request) => !requestHasMovedToOrder(request, orders),
+  );
 
   return (
     <aside
@@ -6874,20 +6898,22 @@ function UserSidebar({
 
       {sidebarOpen && showPrivateNav && (requests.length || orders.length) ? (
         <div className="draft-list">
-          <div className="sidebar-section-title">Recent requests</div>
-          {dedupeRequestsByIdentity(requests)
-            .slice(0, 6)
-            .map((request) => (
-              <button
-                className={`draft-list-item ${request.id === activeRequest?.id ? "active" : ""}`}
-                key={request.id}
-                onClick={() => openRequest(request.id, "user")}
-              >
-                <strong>{request.title}</strong>
-                <span>{request.id}</span>
-                <small>{statusCopy[request.status]}</small>
-              </button>
-            ))}
+          {!!activeSidebarRequests.length && (
+            <>
+              <div className="sidebar-section-title">Recent requests</div>
+              {activeSidebarRequests.slice(0, 6).map((request) => (
+                <button
+                  className={`draft-list-item ${request.id === activeRequest?.id ? "active" : ""}`}
+                  key={request.id}
+                  onClick={() => openRequest(request.id, "user")}
+                >
+                  <strong>{request.title}</strong>
+                  <span>{request.id}</span>
+                  <small>{statusCopy[request.status]}</small>
+                </button>
+              ))}
+            </>
+          )}
           {!!orders.length && (
             <>
               <div className="sidebar-section-title">Recent orders</div>
@@ -7354,19 +7380,28 @@ function ProcessingScreen({ request, progressIndex }) {
   );
 }
 
-function RequestsList({ requests, openRequest, startNewRequest }) {
+function RequestsList({ requests, orders = [], openRequest, startNewRequest }) {
   const list = dedupeRequestsByIdentity(requests);
+  const activeRequests = list.filter(
+    (request) => !requestHasMovedToOrder(request, orders),
+  );
+  const convertedRequests = list.filter((request) =>
+    requestHasMovedToOrder(request, orders),
+  );
   return (
     <section className="requests-screen">
       <div className="requests-header">
         <span className="eyebrow">Requests</span>
         <h1>Your harness requests</h1>
-        <p>Continue a thread, review an Easy Harness Draft, or confirm a price when it is ready.</p>
+        <p>
+          Continue an active request, review an Easy Harness Draft, or confirm a
+          price when it is ready.
+        </p>
       </div>
 
-      {list.length ? (
+      {activeRequests.length ? (
         <div className="request-list">
-          {list.map((request) => (
+          {activeRequests.map((request) => (
             <button
               className="request-row"
               key={request.id}
@@ -7386,13 +7421,54 @@ function RequestsList({ requests, openRequest, startNewRequest }) {
       ) : (
         <div className="empty-state action-empty-state">
           <div>
-            <strong>No harness requests yet.</strong>
-            <p>Start with a short description, a photo, a sketch, a pinout, or an old harness sample.</p>
+            <strong>
+              {convertedRequests.length
+                ? "No active requests right now."
+                : "No harness requests yet."}
+            </strong>
+            <p>
+              {convertedRequests.length
+                ? "Requests that already became orders are kept below for reference."
+                : "Start with a short description, a photo, a sketch, a pinout, or an old harness sample."}
+            </p>
           </div>
           <button className="secondary-action" onClick={startNewRequest}>
             New request
           </button>
         </div>
+      )}
+      {!!convertedRequests.length && (
+        <details className="converted-requests-block">
+          <summary>
+            <span>Converted to orders</span>
+            <small>{convertedRequests.length}</small>
+          </summary>
+          <div className="request-list converted-request-list">
+            {convertedRequests.map((request) => {
+              const linkedOrder = linkedOrderForRequest(request, orders);
+              return (
+                <button
+                  className="request-row converted-request-row"
+                  key={request.id}
+                  onClick={() => openRequest(request.id, "user")}
+                >
+                  <div>
+                    <strong>{request.title}</strong>
+                    <span>
+                      {linkedOrder
+                        ? `${request.id} / Order ${linkedOrder.id}`
+                        : request.id}
+                    </span>
+                  </div>
+                  <div className="request-row-meta">
+                    <StatusBadge status="confirmed" />
+                    <small>{request.updated}</small>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+        </details>
       )}
     </section>
   );

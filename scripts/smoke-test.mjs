@@ -615,6 +615,15 @@ const checks = [
   {
     name: "orders list separates ready-for-payment from active orders",
     pass: app.includes("Ready for payment") && app.includes("Active orders") && app.includes("Completed")
+  },
+  {
+    name: "converted requests are de-emphasized after order creation",
+    pass: app.includes("Converted to orders") &&
+      app.includes("converted-requests-block") &&
+      app.includes("No active requests right now") &&
+      app.includes("Order created") &&
+      app.includes("requestHasMovedToOrder") &&
+      app.includes("activeSidebarRequests")
   }
 ];
 
