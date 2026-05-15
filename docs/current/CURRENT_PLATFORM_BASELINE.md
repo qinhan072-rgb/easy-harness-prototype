@@ -28,6 +28,10 @@ platform yet.
 - Real browser files upload to Supabase Storage bucket `request-attachments`.
 - Attachment and storage metadata write to Supabase.
 - Staff replies and released harness quotes write to Supabase.
+- Staff Draft/quote preview blocks should carry forward explicit customer
+  details from the full request thread, such as quantity, length, and voltage,
+  while avoiding production-stage labels like BOM unless a real production
+  package exists.
 - Home, customer thread, and staff thread accept drag-and-drop file upload;
   dropped folders are expanded in browsers that expose folder entries.
 - Conversation attachment blocks can show inline image/PDF/CSV previews when

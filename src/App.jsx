@@ -974,7 +974,7 @@ const seedRequests = [
         "Controller-to-Dual-Sensor Harness Assembly",
       ),
       easyMessage(
-        "Here is a quick BOM preview and harness layout draft. Please review the connection direction and confirm whether this layout works for your device.",
+        "Here is the Easy Harness Draft basis and layout preview. Please review the connection direction and confirm whether this layout works for your device.",
         [],
         [
           { type: "table" },
@@ -2661,6 +2661,15 @@ function getFirstCustomerText(request) {
   const message = request.messages.find((item) => item.role === "customer");
   const block = message?.blocks?.find((item) => item.type === "text");
   return block?.text || "";
+}
+
+function getCustomerThreadText(request = { messages: [] }) {
+  return (request.messages || [])
+    .filter((item) => item.role === "customer")
+    .flatMap((message) => message.blocks || [])
+    .filter((block) => block.type === "text" && block.text)
+    .map((block) => block.text)
+    .join("\n");
 }
 
 function getLastEasyMessage(request) {
@@ -12138,7 +12147,7 @@ function FileChip({ file, onRemove }) {
 
 function HarnessPreview({ request }) {
   const title = request?.title || "Harness layout";
-  const text = getFirstCustomerText(request || { messages: [] });
+  const text = getCustomerThreadText(request || { messages: [] });
   const dualBranch = /dual|two|2|sensor/i.test(`${title} ${text}`);
 
   return (
@@ -12169,29 +12178,31 @@ function detailValue(text, pattern, fallback) {
 }
 
 function BomTable({ request }) {
-  const text = getFirstCustomerText(request || { messages: [] });
+  const text = getCustomerThreadText(request || { messages: [] });
+  const pending = "Easy Harness review";
   const quantity = detailValue(
     text,
     /\b\d+\s*(pcs|pieces|piece|sets|units)\b/i,
-    "Confirm in thread",
+    pending,
   );
   const length = detailValue(
     text,
     /\b\d+(\.\d+)?\s*(m|meter|meters|cm|mm|inch|inches)\b/i,
-    "Confirm in thread",
+    pending,
   );
   const rating = detailValue(
     text,
     /\b\d+(\.\d+)?\s*(v|volt|volts|a|amp|amps)\b/i,
-    "Confirm in thread",
+    pending,
   );
+  const stateFor = (value) => (value === pending ? "Review" : "Captured");
 
   return (
     <table className="bom-table">
       <thead>
         <tr>
-          <th>Confirmation point</th>
-          <th>Current thread basis</th>
+          <th>Draft basis item</th>
+          <th>Current order basis</th>
           <th>State</th>
         </tr>
       </thead>
@@ -12199,22 +12210,22 @@ function BomTable({ request }) {
         <tr>
           <td>Harness type</td>
           <td>{request?.title || "Harness assembly"}</td>
-          <td>Ready</td>
+          <td>Captured</td>
         </tr>
         <tr>
           <td>Length</td>
           <td>{length}</td>
-          <td>{length === "Confirm in thread" ? "Open" : "Ready"}</td>
+          <td>{stateFor(length)}</td>
         </tr>
         <tr>
           <td>Quantity</td>
           <td>{quantity}</td>
-          <td>{quantity === "Confirm in thread" ? "Open" : "Ready"}</td>
+          <td>{stateFor(quantity)}</td>
         </tr>
         <tr>
           <td>Electrical rating</td>
           <td>{rating}</td>
-          <td>{rating === "Confirm in thread" ? "Open" : "Ready"}</td>
+          <td>{stateFor(rating)}</td>
         </tr>
       </tbody>
     </table>

@@ -80,13 +80,17 @@ Implemented:
 Still not live:
 
 - Stripe/PayPal hosted payment session calls and webhooks.
-- Marketplace seller account/API automation; the current path is staff-prepared
-  link handoff for a matching protected order.
+- Marketplace seller account/API automation. The current protected payment path
+  is staff-prepared link handoff for a matching protected order; Alibaba
+  International/Trade Assurance API automation should be treated as an
+  integration candidate once seller API access and permissions are confirmed.
 - DHL Express live rate, shipment, label, invoice, pickup, and tracking calls.
 - Email/WhatsApp provider delivery.
 - Production custom domain and company email sender.
-- Production legal terms, privacy policy, upload authorization, and after-sales
-  wording.
+- Customer-facing policy pages exist, but production legal/entity review is not
+  complete. The missing pieces are company legal name, address, jurisdiction,
+  support contacts, returns/refunds, tax/duty handling, and operational
+  acceptance by the business.
 - Deep AI engineering pipeline: file unpacking, OCR, CAD/PDF/Excel parsing,
   vision extraction, Harness JSON, catalog matching, rule validation, BOM/cut
   list/manufacturing package generation.
@@ -148,6 +152,9 @@ Keep DeepSeek secrets only if it is used as a fallback.
 - Public registration creates customer accounts only.
 - Staff/admin accounts must be invited or created by admin.
 - Do not collapse request and order into one concept.
+- Do not label Draft/quote basis previews as production BOMs unless a real
+  manufacturing package has been generated; carry explicit customer details
+  from the full request thread into quote/order snapshots.
 - Do not collect card details in the app; use hosted payment providers.
 - Keep DAP import duty/tax boundary clear until landed-cost support exists.
 - Keep production tracking simple for customers.

@@ -326,6 +326,15 @@ const checks = [
       !app.includes("Old harness samples")
   },
   {
+    name: "draft basis table uses full customer thread and avoids BOM promise",
+    pass: app.includes("function getCustomerThreadText") &&
+      app.includes("Here is the Easy Harness Draft basis and layout preview.") &&
+      app.includes("Draft basis item") &&
+      app.includes("Current order basis") &&
+      !app.includes("Here is a quick BOM preview") &&
+      app.includes("getCustomerThreadText(request || { messages: [] })")
+  },
+  {
     name: "request submit gates authentication while preserving draft",
     pass: app.includes("Sign in or create an account to submit this request.") &&
       app.includes("submit_request") &&
