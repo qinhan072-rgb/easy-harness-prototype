@@ -57,6 +57,11 @@ platform yet.
 - AI intake currently receives customer text, conversation history, and
   attachment metadata. It does not yet receive reliable visual/OCR/document
   observations from uploaded files.
+- `run-checking` now has an optional Qwen image-input path. When
+  `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`, it can send selected uploaded image
+  attachments to Qwen through short-lived Supabase signed URLs and records how
+  many images were sent. This is off by default and does not cover PDF, Excel,
+  CSV, or CAD parsing.
 
 ## What Is Still Modeled, Not Live
 

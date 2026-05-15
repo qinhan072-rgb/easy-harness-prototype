@@ -75,7 +75,9 @@ Implemented:
 - In-app notifications, notification delivery records, audit logs, and service
   events.
 - `run-checking` Supabase Edge Function for Easy Harness Draft intake, with a
-  configurable Qwen/DeepSeek model adapter.
+  configurable Qwen/DeepSeek model adapter. Qwen can optionally receive selected
+  uploaded image attachments through short-lived Supabase signed URLs when
+  `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`; the default remains metadata-only.
 
 Still not live:
 
@@ -129,8 +131,9 @@ Live AI provider settings:
 ```text
 AI_DRAFT_PROVIDER=qwen
 QWEN_API_KEY=...
-QWEN_MODEL=qwen-plus
+QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+AI_DRAFT_ENABLE_ATTACHMENT_VISION=false
 ```
 
 Keep DeepSeek secrets only if it is used as a fallback.

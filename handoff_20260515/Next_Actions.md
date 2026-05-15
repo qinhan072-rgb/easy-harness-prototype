@@ -240,6 +240,14 @@ uploaded files
   -> Easy Harness Draft
 ```
 
+Current bridge:
+
+- `run-checking` can optionally send selected image attachments to Qwen through
+  short-lived Supabase signed URLs when `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`.
+- This is an image-input bridge, not the full file-understanding pipeline.
+- PDF/Excel/CSV/CAD still need parser-generated structured observations before
+  the Agent may rely on their contents.
+
 Likely files:
 
 - `supabase/functions/run-checking/index.ts`

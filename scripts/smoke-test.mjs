@@ -545,8 +545,21 @@ const checks = [
     pass: checkingFunction.includes("draftModelConfig") &&
       checkingFunction.includes("dashscope.aliyuncs.com/compatible-mode/v1") &&
       checkingFunction.includes("callDraftModel") &&
+      checkingFunction.includes("qwen3.6-plus") &&
       envExample.includes("AI_DRAFT_PROVIDER=qwen") &&
-      envExample.includes("QWEN_API_KEY=")
+      envExample.includes("QWEN_API_KEY=") &&
+      envExample.includes("QWEN_MODEL=qwen3.6-plus")
+  },
+  {
+    name: "ai draft supports optional qwen attachment vision",
+    pass: checkingFunction.includes("AI_DRAFT_ENABLE_ATTACHMENT_VISION") &&
+      checkingFunction.includes("createSignedAttachmentImageUrls") &&
+      checkingFunction.includes(".createSignedUrl") &&
+      checkingFunction.includes("type: \"image_url\"") &&
+      checkingFunction.includes("image_url_sent_to_qwen") &&
+      checkingFunction.includes("image_count_sent_to_model: modelInputMeta.visualImages.length") &&
+      envExample.includes("AI_DRAFT_ENABLE_ATTACHMENT_VISION=false") &&
+      envExample.includes("AI_DRAFT_MAX_VISION_IMAGES=4")
   },
   {
     name: "ai agent does not title requests from one keyword",

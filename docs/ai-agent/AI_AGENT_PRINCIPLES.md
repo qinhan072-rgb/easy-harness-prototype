@@ -491,6 +491,10 @@ Agent 必须清楚区分信息来源：
 当前如果系统只把附件 metadata 传给模型，Agent 不能假装已经看懂图片、
 PDF、Excel 或 CAD 内容。
 
+模型本身支持多模态，不等于当前这一次 Agent run 已经看过文件。只有当系统
+真的把图片输入、OCR 文本、PDF/Excel/CSV/CAD 解析结果，或结构化
+attachment observations 传给 Agent 时，这些内容才可以成为 Draft 证据。
+
 它可以说：
 
 ```text
