@@ -226,7 +226,9 @@ function envFlag(name: string) {
 }
 
 function envNumber(name: string, fallback: number, min: number, max: number) {
-  const value = Number(Deno.env.get(name) || "");
+  const raw = Deno.env.get(name);
+  if (raw === undefined || raw === null || raw.trim() === "") return fallback;
+  const value = Number(raw);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
 }
