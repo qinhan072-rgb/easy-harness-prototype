@@ -233,6 +233,15 @@ function isImageAttachment(attachment: AttachmentRow & { storage?: StorageRow })
   );
 }
 
+function logCheckingEvent(event: string, payload: Record<string, unknown>) {
+  console.log(
+    JSON.stringify({
+      event: `easy_harness_run_checking_${event}`,
+      ...payload,
+    }),
+  );
+}
+
 const draftSchema = {
   type: "object",
   additionalProperties: false,
@@ -2203,6 +2212,12 @@ Deno.serve(async (request) => {
     latestMessage.author_role !== "customer" &&
     requestRow.check_status !== "pending"
   ) {
+    logCheckingEvent("skipped", {
+      request_number: requestRow.request_number,
+      reason: "no_new_customer_input",
+      latest_role: latestMessage.author_role,
+      check_status: requestRow.check_status,
+    });
     return jsonResponse({
       ok: true,
       skipped: true,
@@ -2266,6 +2281,16 @@ Deno.serve(async (request) => {
       supabase,
       attachmentsWithStorage,
     );
+    logCheckingEvent("started", {
+      request_number: requestRow.request_number,
+      trigger: payload.trigger || "manual",
+      provider: selectedDraftProvider(),
+      attachment_count: attachmentsWithStorage.length,
+      image_attachment_count: attachmentsWithStorage.filter(isImageAttachment)
+        .length,
+      attachment_vision_enabled: modelInputMeta.attachmentVisionEnabled,
+      image_count_sent_to_model: modelInputMeta.visualImages.length,
+    });
     const modelInput = summarizeRequestForModel(
       requestRow,
       messages || [],
@@ -2320,6 +2345,17 @@ Deno.serve(async (request) => {
 
     if (updateError)
       throw new Error(`Could not update request: ${updateError.message}`);
+
+    logCheckingEvent("completed", {
+      request_number: requestRow.request_number,
+      status: nextStatus,
+      check_status: legacyStatusFor(draft),
+      draft_status: draft.draft_meta.draft_status,
+      provider,
+      model,
+      attachment_vision_enabled: modelInputMeta.attachmentVisionEnabled,
+      image_count_sent_to_model: modelInputMeta.visualImages.length,
+    });
 
     const { data: latestRows } = await supabase
       .from("request_messages")
@@ -2378,6 +2414,12 @@ Deno.serve(async (request) => {
   } catch (error) {
     const message =
       error instanceof Error ? error.message : "Unknown draft agent error";
+    logCheckingEvent("fallback", {
+      request_number: requestRow.request_number,
+      error: message.slice(0, 500),
+      attachment_vision_enabled: modelInputMeta.attachmentVisionEnabled,
+      image_count_sent_to_model: modelInputMeta.visualImages.length,
+    });
     await supabase.from("integration_events").insert({
       adapter: adapterId,
       action: "primary_agent_failed_local_draft_used",

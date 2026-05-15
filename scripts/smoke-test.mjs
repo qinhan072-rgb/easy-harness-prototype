@@ -558,6 +558,7 @@ const checks = [
       checkingFunction.includes("type: \"image_url\"") &&
       checkingFunction.includes("image_url_sent_to_qwen") &&
       checkingFunction.includes("image_count_sent_to_model: modelInputMeta.visualImages.length") &&
+      checkingFunction.includes("easy_harness_run_checking_") &&
       envExample.includes("AI_DRAFT_ENABLE_ATTACHMENT_VISION=false") &&
       envExample.includes("AI_DRAFT_MAX_VISION_IMAGES=4")
   },
