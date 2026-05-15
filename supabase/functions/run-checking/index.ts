@@ -61,6 +61,22 @@ type DraftVisionImage = {
   signed_url: string;
 };
 
+type DraftVisionDiagnostics = {
+  attachment_vision_enabled: boolean;
+  vision_max_images: number;
+  image_attachment_count: number;
+  vision_not_image_count: number;
+  vision_missing_storage_count: number;
+  vision_storage_not_ready_count: number;
+  vision_signed_url_failed_count: number;
+  vision_skipped_after_limit_count: number;
+};
+
+type DraftVisionSelection = {
+  images: DraftVisionImage[];
+  diagnostics: DraftVisionDiagnostics;
+};
+
 type DraftStatus =
   | "not_harness_related"
   | "needs_harness_context"
@@ -1841,24 +1857,51 @@ async function createSignedAttachmentImageUrls(
   supabase: ReturnType<typeof createClient>,
   attachments: Array<AttachmentRow & { storage?: StorageRow }>,
 ) {
-  if (!attachmentVisionEnabled()) return [] as DraftVisionImage[];
-
+  const enabled = attachmentVisionEnabled();
   const maxImages = envNumber("AI_DRAFT_MAX_VISION_IMAGES", 4, 0, 12);
   const ttlSeconds = envNumber("AI_DRAFT_SIGNED_URL_TTL_SECONDS", 600, 60, 1800);
   const images: DraftVisionImage[] = [];
+  const diagnostics: DraftVisionDiagnostics = {
+    attachment_vision_enabled: enabled,
+    vision_max_images: maxImages,
+    image_attachment_count: 0,
+    vision_not_image_count: 0,
+    vision_missing_storage_count: 0,
+    vision_storage_not_ready_count: 0,
+    vision_signed_url_failed_count: 0,
+    vision_skipped_after_limit_count: 0,
+  };
+
+  if (!enabled) return { images, diagnostics } as DraftVisionSelection;
 
   for (const attachment of attachments) {
-    if (images.length >= maxImages) break;
-    if (!isImageAttachment(attachment)) continue;
+    if (!isImageAttachment(attachment)) {
+      diagnostics.vision_not_image_count += 1;
+      continue;
+    }
+    diagnostics.image_attachment_count += 1;
+    if (images.length >= maxImages) {
+      diagnostics.vision_skipped_after_limit_count += 1;
+      continue;
+    }
     const storage = attachment.storage;
-    if (!storage?.bucket || !storage.object_path) continue;
-    if (!["uploaded", "available"].includes(storage.status || "")) continue;
+    if (!storage?.bucket || !storage.object_path) {
+      diagnostics.vision_missing_storage_count += 1;
+      continue;
+    }
+    if (!["uploaded", "available"].includes(storage.status || "")) {
+      diagnostics.vision_storage_not_ready_count += 1;
+      continue;
+    }
 
     const { data, error } = await supabase.storage
       .from(storage.bucket)
       .createSignedUrl(storage.object_path, ttlSeconds);
 
-    if (error || !data?.signedUrl) continue;
+    if (error || !data?.signedUrl) {
+      diagnostics.vision_signed_url_failed_count += 1;
+      continue;
+    }
     images.push({
       filename: attachment.name,
       mime_type:
@@ -1869,7 +1912,7 @@ async function createSignedAttachmentImageUrls(
     });
   }
 
-  return images;
+  return { images, diagnostics };
 }
 
 function summarizeRequestForModel(
@@ -2269,6 +2312,16 @@ Deno.serve(async (request) => {
   const modelInputMeta = {
     attachmentVisionEnabled: attachmentVisionEnabled(),
     visualImages: [] as DraftVisionImage[],
+    visionDiagnostics: {
+      attachment_vision_enabled: attachmentVisionEnabled(),
+      vision_max_images: envNumber("AI_DRAFT_MAX_VISION_IMAGES", 4, 0, 12),
+      image_attachment_count: 0,
+      vision_not_image_count: 0,
+      vision_missing_storage_count: 0,
+      vision_storage_not_ready_count: 0,
+      vision_signed_url_failed_count: 0,
+      vision_skipped_after_limit_count: 0,
+    } as DraftVisionDiagnostics,
   };
 
   try {
@@ -2277,18 +2330,18 @@ Deno.serve(async (request) => {
       .update({ status: "checking", check_status: "pending" })
       .eq("id", requestRow.id);
 
-    modelInputMeta.visualImages = await createSignedAttachmentImageUrls(
+    const visionSelection = await createSignedAttachmentImageUrls(
       supabase,
       attachmentsWithStorage,
     );
+    modelInputMeta.visualImages = visionSelection.images;
+    modelInputMeta.visionDiagnostics = visionSelection.diagnostics;
     logCheckingEvent("started", {
       request_number: requestRow.request_number,
       trigger: payload.trigger || "manual",
       provider: selectedDraftProvider(),
       attachment_count: attachmentsWithStorage.length,
-      image_attachment_count: attachmentsWithStorage.filter(isImageAttachment)
-        .length,
-      attachment_vision_enabled: modelInputMeta.attachmentVisionEnabled,
+      ...modelInputMeta.visionDiagnostics,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
     });
     const modelInput = summarizeRequestForModel(
@@ -2321,7 +2374,7 @@ Deno.serve(async (request) => {
         request_number: requestRow.request_number,
         message_count: messages?.length || 0,
         attachment_count: attachments?.length || 0,
-        attachment_vision_enabled: modelInputMeta.attachmentVisionEnabled,
+        ...modelInputMeta.visionDiagnostics,
         image_count_sent_to_model: modelInputMeta.visualImages.length,
         image_files_sent_to_model: modelInputMeta.visualImages.map(
           (image) => image.filename,
@@ -2353,7 +2406,7 @@ Deno.serve(async (request) => {
       draft_status: draft.draft_meta.draft_status,
       provider,
       model,
-      attachment_vision_enabled: modelInputMeta.attachmentVisionEnabled,
+      ...modelInputMeta.visionDiagnostics,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
     });
 
@@ -2417,7 +2470,7 @@ Deno.serve(async (request) => {
     logCheckingEvent("fallback", {
       request_number: requestRow.request_number,
       error: message.slice(0, 500),
-      attachment_vision_enabled: modelInputMeta.attachmentVisionEnabled,
+      ...modelInputMeta.visionDiagnostics,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
     });
     await supabase.from("integration_events").insert({
@@ -2457,7 +2510,7 @@ Deno.serve(async (request) => {
         request_number: requestRow.request_number,
         message_count: messages?.length || 0,
         attachment_count: attachments?.length || 0,
-        attachment_vision_enabled: modelInputMeta.attachmentVisionEnabled,
+        ...modelInputMeta.visionDiagnostics,
         image_count_sent_to_model: modelInputMeta.visualImages.length,
         image_files_sent_to_model: modelInputMeta.visualImages.map(
           (image) => image.filename,

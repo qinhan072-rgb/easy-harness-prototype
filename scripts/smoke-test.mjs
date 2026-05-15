@@ -559,6 +559,9 @@ const checks = [
       checkingFunction.includes("image_url_sent_to_qwen") &&
       checkingFunction.includes("image_count_sent_to_model: modelInputMeta.visualImages.length") &&
       checkingFunction.includes("easy_harness_run_checking_") &&
+      checkingFunction.includes("vision_missing_storage_count") &&
+      checkingFunction.includes("vision_storage_not_ready_count") &&
+      checkingFunction.includes("vision_signed_url_failed_count") &&
       envExample.includes("AI_DRAFT_ENABLE_ATTACHMENT_VISION=false") &&
       envExample.includes("AI_DRAFT_MAX_VISION_IMAGES=4")
   },
