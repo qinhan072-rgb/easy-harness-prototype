@@ -8708,6 +8708,7 @@ function OrderWorkspace({
   const providerPending =
     order.paymentStatus === "payment_pending" && !marketplacePending;
   const paymentInProgress = transferPending || providerPending || marketplacePending;
+  const checkoutLocked = isPaid || paymentInProgress;
   const canPay = completeAddress && shipping && !isPaid && !paymentInProgress;
   const [showBusinessFields, setShowBusinessFields] = useState(
     Boolean(order.address.company || order.address.taxId),
@@ -8731,6 +8732,7 @@ function OrderWorkspace({
   }
 
   const updateAddress = (field, value) => {
+    if (checkoutLocked) return;
     updateOrder((current) => ({
       ...current,
       address: {
@@ -8742,6 +8744,7 @@ function OrderWorkspace({
   };
 
   const chooseShipping = (shippingId) => {
+    if (checkoutLocked) return;
     updateOrder((current) => ({
       ...current,
       selectedShippingId: shippingId,
@@ -8759,7 +8762,8 @@ function OrderWorkspace({
                 <span className="eyebrow">Order</span>
                 <h1>{isPaid ? "Order details" : "Order in preparation"}</h1>
                 <p>
-                  {order.id} from {order.requestId}. Review the confirmed harness quote, add delivery details, then choose how to complete payment.
+                  {order.id} from {order.requestId}. Review the confirmed
+                  harness quote, delivery basis, and payment path.
                 </p>
               </div>
               <StatusBadge status={order.status} />
@@ -8811,6 +8815,12 @@ function OrderWorkspace({
               <MapPin size={18} />
               <h2>Delivery information</h2>
             </div>
+            {checkoutLocked && (
+              <CheckoutLockedNotice
+                marketplace={marketplacePending}
+                provider={marketplacePaymentDetails(order).provider}
+              />
+            )}
             <div className="order-form-grid">
               <label className="field wide">
                 <span>Email</span>
@@ -8820,7 +8830,7 @@ function OrderWorkspace({
                     updateAddress("email", event.target.value)
                   }
                   placeholder="email@example.com"
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 />
               </label>
               <label className="field">
@@ -8831,7 +8841,7 @@ function OrderWorkspace({
                     updateAddress("name", event.target.value)
                   }
                   placeholder="Full name"
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 />
               </label>
               <label className="field">
@@ -8841,7 +8851,7 @@ function OrderWorkspace({
                   onChange={(event) =>
                     updateAddress("country", event.target.value)
                   }
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 >
                   <option value="">Select country</option>
                   {checkoutCountries.map((country) => (
@@ -8859,7 +8869,7 @@ function OrderWorkspace({
                     updateAddress("line1", event.target.value)
                   }
                   placeholder="Street address"
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 />
               </label>
               <label className="field wide">
@@ -8870,7 +8880,7 @@ function OrderWorkspace({
                     updateAddress("line2", event.target.value)
                   }
                   placeholder="Apartment, suite, building, floor"
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 />
               </label>
               <label className="field">
@@ -8881,7 +8891,7 @@ function OrderWorkspace({
                     updateAddress("city", event.target.value)
                   }
                   placeholder="City"
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 />
               </label>
               <label className="field">
@@ -8892,7 +8902,7 @@ function OrderWorkspace({
                     updateAddress("region", event.target.value)
                   }
                   placeholder="State or region"
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 />
               </label>
               <label className="field">
@@ -8903,7 +8913,7 @@ function OrderWorkspace({
                     updateAddress("postalCode", event.target.value)
                   }
                   placeholder="Postal code"
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 />
               </label>
               <label className="field">
@@ -8914,7 +8924,7 @@ function OrderWorkspace({
                     updateAddress("phone", event.target.value)
                   }
                   placeholder="Phone number"
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 />
               </label>
               <div className="business-toggle-row wide">
@@ -8922,7 +8932,7 @@ function OrderWorkspace({
                   className="secondary-action"
                   type="button"
                   onClick={() => setShowBusinessFields((current) => !current)}
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 >
                   {showBusinessFields
                     ? "Hide business import details"
@@ -8943,7 +8953,7 @@ function OrderWorkspace({
                         updateAddress("company", event.target.value)
                       }
                       placeholder="Company name"
-                      disabled={isPaid}
+                      disabled={checkoutLocked}
                     />
                   </label>
                   <label className="field">
@@ -8954,7 +8964,7 @@ function OrderWorkspace({
                         updateAddress("taxId", event.target.value)
                       }
                       placeholder="VAT, EORI, or local tax number"
-                      disabled={isPaid}
+                      disabled={checkoutLocked}
                     />
                   </label>
                 </>
@@ -8984,7 +8994,7 @@ function OrderWorkspace({
                   className={`shipping-option ${option.id === order.selectedShippingId ? "active" : ""}`}
                   key={option.id}
                   onClick={() => chooseShipping(option.id)}
-                  disabled={isPaid}
+                  disabled={checkoutLocked}
                 >
                   <span className="radio-dot" aria-hidden="true" />
                   <span>
@@ -9710,6 +9720,19 @@ function BankTransferInstructions({ order }) {
       </div>
       <p>
         {bankTransferDetails.memo} {bankTransferDetails.note}
+      </p>
+    </div>
+  );
+}
+
+function CheckoutLockedNotice({ marketplace = false, provider = "" }) {
+  return (
+    <div className="checkout-locked-notice">
+      <Lock size={15} />
+      <p>
+        {marketplace
+          ? `Delivery details and shipping are locked while Easy Harness prepares the ${provider || "marketplace"} checkout link. If something needs to change, message Easy Harness in this order.`
+          : "Delivery details and shipping are locked while payment is in progress. If something needs to change, message Easy Harness in this order."}
       </p>
     </div>
   );

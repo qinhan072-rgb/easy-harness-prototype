@@ -2752,6 +2752,31 @@ button:disabled {
   line-height: 1.4;
 }
 
+.checkout-locked-notice {
+  display: flex;
+  gap: 9px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid rgba(18, 153, 139, 0.18);
+  border-radius: 12px;
+  background: rgba(240, 253, 250, 0.72);
+  color: var(--text);
+}
+
+.checkout-locked-notice svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--teal);
+}
+
+.checkout-locked-notice p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .marketplace-wait-card {
   border-color: rgba(18, 153, 139, 0.24);
   background: linear-gradient(135deg, rgba(240, 253, 250, 0.92), rgba(255, 255, 255, 0.96));

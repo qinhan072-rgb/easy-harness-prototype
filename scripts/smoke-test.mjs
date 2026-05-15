@@ -242,7 +242,9 @@ const checks = [
       app.includes("marketplace_payment_requested") &&
       app.includes("Your protected marketplace checkout is ready") &&
       app.includes("MarketplaceWaitCard") &&
-      app.includes("You can leave this page and return to this order later")
+      app.includes("You can leave this page and return to this order later") &&
+      app.includes("CheckoutLockedNotice") &&
+      app.includes("Delivery details and shipping are locked while Easy Harness prepares")
   },
   {
     name: "payment uses provider session shape before confirmation",
