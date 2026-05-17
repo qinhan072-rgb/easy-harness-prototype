@@ -246,12 +246,17 @@ Current bridge:
   short-lived Supabase signed URLs when `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`.
 - `run-checking` now creates first-pass `attachment_observations`: text/CSV
   excerpts, CSV table samples, XLSX/XLSM sheet probes, lightweight PDF text
-  probes, Qwen image observations, and `parser_needed` markers.
+  probes, Qwen image observations, lightweight CAD metadata for STEP/STP, DXF,
+  OBJ, STL, and limited IGES, plus `parser_needed` markers.
+- `run-checking` now has an optional Qwen file-extract bridge for PDF, DOCX,
+  XLSX/XLSM, CSV, JSON, TXT/MD, EPUB/MOBI, and common image files that were not
+  already sent as image inputs. Enable with
+  `AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=true`.
 - This is the first intake understanding layer, not the full engineering
   file-understanding pipeline.
-- Scanned PDFs, complex Excel files, CAD geometry, OCR, catalog matching, and
-  manufacturing package generation still need stronger dedicated parsers before
-  the Agent may rely on those contents.
+- DWG/3MF/FCStd conversion, visual CAD rendering, drawing normalization, catalog
+  matching, and manufacturing package generation still need stronger dedicated
+  parsers before the Agent may rely on those contents.
 
 Likely files:
 

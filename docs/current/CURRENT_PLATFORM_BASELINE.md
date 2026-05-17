@@ -68,8 +68,18 @@ platform yet.
 - `run-checking` also probes common non-image files for Draft evidence: text and
   CSV files become excerpts/table samples/structured facts, small XLSX/XLSM
   workbooks become sheet table observations, and PDFs get a lightweight text
-  probe when readable text is present. Unsupported, oversized, encrypted, or CAD
-  files are marked `parser_needed` so the Agent does not invent file contents.
+  probe when readable text is present.
+- `run-checking` now has an optional Qwen file-extract bridge. When
+  `AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=true`, PDF, DOCX, XLSX/XLSM, CSV, JSON,
+  TXT/MD, EPUB/MOBI, and common image files that were not already sent as
+  `image_url` inputs can be uploaded to Qwen's file-extract path and returned as
+  model-produced attachment observations for the Draft Agent.
+- `run-checking` now has a lightweight CAD metadata probe for STEP/STP, DXF,
+  OBJ, STL, and limited IGES. It can extract file type, header/product hints,
+  layer/entity counts, vertex/face/triangle counts, sampled bounding boxes, and
+  unit hints when available. DWG, 3MF, FCStd, unsupported, oversized, or
+  encrypted files are marked `parser_needed` so the Agent does not invent file
+  contents.
 
 ## What Is Still Modeled, Not Live
 
@@ -81,8 +91,8 @@ platform yet.
 - DHL Express live rate calls.
 - DHL shipment creation, label, commercial invoice, pickup, and tracking.
 - Email and WhatsApp delivery provider calls.
-- Production-grade OCR and document extraction for scanned PDFs, complex Excel
-  workbooks, CAD geometry, drawings, and manufacturing packages. The current
+- Production-grade OCR/document extraction, visual CAD rendering, CAD geometry
+  conversion, drawing normalization, and manufacturing packages. The current
   attachment observations layer is an intake helper, not a complete engineering
   parser.
 - Production domain and production SMTP sender.

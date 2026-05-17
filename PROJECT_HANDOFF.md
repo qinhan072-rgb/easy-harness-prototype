@@ -80,8 +80,12 @@ Implemented:
   `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`.
 - First `attachment_observations` layer in `run-checking`: CSV/text excerpts,
   CSV table samples, XLSX/XLSM sheet probes, lightweight PDF text probes, Qwen
-  image-input observations, and `parser_needed` markers for unsupported or
+  image-input observations, lightweight CAD metadata for STEP/STP, DXF, OBJ,
+  STL, and limited IGES, plus `parser_needed` markers for unsupported or
   unparsed files.
+- Optional Qwen file-extract bridge for PDF, DOCX, XLSX/XLSM, CSV, JSON,
+  TXT/MD, EPUB/MOBI, and common image files that were not already sent as
+  `image_url` inputs. Enable with `AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=true`.
 
 Still not live:
 
@@ -98,9 +102,10 @@ Still not live:
   support contacts, final tax/duty handling, and operational acceptance by the
   business. Custom-order cancellation and after-sales/return rules now have a
   production-minded draft in the customer policy pages.
-- Deep AI engineering pipeline: production-grade OCR, CAD/PDF/Excel parsing,
-  richer vision extraction, Harness JSON, catalog matching, rule validation,
-  BOM/cut list/manufacturing package generation.
+- Deep AI engineering pipeline: production-grade OCR, visual CAD rendering,
+  richer CAD geometry conversion, drawing/document normalization, Harness JSON,
+  catalog matching, rule validation, BOM/cut list/manufacturing package
+  generation.
 
 ## AI Agent Baseline
 

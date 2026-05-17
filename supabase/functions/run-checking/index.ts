@@ -86,22 +86,29 @@ type AttachmentObservation = {
     | "csv_excerpt"
     | "pdf_text_probe"
     | "xlsx_table_probe"
+    | "qwen_file_extract"
+    | "cad_metadata_probe"
     | "parser_needed"
     | "storage_unavailable";
   status:
     | "vision_sent_to_model"
     | "text_extracted"
+    | "file_extracted"
+    | "metadata_extracted"
     | "parser_needed"
     | "storage_unavailable"
     | "not_supported_yet";
   evidence_kind:
     | "vision_model_input"
+    | "model_file_extract"
+    | "cad_metadata"
     | "parsed_text"
     | "metadata_with_pending_parser";
   summary: string;
   text_excerpt?: string;
   structured_facts?: Array<Record<string, unknown>>;
   tables?: Array<Record<string, unknown>>;
+  provider_file_id?: string;
   confidence: "model_observation" | "parsed" | "metadata_only";
 };
 
@@ -269,6 +276,14 @@ function attachmentVisionEnabled() {
   );
 }
 
+function qwenFileExtractEnabled() {
+  return (
+    selectedDraftProvider() === "qwen" &&
+    (envFlag("AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT") ||
+      envFlag("QWEN_ENABLE_FILE_EXTRACT"))
+  );
+}
+
 function isImageAttachment(attachment: AttachmentRow & { storage?: StorageRow }) {
   const mime = (attachment.mime_type || attachment.storage?.content_type || "")
     .toLowerCase()
@@ -319,6 +334,45 @@ function isSpreadsheetAttachment(attachment: AttachmentRow & { storage?: Storage
   );
 }
 
+function isOfficeDocumentAttachment(attachment: AttachmentRow & { storage?: StorageRow }) {
+  const name = (attachment.name || "").toLowerCase();
+  const mime = (attachment.mime_type || attachment.storage?.content_type || "")
+    .toLowerCase()
+    .trim();
+  return (
+    mime.includes("word") ||
+    mime.includes("officedocument") ||
+    /\.(docx|pptx|epub|mobi)$/i.test(name)
+  );
+}
+
+function isCadAttachment(attachment: AttachmentRow & { storage?: StorageRow }) {
+  const name = (attachment.name || "").toLowerCase();
+  const mime = (attachment.mime_type || attachment.storage?.content_type || "")
+    .toLowerCase()
+    .trim();
+  return (
+    mime.includes("cad") ||
+    mime.includes("iges") ||
+    mime.includes("step") ||
+    mime.includes("stl") ||
+    /\.(step|stp|igs|iges|dxf|dwg|stl|obj|3mf|amf|fcstd)$/i.test(name)
+  );
+}
+
+function isQwenFileExtractCandidate(attachment: AttachmentRow & { storage?: StorageRow }) {
+  const name = (attachment.name || "").toLowerCase();
+  return (
+    isImageAttachment(attachment) ||
+    isPlainTextAttachment(attachment) ||
+    isCsvAttachment(attachment) ||
+    isPdfAttachment(attachment) ||
+    isSpreadsheetAttachment(attachment) ||
+    isOfficeDocumentAttachment(attachment) ||
+    /\.(docx|pptx|epub|mobi)$/i.test(name)
+  );
+}
+
 function parserNeededLabel(attachment: AttachmentRow & { storage?: StorageRow }) {
   const name = (attachment.name || "").toLowerCase();
   const mime = (attachment.mime_type || attachment.storage?.content_type || "")
@@ -331,9 +385,18 @@ function parserNeededLabel(attachment: AttachmentRow & { storage?: StorageRow })
     /\.(xlsx?|xlsm)$/i.test(name)
   )
     return "spreadsheet parser";
-  if (/\.(step|stp|igs|iges|dxf|dwg|stl|obj)$/i.test(name))
+  if (isCadAttachment(attachment))
     return "CAD parser";
   return "file-specific parser";
+}
+
+function fileExtractParserNeededLabel(attachment: AttachmentRow & { storage?: StorageRow }) {
+  if (isPdfAttachment(attachment)) return "Qwen file-extract or PDF page-image pipeline";
+  if (isSpreadsheetAttachment(attachment)) return "Qwen file-extract or spreadsheet render pipeline";
+  if (isOfficeDocumentAttachment(attachment)) return "Qwen file-extract document pipeline";
+  if (isCadAttachment(attachment)) return "CAD preview/metadata conversion pipeline";
+  if (isImageAttachment(attachment)) return "vision/OCR model pipeline";
+  return parserNeededLabel(attachment);
 }
 
 function compactText(value = "", limit = 8000) {
@@ -491,6 +554,329 @@ function bytesToLatin1(bytes: Uint8Array) {
     chunks.push(String.fromCharCode(...bytes.slice(index, index + 8192)));
   }
   return chunks.join("");
+}
+
+function textFromBytes(bytes: Uint8Array, limit = 2000000) {
+  return new TextDecoder("utf-8", { fatal: false }).decode(
+    bytes.slice(0, Math.min(bytes.length, limit)),
+  );
+}
+
+function isMostlyTextBytes(bytes: Uint8Array) {
+  const sample = bytes.slice(0, Math.min(bytes.length, 8192));
+  if (!sample.length) return false;
+  let control = 0;
+  let zero = 0;
+  for (const byte of sample) {
+    if (byte === 0) zero += 1;
+    if (byte < 9 || (byte > 13 && byte < 32)) control += 1;
+  }
+  return zero / sample.length < 0.02 && control / sample.length < 0.08;
+}
+
+function cadExtension(name = "") {
+  const match = /\.([a-z0-9]+)$/i.exec(name);
+  return (match?.[1] || "").toLowerCase();
+}
+
+function pushUnique(target: string[], value = "", limit = 40) {
+  const clean = compactText(value, 500);
+  if (clean && !target.includes(clean) && target.length < limit) {
+    target.push(clean);
+  }
+}
+
+function numberValue(value = "") {
+  const number = Number(value.replace(/,/g, ""));
+  return Number.isFinite(number) ? number : null;
+}
+
+function boundsFromPoints(points: number[][]) {
+  const valid = points.filter((point) =>
+    point.length >= 3 && point.every((item) => Number.isFinite(item))
+  );
+  if (!valid.length) return null;
+  const min = [Infinity, Infinity, Infinity];
+  const max = [-Infinity, -Infinity, -Infinity];
+  for (const point of valid) {
+    for (let index = 0; index < 3; index += 1) {
+      min[index] = Math.min(min[index], point[index]);
+      max[index] = Math.max(max[index], point[index]);
+    }
+  }
+  return {
+    min,
+    max,
+    size: max.map((value, index) => Number((value - min[index]).toFixed(4))),
+  };
+}
+
+function topCounts(values: string[], limit = 20) {
+  const counts = new Map<string, number>();
+  for (const value of values) counts.set(value, (counts.get(value) || 0) + 1);
+  return [...counts.entries()]
+    .sort((first, second) => second[1] - first[1])
+    .slice(0, limit)
+    .map(([name, count]) => ({ name, count }));
+}
+
+function cadSummaryFromFacts(kind: string, facts: Array<Record<string, unknown>>) {
+  const bits: string[] = [`CAD ${kind.toUpperCase()} metadata extracted`];
+  const products = facts
+    .filter((item) => item.kind === "cad_product_name")
+    .map((item) => String(item.value || ""))
+    .filter(Boolean)
+    .slice(0, 3);
+  const bounds = facts.find((item) => item.kind === "cad_bounding_box");
+  const layers = facts.find((item) => item.kind === "cad_layers");
+  if (products.length) bits.push(`products: ${products.join(", ")}`);
+  if (bounds?.value && typeof bounds.value === "object") {
+    const value = bounds.value as Record<string, unknown>;
+    bits.push(`bounds size: ${JSON.stringify(value.size || value)}`);
+  }
+  if (Array.isArray(layers?.value)) {
+    bits.push(`layers: ${(layers.value as string[]).slice(0, 5).join(", ")}`);
+  }
+  return bits.join("; ");
+}
+
+function parseStepCad(text: string) {
+  const facts: Array<Record<string, unknown>> = [];
+  const productNames: string[] = [];
+  for (const match of text.matchAll(/\bPRODUCT\s*\(\s*'([^']*)'/gi)) {
+    pushUnique(productNames, match[1], 12);
+  }
+  for (const name of productNames) {
+    facts.push({ kind: "cad_product_name", value: name, source: "step_product" });
+  }
+  const fileName = /\bFILE_NAME\s*\(\s*'([^']*)'/i.exec(text)?.[1];
+  if (fileName) facts.push({ kind: "cad_file_name", value: fileName, source: "step_header" });
+  const schema = /\bFILE_SCHEMA\s*\(\s*\(\s*'([^']*)'/i.exec(text)?.[1];
+  if (schema) facts.push({ kind: "cad_schema", value: schema, source: "step_header" });
+
+  const entityTypes = [...text.matchAll(/#\d+\s*=\s*([A-Z0-9_]+)\s*\(/g)]
+    .map((match) => match[1]);
+  facts.push({
+    kind: "cad_entity_counts",
+    value: topCounts(entityTypes),
+    source: "step_entities",
+  });
+
+  if (/SI_UNIT\s*\([^)]*\.MILLI\./i.test(text)) {
+    facts.push({ kind: "cad_unit_hint", value: "millimetre", source: "step_si_unit" });
+  } else if (/SI_UNIT\s*\([^)]*\.METRE\./i.test(text)) {
+    facts.push({ kind: "cad_unit_hint", value: "metre", source: "step_si_unit" });
+  }
+
+  const points: number[][] = [];
+  for (const match of text.matchAll(/CARTESIAN_POINT\s*\([^)]*\(\s*([^)]+)\s*\)/gi)) {
+    const point = match[1].split(",").map((item) => Number(item.trim()));
+    if (point.length >= 3 && point.every(Number.isFinite)) points.push(point.slice(0, 3));
+    if (points.length >= 10000) break;
+  }
+  const bounds = boundsFromPoints(points);
+  if (bounds) facts.push({ kind: "cad_bounding_box", value: bounds, source: "step_cartesian_points" });
+  if (points.length) facts.push({ kind: "cad_point_count_sampled", value: points.length, source: "step_cartesian_points" });
+
+  return {
+    text: compactText(
+      [
+        fileName ? `STEP file: ${fileName}` : "",
+        schema ? `Schema: ${schema}` : "",
+        productNames.length ? `Products: ${productNames.join(", ")}` : "",
+      ].filter(Boolean).join("\n"),
+    ),
+    facts,
+  };
+}
+
+function parseObjCad(text: string) {
+  const facts: Array<Record<string, unknown>> = [];
+  const points: number[][] = [];
+  const objects: string[] = [];
+  const groups: string[] = [];
+  let faceCount = 0;
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (line.startsWith("v ")) {
+      const point = line.split(/\s+/).slice(1, 4).map(Number);
+      if (point.length === 3 && point.every(Number.isFinite)) points.push(point);
+    } else if (line.startsWith("f ")) {
+      faceCount += 1;
+    } else if (line.startsWith("o ")) {
+      pushUnique(objects, line.slice(2), 20);
+    } else if (line.startsWith("g ")) {
+      pushUnique(groups, line.slice(2), 20);
+    }
+  }
+  const bounds = boundsFromPoints(points);
+  if (bounds) facts.push({ kind: "cad_bounding_box", value: bounds, source: "obj_vertices" });
+  facts.push({ kind: "cad_vertex_count", value: points.length, source: "obj_vertices" });
+  facts.push({ kind: "cad_face_count", value: faceCount, source: "obj_faces" });
+  if (objects.length) facts.push({ kind: "cad_object_names", value: objects, source: "obj_objects" });
+  if (groups.length) facts.push({ kind: "cad_group_names", value: groups, source: "obj_groups" });
+  return {
+    text: compactText(`OBJ vertices: ${points.length}\nFaces: ${faceCount}\nObjects: ${objects.join(", ")}\nGroups: ${groups.join(", ")}`),
+    facts,
+  };
+}
+
+function parseTextStlCad(text: string) {
+  const points: number[][] = [];
+  for (const match of text.matchAll(/\bvertex\s+([+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s+([+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?)\s+([+-]?\d+(?:\.\d+)?(?:e[+-]?\d+)?)/gi)) {
+    points.push([Number(match[1]), Number(match[2]), Number(match[3])]);
+    if (points.length >= 30000) break;
+  }
+  const facetCount = (text.match(/\bfacet\s+normal\b/gi) || []).length;
+  const facts: Array<Record<string, unknown>> = [
+    { kind: "cad_triangle_count", value: facetCount, source: "stl_text" },
+    { kind: "cad_vertex_count_sampled", value: points.length, source: "stl_text" },
+  ];
+  const bounds = boundsFromPoints(points);
+  if (bounds) facts.push({ kind: "cad_bounding_box", value: bounds, source: "stl_text_vertices" });
+  return {
+    text: compactText(`ASCII STL facets: ${facetCount}\nVertices sampled: ${points.length}`),
+    facts,
+  };
+}
+
+function parseBinaryStlCad(bytes: Uint8Array) {
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const triangleCount = bytes.byteLength >= 84 ? view.getUint32(80, true) : 0;
+  const points: number[][] = [];
+  const maxTriangles = Math.min(triangleCount, 10000);
+  for (let triangle = 0; triangle < maxTriangles; triangle += 1) {
+    const base = 84 + triangle * 50;
+    if (base + 50 > bytes.byteLength) break;
+    for (let vertex = 0; vertex < 3; vertex += 1) {
+      const offset = base + 12 + vertex * 12;
+      points.push([
+        view.getFloat32(offset, true),
+        view.getFloat32(offset + 4, true),
+        view.getFloat32(offset + 8, true),
+      ]);
+    }
+  }
+  const facts: Array<Record<string, unknown>> = [
+    { kind: "cad_triangle_count", value: triangleCount, source: "stl_binary" },
+    { kind: "cad_vertex_count_sampled", value: points.length, source: "stl_binary" },
+  ];
+  const bounds = boundsFromPoints(points);
+  if (bounds) facts.push({ kind: "cad_bounding_box", value: bounds, source: "stl_binary_vertices" });
+  return {
+    text: compactText(`Binary STL triangles: ${triangleCount}\nVertices sampled: ${points.length}`),
+    facts,
+  };
+}
+
+function parseDxfCad(text: string) {
+  const lines = text.split(/\r?\n/).map((line) => line.trim());
+  const layers: string[] = [];
+  const entityTypes: string[] = [];
+  const points: number[][] = [];
+  let unitCode = "";
+  let currentX: number | null = null;
+  let currentY: number | null = null;
+  let currentZ: number | null = null;
+  const unitsByCode: Record<string, string> = {
+    "0": "unitless",
+    "1": "inches",
+    "2": "feet",
+    "4": "millimetres",
+    "5": "centimetres",
+    "6": "metres",
+  };
+
+  for (let index = 0; index < lines.length - 1; index += 2) {
+    const code = lines[index];
+    const value = lines[index + 1] || "";
+    if (code === "0" && /^[A-Z_][A-Z0-9_]*$/i.test(value)) entityTypes.push(value.toUpperCase());
+    if (code === "8") pushUnique(layers, value, 80);
+    if (value === "$INSUNITS") {
+      for (let lookahead = index + 2; lookahead < Math.min(lines.length - 1, index + 12); lookahead += 2) {
+        if (lines[lookahead] === "70") {
+          unitCode = lines[lookahead + 1] || "";
+          break;
+        }
+      }
+    }
+    if (code === "10") currentX = numberValue(value);
+    if (code === "20") currentY = numberValue(value);
+    if (code === "30") {
+      currentZ = numberValue(value);
+      if (currentX !== null && currentY !== null && currentZ !== null) {
+        points.push([currentX, currentY, currentZ]);
+        currentX = null;
+        currentY = null;
+        currentZ = null;
+      }
+    }
+    if (points.length >= 20000) break;
+  }
+
+  const facts: Array<Record<string, unknown>> = [
+    { kind: "cad_entity_counts", value: topCounts(entityTypes), source: "dxf_entities" },
+  ];
+  if (layers.length) facts.push({ kind: "cad_layers", value: layers, source: "dxf_layers" });
+  if (unitCode) facts.push({ kind: "cad_unit_hint", value: unitsByCode[unitCode] || `INSUNITS ${unitCode}`, source: "dxf_insunits" });
+  const bounds = boundsFromPoints(points);
+  if (bounds) facts.push({ kind: "cad_bounding_box", value: bounds, source: "dxf_points" });
+  if (points.length) facts.push({ kind: "cad_point_count_sampled", value: points.length, source: "dxf_points" });
+  return {
+    text: compactText(`DXF layers: ${layers.join(", ")}\nUnits: ${unitCode ? unitsByCode[unitCode] || unitCode : "unknown"}\nEntities: ${JSON.stringify(topCounts(entityTypes, 10))}`),
+    facts,
+  };
+}
+
+function parseIgesCad(text: string) {
+  const facts: Array<Record<string, unknown>> = [];
+  const globalLine = text.split(/\r?\n/).find((line) => /G\s*\d*\s*$/.test(line)) || "";
+  const entityTypes = [...text.matchAll(/^\s*\d+\s+(\d+)\s+/gm)].map((match) => match[1]);
+  if (entityTypes.length) {
+    facts.push({ kind: "cad_entity_counts", value: topCounts(entityTypes), source: "iges_directory" });
+  }
+  if (globalLine) facts.push({ kind: "cad_global_section_hint", value: compactText(globalLine, 1000), source: "iges_global" });
+  return {
+    text: compactText(`IGES entity types: ${JSON.stringify(topCounts(entityTypes, 10))}\n${globalLine}`),
+    facts,
+  };
+}
+
+function extractCadMetadata(bytes: Uint8Array, attachment: AttachmentRow & { storage?: StorageRow }) {
+  const extension = cadExtension(attachment.name);
+  const kind = extension || "cad";
+  if (["dwg", "3mf", "fcstd"].includes(extension)) return null;
+
+  let parsed: { text: string; facts: Array<Record<string, unknown>> } | null = null;
+  const canReadText = isMostlyTextBytes(bytes);
+  const text = canReadText ? textFromBytes(bytes) : "";
+
+  if (["step", "stp"].includes(extension) && text) parsed = parseStepCad(text);
+  else if (extension === "dxf" && text) parsed = parseDxfCad(text);
+  else if (["igs", "iges"].includes(extension) && text) parsed = parseIgesCad(text);
+  else if (extension === "obj" && text) parsed = parseObjCad(text);
+  else if (extension === "stl") {
+    parsed = text.trim().toLowerCase().startsWith("solid")
+      ? parseTextStlCad(text)
+      : parseBinaryStlCad(bytes);
+  } else if (text) {
+    parsed = {
+      text: compactText(text),
+      facts: extractTextFacts(text),
+    };
+  }
+
+  if (!parsed || (!parsed.text && !parsed.facts.length)) return null;
+  const facts = [
+    { kind: "cad_file_type", value: kind.toUpperCase(), source: "filename_extension" },
+    { kind: "cad_file_size_bytes", value: bytes.byteLength, source: "storage_object" },
+    ...parsed.facts,
+  ];
+  return {
+    text: parsed.text,
+    facts,
+    summary: cadSummaryFromFacts(kind, facts),
+  };
 }
 
 function unescapePdfString(value = "") {
@@ -712,6 +1098,184 @@ async function extractXlsxTables(bytes: Uint8Array) {
     tables,
     facts: facts.slice(0, 80),
   };
+}
+
+function sleep(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds));
+}
+
+function safeArrayOfRecords(value: unknown, limit = 80) {
+  return Array.isArray(value)
+    ? value
+        .filter((item) => item && typeof item === "object" && !Array.isArray(item))
+        .slice(0, limit) as Array<Record<string, unknown>>
+    : [];
+}
+
+function safeText(value: unknown, limit = 8000) {
+  return typeof value === "string" ? compactText(value, limit) : "";
+}
+
+function normalizeQwenFileExtractResult(
+  raw: unknown,
+  fallbackFilename: string,
+) {
+  const value =
+    raw && typeof raw === "object" && !Array.isArray(raw)
+      ? raw as Record<string, unknown>
+      : {};
+  const textExcerpt = safeText(
+    value.text_excerpt || value.visible_text || value.extracted_text || "",
+  );
+  const tables = safeArrayOfRecords(value.tables, 20);
+  const facts = safeArrayOfRecords(value.structured_facts, 120);
+  return {
+    filename: safeText(value.filename, 500) || fallbackFilename,
+    summary:
+      safeText(value.summary, 1200) ||
+      "Qwen file-extract returned document observations for Draft intake.",
+    text_excerpt: textExcerpt,
+    structured_facts: facts.length ? facts : extractTextFacts(textExcerpt),
+    tables,
+  };
+}
+
+async function uploadQwenFileForExtract(
+  bytes: Uint8Array,
+  filename: string,
+  mimeType: string,
+) {
+  const { apiKey, baseUrl } = draftModelConfig();
+  const form = new FormData();
+  const fileBuffer = bytes.buffer.slice(
+    bytes.byteOffset,
+    bytes.byteOffset + bytes.byteLength,
+  ) as ArrayBuffer;
+  form.append("purpose", "file-extract");
+  form.append(
+    "file",
+    new Blob([fileBuffer], { type: mimeType || "application/octet-stream" }),
+    filename || "attachment",
+  );
+
+  const response = await fetch(`${baseUrl}/files`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${apiKey}` },
+    body: form,
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(`Qwen file upload failed (${response.status}): ${raw.slice(0, 400)}`);
+  }
+  const parsed = JSON.parse(raw);
+  if (!parsed?.id) throw new Error("Qwen file upload did not return a file id.");
+  return String(parsed.id);
+}
+
+async function waitForQwenFileReady(fileId: string) {
+  const { apiKey, baseUrl } = draftModelConfig();
+  const attempts = envNumber("AI_DRAFT_QWEN_FILE_EXTRACT_POLL_ATTEMPTS", 8, 1, 30);
+  const intervalMs = envNumber("AI_DRAFT_QWEN_FILE_EXTRACT_POLL_INTERVAL_MS", 750, 100, 5000);
+
+  for (let attempt = 0; attempt < attempts; attempt += 1) {
+    const response = await fetch(`${baseUrl}/files/${fileId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    });
+    if (!response.ok) return;
+    const data = await response.json();
+    const status = String(data?.status || "").toLowerCase();
+    if (!status || ["processed", "ready", "uploaded", "available", "ok"].includes(status)) return;
+    if (["failed", "error", "cancelled", "canceled"].includes(status)) {
+      throw new Error(`Qwen file ${fileId} processing failed with status ${status}.`);
+    }
+    await sleep(intervalMs);
+  }
+}
+
+async function callQwenFileExtractModel(fileId: string, filename: string, mimeType: string) {
+  const { apiKey, baseUrl } = draftModelConfig();
+  const model = Deno.env.get("QWEN_FILE_EXTRACT_MODEL") || "qwen-long";
+  const maxTokens = envNumber("QWEN_FILE_EXTRACT_MAX_TOKENS", 5000, 1000, 12000);
+  const prompt = [
+    "Extract Easy Harness request evidence from the attached customer file.",
+    "Return JSON only with these keys:",
+    "filename, summary, text_excerpt, structured_facts, tables, uncertainties.",
+    "Focus on visible or extracted evidence relevant to a custom wiring harness: connector labels/models, pin numbers, pinout rows, wire colors, wire gauge, lengths, quantity, voltage/current, BOM/part rows, dimensions, notes, title blocks, and unclear items.",
+    "Do not invent missing engineering facts. If a table, drawing, scan, photo, or handwriting is unclear, record an uncertainty instead of guessing.",
+    `File name: ${filename}`,
+    `MIME type: ${mimeType}`,
+  ].join("\n");
+
+  const response = await fetch(`${baseUrl}/chat/completions`, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      model,
+      stream: false,
+      max_tokens: maxTokens,
+      messages: [
+        {
+          role: "system",
+          content:
+            "You are Easy Harness File Understanding Agent. You inspect only the attached file and produce structured observations for the Draft Agent.",
+        },
+        {
+          role: "system",
+          content: `fileid://${fileId}`,
+        },
+        {
+          role: "user",
+          content: prompt,
+        },
+      ],
+    }),
+  });
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(`Qwen file extract failed (${response.status}): ${raw.slice(0, 500)}`);
+  }
+  const data = JSON.parse(raw);
+  const content = data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error("Qwen file extract returned an empty result.");
+  return normalizeQwenFileExtractResult(
+    JSON.parse(extractJsonObject(content)),
+    filename,
+  );
+}
+
+async function buildQwenFileExtractObservation(
+  attachment: AttachmentRow & { storage?: StorageRow },
+  bytes: Uint8Array,
+) {
+  const storage = attachment.storage;
+  const mimeType =
+    attachment.mime_type ||
+    storage?.content_type ||
+    "application/octet-stream";
+  const fileId = await uploadQwenFileForExtract(bytes, attachment.name, mimeType);
+  await waitForQwenFileReady(fileId);
+  const extracted = await callQwenFileExtractModel(
+    fileId,
+    attachment.name,
+    mimeType,
+  );
+
+  return {
+    filename: attachment.name,
+    mime_type: mimeType,
+    parser: "qwen_file_extract",
+    status: "file_extracted",
+    evidence_kind: "model_file_extract",
+    summary: extracted.summary,
+    text_excerpt: extracted.text_excerpt,
+    structured_facts: extracted.structured_facts,
+    tables: extracted.tables,
+    provider_file_id: fileId,
+    confidence: "model_observation",
+  } as AttachmentObservation;
 }
 
 function logCheckingEvent(event: string, payload: Record<string, unknown>) {
@@ -2393,7 +2957,26 @@ async function buildAttachmentObservations(
     0,
     5000000,
   );
+  const maxQwenExtractBytes = envNumber(
+    "AI_DRAFT_QWEN_FILE_EXTRACT_MAX_BYTES",
+    10000000,
+    0,
+    50000000,
+  );
+  const maxQwenExtractFiles = envNumber(
+    "AI_DRAFT_QWEN_FILE_EXTRACT_MAX_FILES",
+    4,
+    0,
+    12,
+  );
+  const maxCadMetadataBytes = envNumber(
+    "AI_DRAFT_CAD_METADATA_MAX_BYTES",
+    10000000,
+    0,
+    50000000,
+  );
   const observations: AttachmentObservation[] = [];
+  let qwenExtractedCount = 0;
 
   for (const attachment of attachments) {
     const storage = attachment.storage;
@@ -2444,15 +3027,62 @@ async function buildAttachmentObservations(
     }
 
     const sizeBytes = Number(attachment.size_bytes || storage.size_bytes || 0);
+    let cachedBlob: Blob | null = null;
+    let cachedBytes: Uint8Array | null = null;
+    const downloadBlob = async () => {
+      if (cachedBlob) return cachedBlob;
+      const { data, error } = await supabase.storage
+        .from(storage.bucket)
+        .download(storage.object_path);
+      if (error || !data) return null;
+      cachedBlob = data;
+      return cachedBlob;
+    };
+    const downloadBytes = async () => {
+      if (cachedBytes) return cachedBytes;
+      const blob = await downloadBlob();
+      if (!blob) return null;
+      cachedBytes = new Uint8Array(await blob.arrayBuffer());
+      return cachedBytes;
+    };
+    const canUseQwenFileExtract =
+      qwenFileExtractEnabled() &&
+      qwenExtractedCount < maxQwenExtractFiles &&
+      sizeBytes <= maxQwenExtractBytes &&
+      isQwenFileExtractCandidate(attachment);
+    const preferLocalTextParser =
+      isPlainTextAttachment(attachment) || isCsvAttachment(attachment);
+
+    if (canUseQwenFileExtract && !preferLocalTextParser) {
+      try {
+        const bytes = await downloadBytes();
+        if (bytes) {
+          const observation = await buildQwenFileExtractObservation(
+            attachment,
+            bytes,
+          );
+          observations.push(observation);
+          qwenExtractedCount += 1;
+          continue;
+        }
+      } catch (error) {
+        logCheckingEvent("file_extract_failed", {
+          filename: attachment.name,
+          mime_type: attachment.mime_type || storage.content_type || "",
+          error:
+            error instanceof Error
+              ? error.message.slice(0, 500)
+              : "Unknown Qwen file-extract error",
+        });
+      }
+    }
 
     if (
       (isPlainTextAttachment(attachment) || isCsvAttachment(attachment)) &&
       sizeBytes <= maxTextBytes
     ) {
-      const { data, error } = await supabase.storage
-        .from(storage.bucket)
-        .download(storage.object_path);
-      if (!error && data) {
+      const data = await downloadBlob();
+      if (data) {
         const rawText = await data.text();
         const text = compactText(rawText);
         const rows = isCsvAttachment(attachment)
@@ -2484,13 +3114,9 @@ async function buildAttachmentObservations(
     }
 
     if (isPdfAttachment(attachment) && sizeBytes <= maxStructuredBytes) {
-      const { data, error } = await supabase.storage
-        .from(storage.bucket)
-        .download(storage.object_path);
-      if (!error && data) {
-        const text = extractPdfTextProbe(
-          new Uint8Array(await data.arrayBuffer()),
-        );
+      const bytes = await downloadBytes();
+      if (bytes) {
+        const text = extractPdfTextProbe(bytes);
         if (text) {
           observations.push({
             ...base,
@@ -2509,14 +3135,10 @@ async function buildAttachmentObservations(
     }
 
     if (isSpreadsheetAttachment(attachment) && sizeBytes <= maxStructuredBytes) {
-      const { data, error } = await supabase.storage
-        .from(storage.bucket)
-        .download(storage.object_path);
-      if (!error && data) {
+      const bytes = await downloadBytes();
+      if (bytes) {
         try {
-          const parsed = await extractXlsxTables(
-            new Uint8Array(await data.arrayBuffer()),
-          );
+          const parsed = await extractXlsxTables(bytes);
           if (parsed.tables.length || parsed.text) {
             observations.push({
               ...base,
@@ -2541,12 +3163,56 @@ async function buildAttachmentObservations(
       }
     }
 
+    if (canUseQwenFileExtract && preferLocalTextParser) {
+      try {
+        const bytes = await downloadBytes();
+        if (bytes) {
+          const observation = await buildQwenFileExtractObservation(
+            attachment,
+            bytes,
+          );
+          observations.push(observation);
+          qwenExtractedCount += 1;
+          continue;
+        }
+      } catch (error) {
+        logCheckingEvent("file_extract_failed", {
+          filename: attachment.name,
+          mime_type: attachment.mime_type || storage.content_type || "",
+          error:
+            error instanceof Error
+              ? error.message.slice(0, 500)
+              : "Unknown Qwen file-extract error",
+        });
+      }
+    }
+
+    if (isCadAttachment(attachment) && sizeBytes <= maxCadMetadataBytes) {
+      const bytes = await downloadBytes();
+      if (bytes) {
+        const cad = extractCadMetadata(bytes, attachment);
+        if (cad) {
+          observations.push({
+            ...base,
+            parser: "cad_metadata_probe",
+            status: "metadata_extracted",
+            evidence_kind: "cad_metadata",
+            summary: cad.summary,
+            text_excerpt: cad.text,
+            structured_facts: cad.facts,
+            confidence: "parsed",
+          });
+          continue;
+        }
+      }
+    }
+
     observations.push({
       ...base,
       parser: "parser_needed",
       status: "parser_needed",
       evidence_kind: "metadata_with_pending_parser",
-      summary: `${parserNeededLabel(attachment)} is needed before Easy Harness can rely on this file's contents.`,
+      summary: `${fileExtractParserNeededLabel(attachment)} is needed before Easy Harness can rely on this file's contents.`,
       confidence: "metadata_only",
     });
   }
@@ -2562,6 +3228,9 @@ function summarizeRequestForModel(
   attachmentObservations: AttachmentObservation[] = [],
 ) {
   const visualFilenames = new Set(visualImages.map((image) => image.filename));
+  const observationByFilename = new Map(
+    attachmentObservations.map((item) => [item.filename, item]),
+  );
   return JSON.stringify(
     {
       request: {
@@ -2578,11 +3247,12 @@ function summarizeRequestForModel(
       })),
       attachment_observation_context: {
         qwen_vision_enabled: attachmentVisionEnabled(),
+        qwen_file_extract_enabled: qwenFileExtractEnabled(),
         image_count_sent_to_model: visualImages.length,
         image_files_sent_to_model: visualImages.map((image) => image.filename),
         boundary: visualImages.length
-          ? "Selected image attachments are provided to the draft model as image_url inputs. These images may be used only as model-visible visual observations with partial confidence unless the customer text confirms the same detail. Non-image files may be used only when attachment_observations contains parsed text or structured facts."
-          : "No image pixels are provided to the draft model. Non-image files may be used only when attachment_observations contains parsed text or structured facts.",
+          ? "Selected image attachments are provided to the draft model as image_url inputs. These images may be used only as model-visible visual observations with partial confidence unless the customer text confirms the same detail. Non-image files may be used only when attachment_observations contains parsed text, Qwen file-extract observations, CAD metadata, tables, or structured facts."
+          : "No image pixels are provided to the draft model. Files may be used only when attachment_observations contains parsed text, Qwen file-extract observations, CAD metadata, tables, or structured facts.",
       },
       attachment_observations: attachmentObservations,
       attachments: attachments.map((attachment) => ({
@@ -2594,11 +3264,19 @@ function summarizeRequestForModel(
         model_input:
           visualFilenames.has(attachment.name) && attachmentVisionEnabled()
             ? "image_url_sent_to_qwen"
+            : ["file_extracted", "text_extracted", "metadata_extracted"].includes(
+                observationByFilename.get(attachment.name)?.status || "",
+              )
+              ? "attachment_observation_sent_to_draft_agent"
             : "metadata_only",
         evidence_boundary:
           visualFilenames.has(attachment.name) && attachmentVisionEnabled()
             ? "This image is visible to the Qwen draft model. Treat visual details as model observations, not confirmed manufacturing facts."
-            : "This intake run receives attachment metadata for this file only. It does not receive reliable image pixels, PDF text, spreadsheet rows, CAD geometry, OCR, or visual observations for this file unless structured observations appear explicitly in the request context.",
+            : ["file_extracted", "text_extracted", "metadata_extracted"].includes(
+                observationByFilename.get(attachment.name)?.status || "",
+              )
+              ? "This file contributed structured attachment_observations for the Draft Agent. Treat extracted details as model/parsed/CAD metadata observations, not confirmed manufacturing facts."
+              : "This intake run receives attachment metadata for this file only. It does not receive reliable image pixels, PDF text, spreadsheet rows, CAD geometry, OCR, or visual observations for this file unless structured observations appear explicitly in the request context.",
       })),
     },
     null,
@@ -2677,7 +3355,7 @@ async function callDraftModel(
   const jsonShape = JSON.stringify(draftSchema, null, 2);
   const visualEvidenceInstruction = visualImages.length
     ? "Evidence boundary: this intake run includes conversation text, attachment metadata, selected image files as model-visible image_url inputs, and attachment_observations. You may use image observations and parsed attachment observations, but mark them as partial/model/parsed evidence unless corroborated by customer text. Do not claim PDF, Excel, CAD, hidden label, pinout, or document contents unless those details are explicitly present in text or attachment_observations."
-    : "Evidence boundary: this intake run receives conversation text, attachment metadata, and any parser-produced attachment_observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, or document contents from attachments unless those details are explicitly present in text or attachment_observations.";
+    : "Evidence boundary: this intake run receives conversation text, attachment metadata, and any parser-produced attachment_observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, CAD geometry, or document contents from attachments unless those details are explicitly present in text or attachment_observations.";
   const userContent =
     provider === "qwen" && visualImages.length
       ? [
@@ -2735,7 +3413,7 @@ async function callDraftModel(
             visualImages.length
               ? "If photos are sent as image inputs, you may reference clear visible observations cautiously. Never turn visual observations into production facts; connector selection, pinout, wire colors, dimensions, and layout still require Easy Harness review unless the customer text confirms them."
               : "If files are attached but attachment_observations says parser_needed or storage_unavailable, treat them as received evidence for Easy Harness review. Do not phrase review items as if this run already inspected those contents.",
-            "Use attachment_observations as the structured file-understanding layer. Observations with status text_extracted or vision_sent_to_model may inform known_requirements, provided_evidence, captured_professional_details, and unknowns. CSV rows, spreadsheet tables, PDF text probes, text excerpts, and structured_facts may be used as parsed evidence. Observations with parser_needed or storage_unavailable may only support 'files received' and Easy Harness review items, not file-content claims.",
+            "Use attachment_observations as the structured file-understanding layer. Observations with status text_extracted, file_extracted, metadata_extracted, or vision_sent_to_model may inform known_requirements, provided_evidence, captured_professional_details, and unknowns. Qwen file-extract observations, CSV rows, spreadsheet tables, PDF text probes, CAD metadata, text excerpts, and structured_facts may be used as parsed/model evidence. Observations with parser_needed or storage_unavailable may only support 'files received' and Easy Harness review items, not file-content claims.",
             "General Draft gate: close the draft when connection goal, endpoints or samples/photos, use/function, quantity or approximate quantity, length or measurement basis, environment/use context, and critical safety info are sufficient. Remaining professional unknowns should move to Easy Harness review or supplier/manufacturing confirmation.",
             "Do not close the draft when there is no harness/cable connection goal, the user only asks whether an unrelated file is ok, Easy Harness cannot tell what should be built, or a power-carrying harness lacks basic voltage/current/power and no safe approximation is possible.",
             "For power-carrying requests, voltage and expected current or power are functional/safety basics. Ask one concise question only when the whole request indicates a real power-carrying load and the customer is likely to know an approximate answer. Do not ask because a single word appeared.",
@@ -2777,6 +3455,31 @@ async function callDraftModel(
     usage: data?.usage || null,
     draft: normalizeDraft(parsed, provider, model, trigger),
   };
+}
+
+function parsedAttachmentObservationCount(observations: AttachmentObservation[]) {
+  return observations.filter((item) =>
+    [
+      "text_extracted",
+      "file_extracted",
+      "metadata_extracted",
+      "vision_sent_to_model",
+    ].includes(
+      item.status,
+    )
+  ).length;
+}
+
+function qwenFileExtractObservationCount(observations: AttachmentObservation[]) {
+  return observations.filter((item) => item.parser === "qwen_file_extract").length;
+}
+
+function cadMetadataObservationCount(observations: AttachmentObservation[]) {
+  return observations.filter((item) => item.parser === "cad_metadata_probe").length;
+}
+
+function parserNeededObservationCount(observations: AttachmentObservation[]) {
+  return observations.filter((item) => item.status === "parser_needed").length;
 }
 
 Deno.serve(async (request) => {
@@ -2953,6 +3656,7 @@ Deno.serve(async (request) => {
   }));
   const modelInputMeta = {
     attachmentVisionEnabled: attachmentVisionEnabled(),
+    qwenFileExtractEnabled: qwenFileExtractEnabled(),
     visualImages: [] as DraftVisionImage[],
     attachmentObservations: [] as AttachmentObservation[],
     visionDiagnostics: {
@@ -2990,15 +3694,22 @@ Deno.serve(async (request) => {
       provider: selectedDraftProvider(),
       attachment_count: attachmentsWithStorage.length,
       ...modelInputMeta.visionDiagnostics,
+      qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
       attachment_observation_count:
         modelInputMeta.attachmentObservations.length,
-      parsed_attachment_count: modelInputMeta.attachmentObservations.filter(
-        (item) => item.status === "text_extracted",
-      ).length,
-      parser_needed_count: modelInputMeta.attachmentObservations.filter(
-        (item) => item.status === "parser_needed",
-      ).length,
+      parsed_attachment_count: parsedAttachmentObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
+      qwen_file_extract_count: qwenFileExtractObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
+      cad_metadata_count: cadMetadataObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
+      parser_needed_count: parserNeededObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
     });
     const modelInput = summarizeRequestForModel(
       requestRow,
@@ -3032,18 +3743,25 @@ Deno.serve(async (request) => {
         message_count: messages?.length || 0,
         attachment_count: attachments?.length || 0,
         ...modelInputMeta.visionDiagnostics,
+        qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
         image_count_sent_to_model: modelInputMeta.visualImages.length,
         image_files_sent_to_model: modelInputMeta.visualImages.map(
           (image) => image.filename,
         ),
         attachment_observation_count:
           modelInputMeta.attachmentObservations.length,
-        parsed_attachment_count: modelInputMeta.attachmentObservations.filter(
-          (item) => item.status === "text_extracted",
-        ).length,
-        parser_needed_count: modelInputMeta.attachmentObservations.filter(
-          (item) => item.status === "parser_needed",
-        ).length,
+        parsed_attachment_count: parsedAttachmentObservationCount(
+          modelInputMeta.attachmentObservations,
+        ),
+        qwen_file_extract_count: qwenFileExtractObservationCount(
+          modelInputMeta.attachmentObservations,
+        ),
+        cad_metadata_count: cadMetadataObservationCount(
+          modelInputMeta.attachmentObservations,
+        ),
+        parser_needed_count: parserNeededObservationCount(
+          modelInputMeta.attachmentObservations,
+        ),
       },
       attachment_observations: modelInputMeta.attachmentObservations,
     });
@@ -3073,9 +3791,16 @@ Deno.serve(async (request) => {
       provider,
       model,
       ...modelInputMeta.visionDiagnostics,
+      qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
       attachment_observation_count:
         modelInputMeta.attachmentObservations.length,
+      qwen_file_extract_count: qwenFileExtractObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
+      cad_metadata_count: cadMetadataObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
     });
 
     const { data: latestRows } = await supabase
@@ -3139,6 +3864,7 @@ Deno.serve(async (request) => {
       request_number: requestRow.request_number,
       error: message.slice(0, 500),
       ...modelInputMeta.visionDiagnostics,
+      qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
       attachment_observation_count:
         modelInputMeta.attachmentObservations.length,
@@ -3181,18 +3907,25 @@ Deno.serve(async (request) => {
         message_count: messages?.length || 0,
         attachment_count: attachments?.length || 0,
         ...modelInputMeta.visionDiagnostics,
+        qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
         image_count_sent_to_model: modelInputMeta.visualImages.length,
         image_files_sent_to_model: modelInputMeta.visualImages.map(
           (image) => image.filename,
         ),
         attachment_observation_count:
           modelInputMeta.attachmentObservations.length,
-        parsed_attachment_count: modelInputMeta.attachmentObservations.filter(
-          (item) => item.status === "text_extracted",
-        ).length,
-        parser_needed_count: modelInputMeta.attachmentObservations.filter(
-          (item) => item.status === "parser_needed",
-        ).length,
+        parsed_attachment_count: parsedAttachmentObservationCount(
+          modelInputMeta.attachmentObservations,
+        ),
+        qwen_file_extract_count: qwenFileExtractObservationCount(
+          modelInputMeta.attachmentObservations,
+        ),
+        cad_metadata_count: cadMetadataObservationCount(
+          modelInputMeta.attachmentObservations,
+        ),
+        parser_needed_count: parserNeededObservationCount(
+          modelInputMeta.attachmentObservations,
+        ),
       },
       attachment_observations: modelInputMeta.attachmentObservations,
       agent_runtime: {

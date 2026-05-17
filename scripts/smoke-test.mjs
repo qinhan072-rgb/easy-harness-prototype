@@ -581,12 +581,29 @@ const checks = [
       checkingFunction.includes("parseDelimitedRows") &&
       checkingFunction.includes("extractPdfTextProbe") &&
       checkingFunction.includes("extractXlsxTables") &&
+      checkingFunction.includes("buildQwenFileExtractObservation") &&
+      checkingFunction.includes("uploadQwenFileForExtract") &&
+      checkingFunction.includes("fileid://") &&
+      checkingFunction.includes("qwen_file_extract") &&
+      checkingFunction.includes("extractCadMetadata") &&
+      checkingFunction.includes("cad_metadata_probe") &&
+      checkingFunction.includes("parseStepCad") &&
+      checkingFunction.includes("parseDxfCad") &&
+      checkingFunction.includes("parseBinaryStlCad") &&
       checkingFunction.includes("structured_facts") &&
       checkingFunction.includes("parser_needed_count") &&
+      checkingFunction.includes("qwen_file_extract_count") &&
+      checkingFunction.includes("cad_metadata_count") &&
       checkingFunction.includes("AI_DRAFT_TEXT_ATTACHMENT_MAX_BYTES") &&
       checkingFunction.includes("AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES") &&
+      checkingFunction.includes("AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT") &&
+      checkingFunction.includes("AI_DRAFT_QWEN_FILE_EXTRACT_MAX_FILES") &&
+      checkingFunction.includes("AI_DRAFT_CAD_METADATA_MAX_BYTES") &&
       envExample.includes("AI_DRAFT_TEXT_ATTACHMENT_MAX_BYTES=200000") &&
-      envExample.includes("AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES=2000000")
+      envExample.includes("AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES=2000000") &&
+      envExample.includes("AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=false") &&
+      envExample.includes("QWEN_FILE_EXTRACT_MODEL=qwen-long") &&
+      envExample.includes("AI_DRAFT_CAD_METADATA_MAX_BYTES=10000000")
   },
   {
     name: "ai agent does not title requests from one keyword",
