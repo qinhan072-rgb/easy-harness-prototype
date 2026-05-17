@@ -1,6 +1,6 @@
 # Current Platform Baseline
 
-Last reviewed: 2026-05-13
+Last reviewed: 2026-05-17
 
 ## Stage
 
@@ -48,20 +48,28 @@ platform yet.
 - Customer-facing legal and trade policy pages now exist for Terms, Privacy,
   Upload Authorization, Quote and Custom Order Terms, Shipping/Duties/Regions,
   and After-sales Support.
+- Custom-order cancellation and after-sales copy now states the made-to-order
+  boundary: cancellation before production may be possible, production-started
+  custom harnesses generally are not returnable without Easy Harness error,
+  verified quality issue, or mismatch with the confirmed order basis, and
+  returns require authorization.
 - Registration, upload, quote confirmation, order payment preparation, DAP
   shipping, and after-sales support now link to those policies with lightweight
   customer-facing copy.
 - `run-checking` Edge Function exists for AI intake and Easy Harness Draft
   generation. It can run through Qwen or DeepSeek; Qwen is the recommended
   first live provider for the next deployment pass.
-- AI intake currently receives customer text, conversation history, and
-  attachment metadata. It does not yet receive reliable visual/OCR/document
-  observations from uploaded files.
-- `run-checking` now has an optional Qwen image-input path. When
+- AI intake receives customer text, conversation history, attachment metadata,
+  and an internal `attachment_observations` layer.
+- `run-checking` has an optional Qwen image-input path. When
   `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`, it can send selected uploaded image
   attachments to Qwen through short-lived Supabase signed URLs and records how
-  many images were sent. This is off by default and does not cover PDF, Excel,
-  CSV, or CAD parsing.
+  many images were sent.
+- `run-checking` also probes common non-image files for Draft evidence: text and
+  CSV files become excerpts/table samples/structured facts, small XLSX/XLSM
+  workbooks become sheet table observations, and PDFs get a lightweight text
+  probe when readable text is present. Unsupported, oversized, encrypted, or CAD
+  files are marked `parser_needed` so the Agent does not invent file contents.
 
 ## What Is Still Modeled, Not Live
 
@@ -73,12 +81,14 @@ platform yet.
 - DHL Express live rate calls.
 - DHL shipment creation, label, commercial invoice, pickup, and tracking.
 - Email and WhatsApp delivery provider calls.
-- Full document extraction from PDF/Excel/CAD files. The UI can preview or
-  frame files; it does not yet parse these documents into structured harness
-  evidence for the AI Agent.
+- Production-grade OCR and document extraction for scanned PDFs, complex Excel
+  workbooks, CAD geometry, drawings, and manufacturing packages. The current
+  attachment observations layer is an intake helper, not a complete engineering
+  parser.
 - Production domain and production SMTP sender.
 - Final company review of legal entity details, official address, support email,
-  governing law, refund handling, and any country-specific trading terms.
+  governing law, refund handling implementation, and any country-specific
+  trading terms.
 - Full AI engineering pipeline for file parsing, vision extraction, Harness
   JSON, catalog matching, rule validation, and production package generation.
 
@@ -105,8 +115,8 @@ Current Agent rules:
 - Keywords are evidence, not workflow triggers.
 - The Agent should not become a fixed questionnaire.
 - The Agent may refuse to close Draft when the connection goal is not clear.
-- The Agent must not claim to visually inspect files unless a separate
-  vision/OCR/document parser provides that evidence.
+- The Agent must not claim to visually inspect or parse files unless Qwen image
+  input or `attachment_observations` provides that evidence for the current run.
 - Model provider is an adapter choice. The platform contract stays the Easy
   Harness Draft, whether the runtime model is Qwen, DeepSeek, or another
   compatible provider.

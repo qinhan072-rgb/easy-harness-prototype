@@ -22,19 +22,32 @@ QWEN_MAX_TOKENS=12000
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=false
 AI_DRAFT_MAX_VISION_IMAGES=4
 AI_DRAFT_SIGNED_URL_TTL_SECONDS=600
+AI_DRAFT_TEXT_ATTACHMENT_MAX_BYTES=200000
+AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES=2000000
 ```
 
 `QWEN_MODEL` can be changed later without changing frontend code. Keep the
 Draft Agent contract stable even when testing another model.
 
-## Optional Image Understanding
+## Attachment Observations
 
 Qwen 3.6 can accept image input through DashScope's OpenAI-compatible chat API,
 but Easy Harness only gets that benefit if the Edge Function explicitly sends
 the uploaded image files to the model.
 
-By default, uploaded files remain metadata-only for the Draft Agent. To enable
-image attachment understanding for `run-checking`, set:
+`run-checking` now builds an internal `attachment_observations` layer before
+calling the Draft Agent:
+
+- Image files can be sent to Qwen as `image_url` inputs when vision is enabled.
+- CSV and text files can be downloaded from Supabase Storage and converted into
+  text excerpts, table samples, and structured facts.
+- Small XLSX/XLSM files can be probed for sheet rows and table-like evidence.
+- PDF files get a lightweight text probe when readable text is present.
+- CAD files and unsupported or oversized files are classified as
+  `parser_needed`; the Agent may treat them as received files but must not claim
+  their contents were inspected.
+
+To enable image attachment understanding for `run-checking`, set:
 
 ```text
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=true
@@ -42,11 +55,17 @@ AI_DRAFT_ENABLE_ATTACHMENT_VISION=true
 
 When enabled, `run-checking` creates short-lived Supabase signed URLs for up to
 `AI_DRAFT_MAX_VISION_IMAGES` image attachments and includes them as Qwen
-`image_url` inputs. Non-image files still remain metadata-only until a separate
-OCR/PDF/CSV/Excel/CAD parser produces structured attachment observations.
+`image_url` inputs. Text/CSV/PDF/XLSX observations are controlled by:
 
-Keep this off until the business has confirmed that uploaded customer images may
-be sent to the selected AI provider for intake processing.
+```text
+AI_DRAFT_TEXT_ATTACHMENT_MAX_BYTES=200000
+AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES=2000000
+```
+
+Before enabling image vision in production, internally confirm provider terms,
+privacy/upload authorization language, and customer-file handling policy. This
+is an internal deployment check; do not expose implementation details in the
+customer conversation.
 
 Use the base URL that matches the Qwen API key region:
 

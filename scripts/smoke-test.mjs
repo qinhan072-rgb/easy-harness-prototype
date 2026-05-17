@@ -272,6 +272,8 @@ const checks = [
     name: "order page includes after-sales policy",
     pass: app.includes("After-sales support") &&
       app.includes("Custom-made harnesses are covered") &&
+      app.includes("Visible delivery or assembly issues should normally be reported within 14 days") &&
+      app.includes("Return authorization") &&
       app.includes("After-sales and Support Policy")
   },
   {
@@ -572,6 +574,21 @@ const checks = [
       envExample.includes("AI_DRAFT_MAX_VISION_IMAGES=4")
   },
   {
+    name: "ai draft builds structured attachment observations",
+    pass: checkingFunction.includes("type AttachmentObservation") &&
+      checkingFunction.includes("buildAttachmentObservations") &&
+      checkingFunction.includes("attachment_observations") &&
+      checkingFunction.includes("parseDelimitedRows") &&
+      checkingFunction.includes("extractPdfTextProbe") &&
+      checkingFunction.includes("extractXlsxTables") &&
+      checkingFunction.includes("structured_facts") &&
+      checkingFunction.includes("parser_needed_count") &&
+      checkingFunction.includes("AI_DRAFT_TEXT_ATTACHMENT_MAX_BYTES") &&
+      checkingFunction.includes("AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES") &&
+      envExample.includes("AI_DRAFT_TEXT_ATTACHMENT_MAX_BYTES=200000") &&
+      envExample.includes("AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES=2000000")
+  },
+  {
     name: "ai agent does not title requests from one keyword",
     pass: !app.includes('if (value.includes("battery")) return "Battery Pack Adapter Harness"') &&
       app.includes("firstLine") &&
@@ -579,7 +596,8 @@ const checks = [
   },
   {
     name: "ai agent softens file-review claims",
-    pass: checkingFunction.includes("Do not phrase review items as if this run already inspected the image") &&
+    pass: checkingFunction.includes("Do not phrase review items as if this run already inspected those contents") &&
+      checkingFunction.includes("not file-content claims") &&
       checkingFunction.includes("Inspect uploaded files during Easy Harness review before relying on connector")
   },
   {
@@ -597,8 +615,9 @@ const checks = [
         aiAgentPrinciples.includes("不能假装已经看懂图片")
       )
     ) &&
-      checkingFunction.includes("Evidence boundary: this intake run receives attachment metadata") &&
-      checkingFunction.includes("Do not claim to visually identify connector models")
+      checkingFunction.includes("Evidence boundary: this intake run receives conversation text, attachment metadata, and any parser-produced attachment_observations") &&
+      checkingFunction.includes("Do not claim to visually identify connector models") &&
+      checkingFunction.includes("unless those details are explicitly present in text or attachment_observations")
   },
   {
     name: "ai agent can refuse unsafe draft closure",

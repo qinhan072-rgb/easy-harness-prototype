@@ -77,6 +77,34 @@ type DraftVisionSelection = {
   diagnostics: DraftVisionDiagnostics;
 };
 
+type AttachmentObservation = {
+  filename: string;
+  mime_type: string;
+  parser:
+    | "qwen_vision_image"
+    | "text_excerpt"
+    | "csv_excerpt"
+    | "pdf_text_probe"
+    | "xlsx_table_probe"
+    | "parser_needed"
+    | "storage_unavailable";
+  status:
+    | "vision_sent_to_model"
+    | "text_extracted"
+    | "parser_needed"
+    | "storage_unavailable"
+    | "not_supported_yet";
+  evidence_kind:
+    | "vision_model_input"
+    | "parsed_text"
+    | "metadata_with_pending_parser";
+  summary: string;
+  text_excerpt?: string;
+  structured_facts?: Array<Record<string, unknown>>;
+  tables?: Array<Record<string, unknown>>;
+  confidence: "model_observation" | "parsed" | "metadata_only";
+};
+
 type DraftStatus =
   | "not_harness_related"
   | "needs_harness_context"
@@ -249,6 +277,441 @@ function isImageAttachment(attachment: AttachmentRow & { storage?: StorageRow })
     mime.startsWith("image/") ||
     /\.(png|jpe?g|webp|gif|bmp)$/i.test(attachment.name || "")
   );
+}
+
+function isPlainTextAttachment(attachment: AttachmentRow & { storage?: StorageRow }) {
+  const name = (attachment.name || "").toLowerCase();
+  const mime = (attachment.mime_type || attachment.storage?.content_type || "")
+    .toLowerCase()
+    .trim();
+  return (
+    mime.startsWith("text/") ||
+    mime.includes("json") ||
+    /\.(txt|md|json|log)$/i.test(name)
+  );
+}
+
+function isCsvAttachment(attachment: AttachmentRow & { storage?: StorageRow }) {
+  const name = (attachment.name || "").toLowerCase();
+  const mime = (attachment.mime_type || attachment.storage?.content_type || "")
+    .toLowerCase()
+    .trim();
+  return mime.includes("csv") || /\.csv$/i.test(name);
+}
+
+function isPdfAttachment(attachment: AttachmentRow & { storage?: StorageRow }) {
+  const name = (attachment.name || "").toLowerCase();
+  const mime = (attachment.mime_type || attachment.storage?.content_type || "")
+    .toLowerCase()
+    .trim();
+  return mime.includes("pdf") || /\.pdf$/i.test(name);
+}
+
+function isSpreadsheetAttachment(attachment: AttachmentRow & { storage?: StorageRow }) {
+  const name = (attachment.name || "").toLowerCase();
+  const mime = (attachment.mime_type || attachment.storage?.content_type || "")
+    .toLowerCase()
+    .trim();
+  return (
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    /\.(xlsx|xlsm)$/i.test(name)
+  );
+}
+
+function parserNeededLabel(attachment: AttachmentRow & { storage?: StorageRow }) {
+  const name = (attachment.name || "").toLowerCase();
+  const mime = (attachment.mime_type || attachment.storage?.content_type || "")
+    .toLowerCase()
+    .trim();
+  if (mime.includes("pdf") || /\.pdf$/i.test(name)) return "PDF text/OCR parser";
+  if (
+    mime.includes("spreadsheet") ||
+    mime.includes("excel") ||
+    /\.(xlsx?|xlsm)$/i.test(name)
+  )
+    return "spreadsheet parser";
+  if (/\.(step|stp|igs|iges|dxf|dwg|stl|obj)$/i.test(name))
+    return "CAD parser";
+  return "file-specific parser";
+}
+
+function compactText(value = "", limit = 8000) {
+  return value.replace(/\s+/g, " ").trim().slice(0, limit);
+}
+
+function xmlDecode(value = "") {
+  return value
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;/g, "'");
+}
+
+function extractTextFacts(text = "") {
+  const facts: Array<Record<string, unknown>> = [];
+  const patterns: Array<[string, RegExp]> = [
+    ["quantity", /\b\d+\s*(pcs?|pieces?|units?|sets?|pairs?)\b/gi],
+    ["length", /\b\d+(?:\.\d+)?\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/gi],
+    ["voltage", /\b\d+(?:\.\d+)?\s*(v|volt|volts)\b/gi],
+    ["current", /\b\d+(?:\.\d+)?\s*(a|amp|amps)\b/gi],
+    ["connector_or_part", /\b[A-Z]{1,6}[-_]?\d{2,}[A-Z0-9_-]*\b/g],
+    ["pin_assignment", /\bpin\s*\d{1,3}\s*(?:[:=\-]|\s+)\s*[A-Za-z0-9+/_\- ]{1,40}/gi],
+  ];
+  for (const [kind, pattern] of patterns) {
+    const matches = [...text.matchAll(pattern)]
+      .map((match) => match[0].trim())
+      .filter(Boolean)
+      .slice(0, 12);
+    for (const value of matches) facts.push({ kind, value, source: "attachment_text" });
+  }
+  return facts.slice(0, 40);
+}
+
+function parseDelimitedRows(text = "", maxRows = 80, maxColumns = 30) {
+  const sample = text.slice(0, 4000);
+  const commaCount = (sample.match(/,/g) || []).length;
+  const tabCount = (sample.match(/\t/g) || []).length;
+  const delimiter = tabCount > commaCount ? "\t" : ",";
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cell = "";
+  let inQuotes = false;
+
+  for (let index = 0; index < text.length && rows.length < maxRows; index += 1) {
+    const char = text[index];
+    if (inQuotes) {
+      if (char === '"' && text[index + 1] === '"') {
+        cell += '"';
+        index += 1;
+      } else if (char === '"') {
+        inQuotes = false;
+      } else {
+        cell += char;
+      }
+      continue;
+    }
+    if (char === '"') {
+      inQuotes = true;
+    } else if (char === delimiter) {
+      row.push(compactText(cell, 500));
+      cell = "";
+    } else if (char === "\n") {
+      row.push(compactText(cell, 500));
+      rows.push(row.slice(0, maxColumns));
+      row = [];
+      cell = "";
+    } else if (char !== "\r") {
+      cell += char;
+    }
+  }
+
+  if (cell || row.length) {
+    row.push(compactText(cell, 500));
+    rows.push(row.slice(0, maxColumns));
+  }
+
+  return rows.filter((item) => item.some(Boolean));
+}
+
+function tableSummary(
+  rows: string[][],
+  source: string,
+  sheetName = "Table",
+): Record<string, unknown> | null {
+  if (!rows.length) return null;
+  const headers = rows[0].map((item, index) => item || `column_${index + 1}`);
+  const sampleRows = rows.slice(1, 8).map((row) =>
+    headers.reduce((memo, header, index) => {
+      if (row[index]) memo[header] = row[index];
+      return memo;
+    }, {} as Record<string, string>)
+  );
+  return {
+    source,
+    sheet_name: sheetName,
+    row_count: Math.max(rows.length - 1, 0),
+    column_count: Math.max(...rows.map((row) => row.length)),
+    headers: headers.slice(0, 30),
+    sample_rows: sampleRows,
+  };
+}
+
+function extractTableFacts(rows: string[][], source: string) {
+  if (rows.length < 2) return [];
+  const headers = rows[0].map((item) => item.toLowerCase().trim());
+  const findColumn = (...needles: string[]) =>
+    headers.findIndex((header) => needles.some((needle) => header.includes(needle)));
+  const pinColumn = findColumn("pin", "cavity", "position");
+  const signalColumn = findColumn("signal", "function", "circuit");
+  const colorColumn = findColumn("color", "colour");
+  const fromColumn = findColumn("from", "end a", "connector a");
+  const toColumn = findColumn("to", "end b", "connector b");
+  const partColumn = findColumn("part", "connector", "terminal", "sku", "mpn");
+  const quantityColumn = findColumn("qty", "quantity");
+  const facts: Array<Record<string, unknown>> = [];
+
+  for (const [rowIndex, row] of rows.slice(1, 41).entries()) {
+    const columns: Record<string, string> = {};
+    for (const index of [
+      pinColumn,
+      signalColumn,
+      colorColumn,
+      fromColumn,
+      toColumn,
+      partColumn,
+      quantityColumn,
+    ]) {
+      if (index >= 0 && row[index]) columns[rows[0][index] || `column_${index + 1}`] = row[index];
+    }
+    if (pinColumn >= 0 && Object.keys(columns).length) {
+      facts.push({
+        kind: "pinout_table_row",
+        source,
+        row_index: rowIndex + 2,
+        columns,
+      });
+    } else if ((partColumn >= 0 || quantityColumn >= 0) && Object.keys(columns).length) {
+      facts.push({
+        kind: "bom_or_parts_table_row",
+        source,
+        row_index: rowIndex + 2,
+        columns,
+      });
+    }
+  }
+
+  return facts.slice(0, 40);
+}
+
+function bytesToLatin1(bytes: Uint8Array) {
+  const chunks: string[] = [];
+  for (let index = 0; index < bytes.length; index += 8192) {
+    chunks.push(String.fromCharCode(...bytes.slice(index, index + 8192)));
+  }
+  return chunks.join("");
+}
+
+function unescapePdfString(value = "") {
+  return value
+    .replace(/\\([nrtbf()\\])/g, (_match, char) => {
+      const map: Record<string, string> = {
+        n: " ",
+        r: " ",
+        t: " ",
+        b: " ",
+        f: " ",
+        "(": "(",
+        ")": ")",
+        "\\": "\\",
+      };
+      return map[char] || char;
+    })
+    .replace(/\\[0-7]{1,3}/g, " ")
+    .trim();
+}
+
+function extractPdfTextProbe(bytes: Uint8Array) {
+  const raw = bytesToLatin1(bytes);
+  const snippets: string[] = [];
+  const literalText = /\((?:\\.|[^\\)]){2,300}\)\s*Tj/g;
+  const arrayText = /\[((?:\s*\((?:\\.|[^\\)]){1,300}\)\s*){1,80})\]\s*TJ/g;
+  const clean = (value: string) => compactText(unescapePdfString(value), 500);
+
+  for (const match of raw.matchAll(literalText)) {
+    const inner = match[0].replace(/\)\s*Tj\s*$/, "").slice(1);
+    const text = clean(inner);
+    if (/[A-Za-z0-9]/.test(text)) snippets.push(text);
+    if (snippets.length >= 80) break;
+  }
+  for (const match of raw.matchAll(arrayText)) {
+    const pieces = [...match[1].matchAll(/\((?:\\.|[^\\)]){1,300}\)/g)]
+      .map((piece) => clean(piece[0].slice(1, -1)))
+      .filter(Boolean);
+    const text = compactText(pieces.join(" "), 1000);
+    if (/[A-Za-z0-9]/.test(text)) snippets.push(text);
+    if (snippets.length >= 100) break;
+  }
+
+  return compactText([...new Set(snippets)].join(" "), 8000);
+}
+
+function readU16(bytes: Uint8Array, offset: number) {
+  return bytes[offset] | (bytes[offset + 1] << 8);
+}
+
+function readU32(bytes: Uint8Array, offset: number) {
+  return (
+    bytes[offset] |
+    (bytes[offset + 1] << 8) |
+    (bytes[offset + 2] << 16) |
+    (bytes[offset + 3] << 24)
+  ) >>> 0;
+}
+
+type ZipEntry = {
+  name: string;
+  method: number;
+  compressedSize: number;
+  localHeaderOffset: number;
+};
+
+function listZipEntries(bytes: Uint8Array) {
+  const minOffset = Math.max(0, bytes.length - 66000);
+  let eocdOffset = -1;
+  for (let offset = bytes.length - 22; offset >= minOffset; offset -= 1) {
+    if (readU32(bytes, offset) === 0x06054b50) {
+      eocdOffset = offset;
+      break;
+    }
+  }
+  if (eocdOffset < 0) throw new Error("ZIP end record not found.");
+
+  const entryCount = readU16(bytes, eocdOffset + 10);
+  let offset = readU32(bytes, eocdOffset + 16);
+  const entries: ZipEntry[] = [];
+  for (let index = 0; index < entryCount; index += 1) {
+    if (readU32(bytes, offset) !== 0x02014b50) break;
+    const method = readU16(bytes, offset + 10);
+    const compressedSize = readU32(bytes, offset + 20);
+    const nameLength = readU16(bytes, offset + 28);
+    const extraLength = readU16(bytes, offset + 30);
+    const commentLength = readU16(bytes, offset + 32);
+    const localHeaderOffset = readU32(bytes, offset + 42);
+    const name = new TextDecoder().decode(bytes.slice(offset + 46, offset + 46 + nameLength));
+    entries.push({ name, method, compressedSize, localHeaderOffset });
+    offset += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
+
+async function readZipEntry(bytes: Uint8Array, entry: ZipEntry) {
+  const offset = entry.localHeaderOffset;
+  if (readU32(bytes, offset) !== 0x04034b50) {
+    throw new Error(`Invalid local ZIP header for ${entry.name}.`);
+  }
+  const nameLength = readU16(bytes, offset + 26);
+  const extraLength = readU16(bytes, offset + 28);
+  const start = offset + 30 + nameLength + extraLength;
+  const compressed = bytes.slice(start, start + entry.compressedSize);
+  if (entry.method === 0) return compressed;
+  if (entry.method !== 8) throw new Error(`Unsupported ZIP compression method ${entry.method}.`);
+  const stream = new Blob([compressed]).stream().pipeThrough(new DecompressionStream("deflate-raw"));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+function xmlAttr(tag: string, name: string) {
+  const match = new RegExp(`\\b${name}=["']([^"']*)["']`).exec(tag);
+  return match ? xmlDecode(match[1]) : "";
+}
+
+function xlsxSheetPath(target = "") {
+  const clean = target.replace(/^\/+/, "").replace(/^\.\//, "");
+  if (clean.startsWith("xl/")) return clean;
+  return `xl/${clean}`;
+}
+
+function columnIndexFromRef(ref = "") {
+  const letters = ref.replace(/[^A-Z]/gi, "").toUpperCase();
+  let value = 0;
+  for (const char of letters) value = value * 26 + char.charCodeAt(0) - 64;
+  return Math.max(value - 1, 0);
+}
+
+function extractSharedStrings(xml = "") {
+  const values: string[] = [];
+  for (const match of xml.matchAll(/<si\b[\s\S]*?<\/si>/g)) {
+    const pieces = [...match[0].matchAll(/<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/g)]
+      .map((item) => xmlDecode(item[1]))
+      .join("");
+    values.push(compactText(pieces, 1000));
+  }
+  return values;
+}
+
+function parseWorksheetRows(xml = "", sharedStrings: string[] = []) {
+  const rows: string[][] = [];
+  for (const rowMatch of xml.matchAll(/<row\b[^>]*>([\s\S]*?)<\/row>/g)) {
+    const cells: string[] = [];
+    for (const cellMatch of rowMatch[1].matchAll(/<c\b([^>]*)>([\s\S]*?)<\/c>/g)) {
+      const attrs = cellMatch[1];
+      const body = cellMatch[2];
+      const ref = xmlAttr(attrs, "r");
+      const type = xmlAttr(attrs, "t");
+      const column = columnIndexFromRef(ref);
+      const rawValue = /<v>([\s\S]*?)<\/v>/.exec(body)?.[1] || "";
+      const inlineValue = /<t(?:\s[^>]*)?>([\s\S]*?)<\/t>/.exec(body)?.[1] || "";
+      let value = "";
+      if (type === "s") value = sharedStrings[Number(rawValue)] || "";
+      else if (type === "inlineStr") value = xmlDecode(inlineValue);
+      else value = xmlDecode(rawValue);
+      if (value) cells[column] = compactText(value, 500);
+    }
+    if (cells.some(Boolean)) rows.push(cells);
+    if (rows.length >= 80) break;
+  }
+  return rows;
+}
+
+async function extractXlsxTables(bytes: Uint8Array) {
+  const entries = listZipEntries(bytes);
+  const byName = new Map(entries.map((entry) => [entry.name, entry]));
+  const entryText = async (name: string) => {
+    const entry = byName.get(name);
+    if (!entry) return "";
+    return new TextDecoder().decode(await readZipEntry(bytes, entry));
+  };
+  const sharedStrings = extractSharedStrings(await entryText("xl/sharedStrings.xml"));
+  const workbookXml = await entryText("xl/workbook.xml");
+  const relsXml = await entryText("xl/_rels/workbook.xml.rels");
+  const relTargets = new Map<string, string>();
+  for (const rel of relsXml.matchAll(/<Relationship\b[^>]*>/g)) {
+    const tag = rel[0];
+    const id = xmlAttr(tag, "Id");
+    const target = xmlAttr(tag, "Target");
+    if (id && target) relTargets.set(id, xlsxSheetPath(target));
+  }
+
+  const sheets: Array<{ name: string; path: string }> = [];
+  for (const sheet of workbookXml.matchAll(/<sheet\b[^>]*>/g)) {
+    const tag = sheet[0];
+    const name = xmlAttr(tag, "name") || `Sheet ${sheets.length + 1}`;
+    const relId = xmlAttr(tag, "r:id");
+    const path = relTargets.get(relId) || `xl/worksheets/sheet${sheets.length + 1}.xml`;
+    sheets.push({ name, path });
+  }
+  if (!sheets.length) {
+    for (const entry of entries.filter((item) => /^xl\/worksheets\/sheet\d+\.xml$/i.test(item.name)).slice(0, 5)) {
+      sheets.push({ name: entry.name.replace(/^.*\/|\.xml$/g, ""), path: entry.name });
+    }
+  }
+
+  const tables: Array<Record<string, unknown>> = [];
+  const facts: Array<Record<string, unknown>> = [];
+  const textParts: string[] = [];
+  for (const sheet of sheets.slice(0, 5)) {
+    const xml = await entryText(sheet.path);
+    if (!xml) continue;
+    const rows = parseWorksheetRows(xml, sharedStrings);
+    const summary = tableSummary(rows, "attachment_xlsx", sheet.name);
+    if (!summary) continue;
+    tables.push(summary);
+    facts.push(...extractTableFacts(rows, `attachment_xlsx:${sheet.name}`));
+    textParts.push(
+      rows
+        .slice(0, 20)
+        .map((row) => row.filter(Boolean).join(" | "))
+        .filter(Boolean)
+        .join("\n"),
+    );
+  }
+
+  return {
+    text: compactText(textParts.filter(Boolean).join("\n"), 8000),
+    tables,
+    facts: facts.slice(0, 80),
+  };
 }
 
 function logCheckingEvent(event: string, payload: Record<string, unknown>) {
@@ -1917,11 +2380,186 @@ async function createSignedAttachmentImageUrls(
   return { images, diagnostics };
 }
 
+async function buildAttachmentObservations(
+  supabase: ReturnType<typeof createClient>,
+  attachments: Array<AttachmentRow & { storage?: StorageRow }>,
+  visualImages: DraftVisionImage[],
+) {
+  const visualFilenames = new Set(visualImages.map((image) => image.filename));
+  const maxTextBytes = envNumber("AI_DRAFT_TEXT_ATTACHMENT_MAX_BYTES", 200000, 0, 1000000);
+  const maxStructuredBytes = envNumber(
+    "AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES",
+    2000000,
+    0,
+    5000000,
+  );
+  const observations: AttachmentObservation[] = [];
+
+  for (const attachment of attachments) {
+    const storage = attachment.storage;
+    const base = {
+      filename: attachment.name,
+      mime_type:
+        attachment.mime_type ||
+        storage?.content_type ||
+        "application/octet-stream",
+    };
+
+    if (visualFilenames.has(attachment.name)) {
+      observations.push({
+        ...base,
+        parser: "qwen_vision_image",
+        status: "vision_sent_to_model",
+        evidence_kind: "vision_model_input",
+        summary:
+          "Image was sent to Qwen as a vision input for request understanding.",
+        confidence: "model_observation",
+      });
+      continue;
+    }
+
+    if (!storage?.bucket || !storage.object_path) {
+      observations.push({
+        ...base,
+        parser: "storage_unavailable",
+        status: "storage_unavailable",
+        evidence_kind: "metadata_with_pending_parser",
+        summary:
+          "Attachment metadata exists, but no storage object path is available for parsing.",
+        confidence: "metadata_only",
+      });
+      continue;
+    }
+
+    if (!["uploaded", "available"].includes(storage.status || "")) {
+      observations.push({
+        ...base,
+        parser: "storage_unavailable",
+        status: "storage_unavailable",
+        evidence_kind: "metadata_with_pending_parser",
+        summary: `Attachment storage status is ${storage.status || "unknown"}; parsing did not run.`,
+        confidence: "metadata_only",
+      });
+      continue;
+    }
+
+    const sizeBytes = Number(attachment.size_bytes || storage.size_bytes || 0);
+
+    if (
+      (isPlainTextAttachment(attachment) || isCsvAttachment(attachment)) &&
+      sizeBytes <= maxTextBytes
+    ) {
+      const { data, error } = await supabase.storage
+        .from(storage.bucket)
+        .download(storage.object_path);
+      if (!error && data) {
+        const rawText = await data.text();
+        const text = compactText(rawText);
+        const rows = isCsvAttachment(attachment)
+          ? parseDelimitedRows(rawText)
+          : [];
+        const table = rows.length
+          ? tableSummary(rows, "attachment_csv", attachment.name)
+          : null;
+        observations.push({
+          ...base,
+          parser: isCsvAttachment(attachment) ? "csv_excerpt" : "text_excerpt",
+          status: "text_extracted",
+          evidence_kind: "parsed_text",
+          summary: text
+            ? rows.length
+              ? "CSV/text content was extracted as table evidence for Draft intake."
+              : "Text content was extracted for Draft intake."
+            : "Text parser ran but no readable text was extracted.",
+          text_excerpt: text,
+          structured_facts: [
+            ...extractTextFacts(text),
+            ...extractTableFacts(rows, "attachment_csv"),
+          ].slice(0, 80),
+          tables: table ? [table] : [],
+          confidence: "parsed",
+        });
+        continue;
+      }
+    }
+
+    if (isPdfAttachment(attachment) && sizeBytes <= maxStructuredBytes) {
+      const { data, error } = await supabase.storage
+        .from(storage.bucket)
+        .download(storage.object_path);
+      if (!error && data) {
+        const text = extractPdfTextProbe(
+          new Uint8Array(await data.arrayBuffer()),
+        );
+        if (text) {
+          observations.push({
+            ...base,
+            parser: "pdf_text_probe",
+            status: "text_extracted",
+            evidence_kind: "parsed_text",
+            summary:
+              "Readable PDF text was extracted with a lightweight text probe for Draft intake.",
+            text_excerpt: text,
+            structured_facts: extractTextFacts(text),
+            confidence: "parsed",
+          });
+          continue;
+        }
+      }
+    }
+
+    if (isSpreadsheetAttachment(attachment) && sizeBytes <= maxStructuredBytes) {
+      const { data, error } = await supabase.storage
+        .from(storage.bucket)
+        .download(storage.object_path);
+      if (!error && data) {
+        try {
+          const parsed = await extractXlsxTables(
+            new Uint8Array(await data.arrayBuffer()),
+          );
+          if (parsed.tables.length || parsed.text) {
+            observations.push({
+              ...base,
+              parser: "xlsx_table_probe",
+              status: "text_extracted",
+              evidence_kind: "parsed_text",
+              summary:
+                "Spreadsheet rows were extracted as table evidence for Draft intake.",
+              text_excerpt: parsed.text,
+              structured_facts: [
+                ...extractTextFacts(parsed.text),
+                ...parsed.facts,
+              ].slice(0, 100),
+              tables: parsed.tables,
+              confidence: "parsed",
+            });
+            continue;
+          }
+        } catch (_error) {
+          // Fall through to parser_needed; the file still remains available for Easy Harness review.
+        }
+      }
+    }
+
+    observations.push({
+      ...base,
+      parser: "parser_needed",
+      status: "parser_needed",
+      evidence_kind: "metadata_with_pending_parser",
+      summary: `${parserNeededLabel(attachment)} is needed before Easy Harness can rely on this file's contents.`,
+      confidence: "metadata_only",
+    });
+  }
+
+  return observations;
+}
+
 function summarizeRequestForModel(
   requestRow: RequestRow,
   messages: MessageRow[],
   attachments: Array<AttachmentRow & { storage?: StorageRow }>,
   visualImages: DraftVisionImage[] = [],
+  attachmentObservations: AttachmentObservation[] = [],
 ) {
   const visualFilenames = new Set(visualImages.map((image) => image.filename));
   return JSON.stringify(
@@ -1943,9 +2581,10 @@ function summarizeRequestForModel(
         image_count_sent_to_model: visualImages.length,
         image_files_sent_to_model: visualImages.map((image) => image.filename),
         boundary: visualImages.length
-          ? "Selected image attachments are provided to the draft model as image_url inputs. These images may be used only as model-visible visual observations with partial confidence unless the customer text confirms the same detail. Non-image files remain metadata-only until OCR/PDF/CSV/Excel/CAD parsing produces structured observations."
-          : "No attachment pixels or document text are provided to the draft model. Attachments are metadata-only in this run.",
+          ? "Selected image attachments are provided to the draft model as image_url inputs. These images may be used only as model-visible visual observations with partial confidence unless the customer text confirms the same detail. Non-image files may be used only when attachment_observations contains parsed text or structured facts."
+          : "No image pixels are provided to the draft model. Non-image files may be used only when attachment_observations contains parsed text or structured facts.",
       },
+      attachment_observations: attachmentObservations,
       attachments: attachments.map((attachment) => ({
         name: attachment.name,
         mime_type: attachment.mime_type,
@@ -2037,8 +2676,8 @@ async function callDraftModel(
 
   const jsonShape = JSON.stringify(draftSchema, null, 2);
   const visualEvidenceInstruction = visualImages.length
-    ? "Evidence boundary: this intake run includes conversation text, attachment metadata, and selected image files as model-visible image_url inputs. You may use visible image observations, but mark them as model observations with partial confidence unless corroborated by customer text. Do not claim PDF, Excel, CSV, CAD, hidden label, pinout, or document contents unless those details are explicitly present in text or structured observations."
-    : "Evidence boundary: this intake run receives attachment metadata and conversation text, not reliable image pixels, OCR, PDF text, spreadsheet rows, CAD geometry, or visual observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, or document contents from attachments unless those details are explicitly present in the text or provided observations.";
+    ? "Evidence boundary: this intake run includes conversation text, attachment metadata, selected image files as model-visible image_url inputs, and attachment_observations. You may use image observations and parsed attachment observations, but mark them as partial/model/parsed evidence unless corroborated by customer text. Do not claim PDF, Excel, CAD, hidden label, pinout, or document contents unless those details are explicitly present in text or attachment_observations."
+    : "Evidence boundary: this intake run receives conversation text, attachment metadata, and any parser-produced attachment_observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, or document contents from attachments unless those details are explicitly present in text or attachment_observations.";
   const userContent =
     provider === "qwen" && visualImages.length
       ? [
@@ -2095,7 +2734,8 @@ async function callDraftModel(
             visualEvidenceInstruction,
             visualImages.length
               ? "If photos are sent as image inputs, you may reference clear visible observations cautiously. Never turn visual observations into production facts; connector selection, pinout, wire colors, dimensions, and layout still require Easy Harness review unless the customer text confirms them."
-              : "If photos/samples/files are attached, treat them as received evidence for Easy Harness review. Do not phrase review items as if this run already inspected the image, CSV, PDF, CAD, spreadsheet, or document contents. Say Easy Harness will inspect/review the uploaded files before relying on connector, pinout, layout, or other file-derived details.",
+              : "If files are attached but attachment_observations says parser_needed or storage_unavailable, treat them as received evidence for Easy Harness review. Do not phrase review items as if this run already inspected those contents.",
+            "Use attachment_observations as the structured file-understanding layer. Observations with status text_extracted or vision_sent_to_model may inform known_requirements, provided_evidence, captured_professional_details, and unknowns. CSV rows, spreadsheet tables, PDF text probes, text excerpts, and structured_facts may be used as parsed evidence. Observations with parser_needed or storage_unavailable may only support 'files received' and Easy Harness review items, not file-content claims.",
             "General Draft gate: close the draft when connection goal, endpoints or samples/photos, use/function, quantity or approximate quantity, length or measurement basis, environment/use context, and critical safety info are sufficient. Remaining professional unknowns should move to Easy Harness review or supplier/manufacturing confirmation.",
             "Do not close the draft when there is no harness/cable connection goal, the user only asks whether an unrelated file is ok, Easy Harness cannot tell what should be built, or a power-carrying harness lacks basic voltage/current/power and no safe approximation is possible.",
             "For power-carrying requests, voltage and expected current or power are functional/safety basics. Ask one concise question only when the whole request indicates a real power-carrying load and the customer is likely to know an approximate answer. Do not ask because a single word appeared.",
@@ -2314,6 +2954,7 @@ Deno.serve(async (request) => {
   const modelInputMeta = {
     attachmentVisionEnabled: attachmentVisionEnabled(),
     visualImages: [] as DraftVisionImage[],
+    attachmentObservations: [] as AttachmentObservation[],
     visionDiagnostics: {
       attachment_vision_enabled: attachmentVisionEnabled(),
       vision_max_images: envNumber("AI_DRAFT_MAX_VISION_IMAGES", 4, 0, 12),
@@ -2338,6 +2979,11 @@ Deno.serve(async (request) => {
     );
     modelInputMeta.visualImages = visionSelection.images;
     modelInputMeta.visionDiagnostics = visionSelection.diagnostics;
+    modelInputMeta.attachmentObservations = await buildAttachmentObservations(
+      supabase,
+      attachmentsWithStorage,
+      modelInputMeta.visualImages,
+    );
     logCheckingEvent("started", {
       request_number: requestRow.request_number,
       trigger: payload.trigger || "manual",
@@ -2345,12 +2991,21 @@ Deno.serve(async (request) => {
       attachment_count: attachmentsWithStorage.length,
       ...modelInputMeta.visionDiagnostics,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
+      attachment_observation_count:
+        modelInputMeta.attachmentObservations.length,
+      parsed_attachment_count: modelInputMeta.attachmentObservations.filter(
+        (item) => item.status === "text_extracted",
+      ).length,
+      parser_needed_count: modelInputMeta.attachmentObservations.filter(
+        (item) => item.status === "parser_needed",
+      ).length,
     });
     const modelInput = summarizeRequestForModel(
       requestRow,
       messages || [],
       attachmentsWithStorage,
       modelInputMeta.visualImages,
+      modelInputMeta.attachmentObservations,
     );
     const { model, provider, reasoningEffort, usage, draft } =
       await callDraftModel(
@@ -2381,7 +3036,16 @@ Deno.serve(async (request) => {
         image_files_sent_to_model: modelInputMeta.visualImages.map(
           (image) => image.filename,
         ),
+        attachment_observation_count:
+          modelInputMeta.attachmentObservations.length,
+        parsed_attachment_count: modelInputMeta.attachmentObservations.filter(
+          (item) => item.status === "text_extracted",
+        ).length,
+        parser_needed_count: modelInputMeta.attachmentObservations.filter(
+          (item) => item.status === "parser_needed",
+        ).length,
       },
+      attachment_observations: modelInputMeta.attachmentObservations,
     });
 
     const { error: updateError } = await supabase
@@ -2410,6 +3074,8 @@ Deno.serve(async (request) => {
       model,
       ...modelInputMeta.visionDiagnostics,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
+      attachment_observation_count:
+        modelInputMeta.attachmentObservations.length,
     });
 
     const { data: latestRows } = await supabase
@@ -2474,6 +3140,8 @@ Deno.serve(async (request) => {
       error: message.slice(0, 500),
       ...modelInputMeta.visionDiagnostics,
       image_count_sent_to_model: modelInputMeta.visualImages.length,
+      attachment_observation_count:
+        modelInputMeta.attachmentObservations.length,
     });
     await supabase.from("integration_events").insert({
       adapter: adapterId,
@@ -2517,7 +3185,16 @@ Deno.serve(async (request) => {
         image_files_sent_to_model: modelInputMeta.visualImages.map(
           (image) => image.filename,
         ),
+        attachment_observation_count:
+          modelInputMeta.attachmentObservations.length,
+        parsed_attachment_count: modelInputMeta.attachmentObservations.filter(
+          (item) => item.status === "text_extracted",
+        ).length,
+        parser_needed_count: modelInputMeta.attachmentObservations.filter(
+          (item) => item.status === "parser_needed",
+        ).length,
       },
+      attachment_observations: modelInputMeta.attachmentObservations,
       agent_runtime: {
         primary_agent_completed: false,
         local_draft_builder_used: true,

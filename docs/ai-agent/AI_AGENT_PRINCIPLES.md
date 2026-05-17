@@ -495,6 +495,11 @@ PDF、Excel 或 CAD 内容。
 真的把图片输入、OCR 文本、PDF/Excel/CSV/CAD 解析结果，或结构化
 attachment observations 传给 Agent 时，这些内容才可以成为 Draft 证据。
 
+当前 `run-checking` 已经有第一版 attachment observations：图片可以作为
+Qwen vision input，CSV/纯文本可以抽取文本和表格线索，XLSX/XLSM 可以抽取
+轻量 sheet 表格，PDF 可以做可读文字探测。扫描 PDF、复杂 Excel、CAD 几何、
+完整 OCR 和制造包仍属于后续专门解析能力。
+
 它可以说：
 
 ```text

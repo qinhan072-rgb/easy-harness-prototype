@@ -77,7 +77,11 @@ Implemented:
 - `run-checking` Supabase Edge Function for Easy Harness Draft intake, with a
   configurable Qwen/DeepSeek model adapter. Qwen can optionally receive selected
   uploaded image attachments through short-lived Supabase signed URLs when
-  `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`; the default remains metadata-only.
+  `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`.
+- First `attachment_observations` layer in `run-checking`: CSV/text excerpts,
+  CSV table samples, XLSX/XLSM sheet probes, lightweight PDF text probes, Qwen
+  image-input observations, and `parser_needed` markers for unsupported or
+  unparsed files.
 
 Still not live:
 
@@ -91,11 +95,12 @@ Still not live:
 - Production custom domain and company email sender.
 - Customer-facing policy pages exist, but production legal/entity review is not
   complete. The missing pieces are company legal name, address, jurisdiction,
-  support contacts, returns/refunds, tax/duty handling, and operational
-  acceptance by the business.
-- Deep AI engineering pipeline: file unpacking, OCR, CAD/PDF/Excel parsing,
-  vision extraction, Harness JSON, catalog matching, rule validation, BOM/cut
-  list/manufacturing package generation.
+  support contacts, final tax/duty handling, and operational acceptance by the
+  business. Custom-order cancellation and after-sales/return rules now have a
+  production-minded draft in the customer policy pages.
+- Deep AI engineering pipeline: production-grade OCR, CAD/PDF/Excel parsing,
+  richer vision extraction, Harness JSON, catalog matching, rule validation,
+  BOM/cut list/manufacturing package generation.
 
 ## AI Agent Baseline
 

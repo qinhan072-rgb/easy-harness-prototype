@@ -193,12 +193,12 @@ const policyPages = [
       {
         heading: "Changes and cancellation",
         body:
-          "You can ask for changes before production starts. After production starts, changes or cancellation may not be possible because the harness is made to your confirmed request.",
+          "You can ask for changes or cancellation before production starts. If payment has been made but production has not started, Easy Harness may cancel the order and refund the unused portion after deducting costs already incurred.",
       },
       {
         heading: "Custom product boundary",
         body:
-          "Custom harnesses are not standard shelf goods. Returns for preference, changed plans, or incorrect customer-provided details may not be available once production has started.",
+          "Custom harnesses are made to order and generally cannot be cancelled or returned after production starts unless Easy Harness made the product incorrectly, the product has a verified quality issue, or the delivered item does not match the confirmed order basis.",
       },
     ],
   },
@@ -251,12 +251,17 @@ const policyPages = [
       {
         heading: "After delivery",
         body:
-          "If you receive a damaged, incorrect, or faulty harness, contact Easy Harness with the order ID plus photos or video so the case can be reviewed quickly.",
+          "If you receive a damaged, incorrect, or faulty harness, contact Easy Harness with the order ID plus photos or video so the case can be reviewed quickly. Visible delivery or assembly issues should normally be reported within 14 days after receipt; quality disputes should normally include supporting evidence within 30 days.",
       },
       {
         heading: "Resolution options",
         body:
           "Depending on the case, Easy Harness may offer guidance, correction, replacement, remake, partial refund, or another reasonable resolution. Issues caused by incorrect customer-provided details, misuse, or later modifications may be excluded.",
+      },
+      {
+        heading: "Return authorization",
+        body:
+          "Do not send products back without return authorization. If a return is needed, Easy Harness will provide the return steps first. Import duties, VAT, customs fees, payment-provider fees, bank fees, and shipping fees are normally not refundable unless Easy Harness clearly accepts responsibility for them.",
       },
     ],
   },
@@ -9153,8 +9158,9 @@ function OrderWorkspace({
             <div className="policy-list compact-policy-list">
               <p>
                 Custom-made harnesses are covered for confirmed Easy Harness
-                production faults. Change requests are available before
-                production starts.{" "}
+                production faults, verified quality issues, or mismatch with
+                the confirmed order basis. Change or cancellation requests are
+                available before production starts.{" "}
                 <InlinePolicyLink
                   openPolicy={openPolicy}
                   policyId="after-sales"
@@ -9164,9 +9170,9 @@ function OrderWorkspace({
               </p>
               <p>
                 After delivery, report defects, wrong assembly, or shipping
-                damage with photos or video in the order message area. Easy
-                Harness can also share email or WhatsApp details when that is
-                the fastest way to resolve the case.
+                damage with photos or video in the order message area. Visible
+                issues should normally be reported within 14 days; quality
+                disputes should normally include evidence within 30 days.
               </p>
             </div>
           </section>
