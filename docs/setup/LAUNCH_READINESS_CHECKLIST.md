@@ -15,7 +15,7 @@ This checklist is for the current production/staging Supabase + Vercel setup bef
 Run:
 
 ```text
-test-fixtures/ai-attachment-intake-v1/sql/supabase_launch_verification.sql
+D:\Harness\easy-harness-project-materials\test-fixtures\ai-attachment-intake-v1\sql\supabase_launch_verification.sql
 ```
 
 in Supabase Dashboard > SQL Editor.
@@ -63,7 +63,7 @@ After running a request with test attachments, expected `check_result.source` si
 Use:
 
 ```text
-test-fixtures/ai-attachment-intake-v1/
+D:\Harness\easy-harness-project-materials\test-fixtures\ai-attachment-intake-v1\
 ```
 
 Recommended first test:
@@ -112,4 +112,3 @@ Before real public launch, confirm:
 - Privacy policy and terms legal owner.
 - Customs defaults: HS code, declared value principle, origin country, incoterm default.
 - Return/RMA contact path.
-

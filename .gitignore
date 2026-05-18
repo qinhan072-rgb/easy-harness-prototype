@@ -1,7 +1,30 @@
-node_modules
-dist
-.DS_Store
-*.log
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Local environment and secrets
 .env
 .env.local
 .env.*.local
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+
+# Logs and local runtime artifacts
+*.log
+*.err.log
+*.pid
+vite-policy-check.log
+vite-policy-check.err.log
+
+# Supabase CLI local cache
+supabase/.temp/
+
+# Local companion/project-material folders that do not belong in the platform repo
+audit-snapshots/
+test-fixtures/
+handoff_20260515/
+NEW_AI_PROMPT.md

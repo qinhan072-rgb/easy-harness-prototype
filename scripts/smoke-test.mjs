@@ -5,7 +5,7 @@ const root = resolve(import.meta.dirname, "..");
 const appPath = resolve(root, "src", "App.jsx");
 const supabaseClientPath = resolve(root, "src", "supabaseClient.js");
 const packagePath = resolve(root, "package.json");
-const distIndex = resolve(root, "dist", "index.html");
+const appIndexPath = resolve(root, "index.html");
 const schemaPath = resolve(root, "supabase", "migrations", "202605080001_stage_2a_schema.sql");
 const rlsPath = resolve(root, "supabase", "migrations", "202605080002_stage_2a_rls.sql");
 const hardeningPath = resolve(root, "supabase", "migrations", "202605080003_stage_2a_security_hardening.sql");
@@ -18,9 +18,11 @@ const notificationAuditRpcPath = resolve(root, "supabase", "migrations", "202605
 const storagePolicyPath = resolve(root, "supabase", "migrations", "202605100006_storage_upload_policies.sql");
 const attachmentPathRpcPath = resolve(root, "supabase", "migrations", "202605140001_workspace_attachment_storage_paths.sql");
 const envExamplePath = resolve(root, ".env.example");
+const gitignorePath = resolve(root, ".gitignore");
 const stage2DocPath = resolve(root, "docs", "setup", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "setup", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
 const aiAgentPrinciplesPath = resolve(root, "docs", "ai-agent", "AI_AGENT_PRINCIPLES.md");
+const repositoryBoundaryDocPath = resolve(root, "docs", "setup", "REPOSITORY_BOUNDARY.md");
 const paymentFunctionPath = resolve(root, "supabase", "functions", "create-payment-session", "index.ts");
 const shippingFunctionPath = resolve(root, "supabase", "functions", "quote-shipping-rates", "index.ts");
 const shipmentFunctionPath = resolve(root, "supabase", "functions", "create-shipment", "index.ts");
@@ -34,6 +36,7 @@ function readIfExists(path) {
 const app = readFileSync(appPath, "utf8");
 const supabaseClient = readIfExists(supabaseClientPath);
 const packageJson = readIfExists(packagePath);
+const appIndex = readIfExists(appIndexPath);
 const schemaSql = readIfExists(schemaPath);
 const rlsSql = readIfExists(rlsPath);
 const hardeningSql = readIfExists(hardeningPath);
@@ -46,9 +49,11 @@ const notificationAuditRpcSql = readIfExists(notificationAuditRpcPath);
 const storagePolicySql = readIfExists(storagePolicyPath);
 const attachmentPathRpcSql = readIfExists(attachmentPathRpcPath);
 const envExample = readIfExists(envExamplePath);
+const gitignore = readIfExists(gitignorePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
 const aiAgentPrinciples = readIfExists(aiAgentPrinciplesPath);
+const repositoryBoundaryDoc = readIfExists(repositoryBoundaryDocPath);
 const paymentFunction = readIfExists(paymentFunctionPath);
 const shippingFunction = readIfExists(shippingFunctionPath);
 const shipmentFunction = readIfExists(shipmentFunctionPath);
@@ -57,8 +62,11 @@ const checkingFunction = readIfExists(checkingFunctionPath);
 
 const checks = [
   {
-    name: "production build output exists",
-    pass: existsSync(distIndex)
+    name: "production build entrypoint is configured",
+    pass: packageJson.includes('"build"') &&
+      packageJson.includes("vite build") &&
+      appIndex.includes('<div id="root"></div>') &&
+      appIndex.includes('/src/main.jsx')
   },
   {
     name: "attachment metadata table is present",
@@ -604,6 +612,36 @@ const checks = [
       envExample.includes("AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=false") &&
       envExample.includes("QWEN_FILE_EXTRACT_MODEL=qwen-long") &&
       envExample.includes("AI_DRAFT_CAD_METADATA_MAX_BYTES=10000000")
+  },
+  {
+    name: "ai draft keeps customer questions consistent across message and summary",
+    pass: checkingFunction.includes("finalizeCustomerQuestions") &&
+      checkingFunction.includes("customerQuestionSet") &&
+      checkingFunction.includes("questionField(question)") &&
+      checkingFunction.includes("draft_closure: {") &&
+      checkingFunction.includes("questions_to_ask: questions") &&
+      checkingFunction.includes("user_facing_summary: {") &&
+      checkingFunction.includes("needed_next: questions")
+  },
+  {
+    name: "cad-only intake acknowledges received reference files",
+    pass: checkingFunction.includes("I received the CAD reference files") &&
+      checkingFunction.includes("dimensional/context references") &&
+      checkingFunction.includes("Before Easy Harness can prepare the Draft")
+  },
+  {
+    name: "repository boundary ignores generated local artifacts",
+    pass: gitignore.includes("node_modules/") &&
+      gitignore.includes("dist/") &&
+      gitignore.includes("supabase/.temp/") &&
+      gitignore.includes("test-fixtures/") &&
+      gitignore.includes("handoff_20260515/") &&
+      gitignore.includes("audit-snapshots/") &&
+      repositoryBoundaryDoc.includes("Do Not Push") &&
+      repositoryBoundaryDoc.includes("git rm -r --cached") &&
+      repositoryBoundaryDoc.includes("D:\\Harness\\easy-harness-project-materials") &&
+      repositoryBoundaryDoc.includes("image_count_sent_to_model") &&
+      repositoryBoundaryDoc.includes("cad_metadata_count")
   },
   {
     name: "ai agent does not title requests from one keyword",

@@ -158,11 +158,14 @@ Keep DeepSeek secrets only if it is used as a fallback.
   readiness.
 - `docs/setup/LAUNCH_READINESS_CHECKLIST.md` - launch verification checklist,
   Supabase SQL checks, and manual payment/logistics SOP.
+- `docs/setup/REPOSITORY_BOUNDARY.md` - what belongs in GitHub and what should
+  stay local/generated.
 - `docs/setup/AUTH_EMAIL_AND_GOOGLE_SETUP.md` - Supabase Auth email/Google
   setup.
 - `docs/archive/` - historical iteration notes and patches.
-- `test-fixtures/ai-attachment-intake-v1/` - uploadable AI attachment intake
-  regression pack with PNG, PDF, CSV, XLSX, STEP, DXF, and STL files.
+- `D:\Harness\easy-harness-project-materials\test-fixtures\ai-attachment-intake-v1\`
+  - local companion AI attachment intake regression pack with PNG, PDF, CSV,
+  XLSX, STEP, DXF, and STL files. It is intentionally outside the platform repo.
 
 ## Do Not Regress
 

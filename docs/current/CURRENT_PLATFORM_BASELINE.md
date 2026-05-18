@@ -82,8 +82,16 @@ platform yet.
   contents.
 - A launch verification checklist now exists at
   `docs/setup/LAUNCH_READINESS_CHECKLIST.md`, and a real upload regression pack
-  exists at `test-fixtures/ai-attachment-intake-v1/` for PNG, PDF, CSV, XLSX,
-  STEP, DXF, and STL intake testing.
+  exists outside the platform repo at
+  `D:\Harness\easy-harness-project-materials\test-fixtures\ai-attachment-intake-v1\`
+  for PNG, PDF, CSV, XLSX, STEP, DXF, and STL intake testing.
+- The AI intake response now uses one canonical customer-question list for both
+  the thread reply and the right-side request summary. CAD-only submissions
+  explicitly acknowledge the received CAD reference files before asking for the
+  missing connection goal.
+- Repository push boundaries are documented at
+  `docs/setup/REPOSITORY_BOUNDARY.md`; generated folders such as `dist/`,
+  `node_modules/`, `supabase/.temp/`, and local audit snapshots are ignored.
 
 ## What Is Still Modeled, Not Live
 

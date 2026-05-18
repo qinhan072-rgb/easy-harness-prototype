@@ -1808,6 +1808,97 @@ function addUnknownOnce(target: UnknownItem[], field: string, reason: string, qu
   target.push({ field, reason, question });
 }
 
+function customerQuestionLabel(item: UnknownItem | string) {
+  if (typeof item === "string") return normalizeString(item, "");
+  return normalizeString(item.question || item.reason || item.field, "");
+}
+
+function questionField(question: string) {
+  const text = question.toLowerCase();
+  if (/\b(other end|opposite end|connect to what|connect, copy, or replace|connection goal)\b/.test(text))
+    return "connection_goal_or_other_end";
+  if (/\bquantity|how many\b/.test(text)) return "quantity";
+  if (/\blength|measurement|sample that can be measured\b/.test(text))
+    return "length_or_measurement_basis";
+  if (/\bcurrent|power|voltage\b/.test(text)) return "voltage_current_or_power";
+  if (/\bpin|shield|spare|wire colors?|termination\b/.test(text))
+    return "pin_population_or_termination";
+  if (/\bused|equipment|environment\b/.test(text)) return "use_context";
+  return "draft_blocking_detail";
+}
+
+function customerQuestionSet(draft: EasyHarnessDraft, limit = 3) {
+  const rawQuestions = [
+    ...draft.draft_closure.questions_to_ask,
+    ...draft.user_facing_summary.needed_next,
+    ...draft.unknowns.ask_user_now.map(customerQuestionLabel),
+    ...draft.unknowns.ask_user_if_likely_known.map(customerQuestionLabel),
+  ];
+  const output: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of rawQuestions) {
+    const question = normalizeString(raw, "");
+    const key = question.toLowerCase();
+    if (!question || seen.has(key)) continue;
+    seen.add(key);
+    output.push(question);
+    if (output.length >= limit) break;
+  }
+  if (
+    !output.length &&
+    draft.draft_meta.draft_status === "needs_harness_context"
+  ) {
+    output.push("What should this harness or cable connect, copy, or replace?");
+  }
+  return output;
+}
+
+function questionItemFor(draft: EasyHarnessDraft, question: string): UnknownItem {
+  const existing = [
+    ...draft.unknowns.ask_user_now,
+    ...draft.unknowns.ask_user_if_likely_known,
+  ].find((item) => customerQuestionLabel(item).toLowerCase() === question.toLowerCase());
+  if (existing) return { ...existing, question };
+  return {
+    field: questionField(question),
+    reason: "This detail is needed before Easy Harness can prepare the Draft.",
+    question,
+  };
+}
+
+function finalizeCustomerQuestions(draft: EasyHarnessDraft): EasyHarnessDraft {
+  if (
+    draft.draft_closure.can_close_user_draft ||
+    draft.draft_meta.draft_status === "ready_for_easy_harness_review" ||
+    draft.draft_meta.draft_status === "closed_for_easy_harness_review" ||
+    draft.draft_meta.draft_status === "not_harness_related"
+  ) {
+    return {
+      ...draft,
+      user_facing_summary: { ...draft.user_facing_summary, needed_next: [] },
+      draft_closure: { ...draft.draft_closure, questions_to_ask: [] },
+    };
+  }
+
+  const questions = customerQuestionSet(draft, 3);
+  const questionItems = questions.map((question) => questionItemFor(draft, question));
+  return {
+    ...draft,
+    unknowns: {
+      ...draft.unknowns,
+      ask_user_now: questionItems,
+    },
+    user_facing_summary: {
+      ...draft.user_facing_summary,
+      needed_next: questions,
+    },
+    draft_closure: {
+      ...draft.draft_closure,
+      questions_to_ask: questions,
+    },
+  };
+}
+
 function setKnownRequirementIfMissing(
   draft: EasyHarnessDraft,
   key: string,
@@ -2304,8 +2395,10 @@ function normalizeDraft(
       customer_message_type: messageType,
     },
   };
-  return enforceDraftReadiness(
-    softenEasyHarnessReviewLanguage(deriveMissingKnownRequirements(draft)),
+  return finalizeCustomerQuestions(
+    enforceDraftReadiness(
+      softenEasyHarnessReviewLanguage(deriveMissingKnownRequirements(draft)),
+    ),
   );
 }
 
@@ -2445,6 +2538,18 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
     .join(" · ");
   const header = [line, details].filter(Boolean).join("\n");
   const messageType = draft.draft_closure.customer_message_type;
+  const questions = customerQuestionSet(draft, 3);
+  const evidenceFilenames = draft.provided_evidence
+    .map((item) => item.filename || "")
+    .filter(Boolean);
+  const cadEvidenceCount = evidenceFilenames.filter((filename) =>
+    /\.(step|stp|dxf|stl|obj|iges|igs)$/i.test(filename),
+  ).length;
+  const evidenceIntro = evidenceFilenames.length
+    ? cadEvidenceCount === evidenceFilenames.length
+      ? "I received the CAD reference files and can use them as dimensional/context references."
+      : "I received the uploaded files and will use them as request context."
+    : "";
 
   if (messageType === "not_harness_related") {
     return [
@@ -2454,9 +2559,19 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
   }
 
   if (messageType === "needs_harness_context") {
+    if (evidenceIntro) {
+      return [
+        evidenceIntro,
+        "Before Easy Harness can prepare the Draft, please add:",
+        ...questions.map((question, index) => `${index + 1}. ${question}`),
+        "Approximate answers are fine. If one item is uncertain, say so.",
+      ]
+        .filter(Boolean)
+        .join("\n\n");
+    }
     return [
       "I can help, but I need one starting point first:",
-      "What should this harness or cable connect to what?",
+      questions[0] || "What should this harness or cable connect, copy, or replace?",
       "You can also upload connector photos, device port photos, an old harness sample, or a simple sketch.",
     ].join("\n\n");
   }
@@ -2471,9 +2586,6 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
       .join("\n\n");
   }
 
-  const questions = draft.draft_closure.questions_to_ask.length
-    ? draft.draft_closure.questions_to_ask
-    : draft.user_facing_summary.needed_next;
   return [
     header || "Harness request",
     "To move this forward:",
