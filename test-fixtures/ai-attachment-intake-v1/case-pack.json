@@ -1,0 +1,47 @@
+{
+  "name": "Easy Harness AI Attachment Intake Test Pack v1",
+  "created_at": "2026-05-18",
+  "cases": [
+    {
+      "id": "mixed-intake",
+      "message": "I need a short custom harness for a Deutsch DT06-6S connector. Use the attached connector image, PDF note, CSV pinout, XLSX table, and CAD reference files. Target length is about 450 mm. This will be used on a 12V automotive sensor branch. Please organize what I gave you into an Easy Harness Draft and ask me only for missing information.",
+      "attachments": [
+        "attachments/dt06_6s_connector_photo_mock.png",
+        "attachments/dt06_6s_reference_note.pdf",
+        "attachments/dt06_6s_pinout.csv",
+        "attachments/dt06_6s_pinout.xlsx",
+        "attachments/dt06_6s_connector_shell.step",
+        "attachments/bracket_outline.dxf",
+        "attachments/protective_boot_ascii.stl"
+      ],
+      "expected_source_signals": {
+        "image_count_sent_to_model": 1,
+        "qwen_file_extract_count_min": 1,
+        "cad_metadata_count_min": 3
+      }
+    },
+    {
+      "id": "spreadsheet-pinout",
+      "message": "The pin mapping is in my spreadsheet and CSV. Please use those files as the source of truth. Connector A is DT06-6S. I am not sure about wire colors for pins 5 and 6.",
+      "attachments": [
+        "attachments/dt06_6s_pinout.csv",
+        "attachments/dt06_6s_pinout.xlsx"
+      ],
+      "expected_source_signals": {
+        "qwen_file_extract_count_min": 1
+      }
+    },
+    {
+      "id": "cad-metadata-only",
+      "message": "I uploaded CAD-style reference files for the connector shell, bracket outline, and protective boot. Please use them as dimensional/context references, not final manufacturing drawings.",
+      "attachments": [
+        "attachments/dt06_6s_connector_shell.step",
+        "attachments/bracket_outline.dxf",
+        "attachments/protective_boot_ascii.stl"
+      ],
+      "expected_source_signals": {
+        "cad_metadata_count_min": 3
+      }
+    }
+  ]
+}

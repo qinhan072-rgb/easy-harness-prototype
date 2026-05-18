@@ -54,6 +54,7 @@ This manifest lists the files a new AI should understand before making changes.
 | `docs/ai-agent/AI_AGENT_PRINCIPLES.md` | AI Agent behavior contract. | Yes, carefully | Do not weaken anti-questionnaire and evidence-boundary rules. |
 | `docs/setup/AI_PROVIDER_QWEN_SETUP.md` | Qwen secrets/deploy setup. | Yes | Keep provider config current. |
 | `docs/setup/AUTH_EMAIL_AND_GOOGLE_SETUP.md` | Supabase Auth email/Google setup. | Yes | Includes email template copy; no secrets. |
+| `docs/setup/LAUNCH_READINESS_CHECKLIST.md` | Production/staging launch verification checklist, Supabase SQL checks, and manual protected payment/logistics SOP. | Yes | Keep aligned with current deploy and operations path. |
 | `docs/setup/MARKETPLACE_PROTECTED_PAYMENT.md` | Marketplace protected payment path. | Yes | Keep aligned with order UI/staff ops flow. |
 | `docs/setup/STAGE_2A_BACKEND_READINESS.md` | Backend/resource readiness. | Yes | Good planning reference. |
 | `docs/archive/` | Historical notes/patches. | Usually no | Useful history, not current truth. |
@@ -63,6 +64,7 @@ This manifest lists the files a new AI should understand before making changes.
 | Path | Purpose | Can Modify? | Notes |
 | --- | --- | --- | --- |
 | `scripts/smoke-test.mjs` | Structural smoke tests for product contracts. | Yes | Update whenever core flow behavior changes. |
+| `test-fixtures/ai-attachment-intake-v1/` | Uploadable AI attachment intake regression pack with PNG, PDF, CSV, XLSX, STEP, DXF, and STL examples plus verification SQL. | Yes | Use for live run-checking verification after Edge Function deploy. |
 | `vite-policy-check.log` | Previous run log. | No need | Can ignore unless debugging. |
 | `vite-policy-check.err.log` | Previous error log. | No need | Can ignore unless debugging. |
 
@@ -74,4 +76,3 @@ This manifest lists the files a new AI should understand before making changes.
 | `dist/` | Build output. | No manual edits | Regenerate with build. |
 | `.git/` | Git metadata. | No manual edits | Git command was not available in this shell at handoff time. |
 | `audit-snapshots/` | Previous verification artifacts. | Usually no | Inspect only if needed. |
-

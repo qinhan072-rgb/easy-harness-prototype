@@ -1,6 +1,6 @@
 # Easy Harness Project Handoff
 
-Last updated: 2026-05-13
+Last updated: 2026-05-18
 
 This is the active handoff for the Easy Harness platform. It replaces older
 prototype-era notes that still mention local-only persistence.
@@ -136,14 +136,16 @@ Key principles:
 - Do not expose "manual review", "human review", "prototype", "mock", or
   implementation details in customer UI.
 
-Live AI provider settings:
+Recommended AI provider settings for the current deployment pass:
 
 ```text
 AI_DRAFT_PROVIDER=qwen
 QWEN_API_KEY=...
 QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-AI_DRAFT_ENABLE_ATTACHMENT_VISION=false
+AI_DRAFT_ENABLE_ATTACHMENT_VISION=true
+AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=true
+QWEN_FILE_EXTRACT_MODEL=qwen-long
 ```
 
 Keep DeepSeek secrets only if it is used as a fallback.
@@ -154,9 +156,13 @@ Keep DeepSeek secrets only if it is used as a fallback.
 - `docs/ai-agent/AI_AGENT_PRINCIPLES.md` - AI Agent configuration baseline.
 - `docs/setup/STAGE_2A_BACKEND_READINESS.md` - backend and external-resource
   readiness.
+- `docs/setup/LAUNCH_READINESS_CHECKLIST.md` - launch verification checklist,
+  Supabase SQL checks, and manual payment/logistics SOP.
 - `docs/setup/AUTH_EMAIL_AND_GOOGLE_SETUP.md` - Supabase Auth email/Google
   setup.
 - `docs/archive/` - historical iteration notes and patches.
+- `test-fixtures/ai-attachment-intake-v1/` - uploadable AI attachment intake
+  regression pack with PNG, PDF, CSV, XLSX, STEP, DXF, and STL files.
 
 ## Do Not Regress
 

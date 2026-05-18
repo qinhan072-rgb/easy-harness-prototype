@@ -1,6 +1,6 @@
 # Current Platform Baseline
 
-Last reviewed: 2026-05-17
+Last reviewed: 2026-05-18
 
 ## Stage
 
@@ -80,6 +80,10 @@ platform yet.
   unit hints when available. DWG, 3MF, FCStd, unsupported, oversized, or
   encrypted files are marked `parser_needed` so the Agent does not invent file
   contents.
+- A launch verification checklist now exists at
+  `docs/setup/LAUNCH_READINESS_CHECKLIST.md`, and a real upload regression pack
+  exists at `test-fixtures/ai-attachment-intake-v1/` for PNG, PDF, CSV, XLSX,
+  STEP, DXF, and STL intake testing.
 
 ## What Is Still Modeled, Not Live
 
@@ -173,6 +177,8 @@ real user testing:
 6. Staff can update order production/shipping/tracking metadata.
 7. Admin can inspect users, requests, orders, notifications, audits, and service
    events.
+8. AI attachment intake test pack produces the expected `check_result.source`
+   signals for image vision, Qwen file extract, and CAD metadata.
 
 After this, choose one focused integration line:
 

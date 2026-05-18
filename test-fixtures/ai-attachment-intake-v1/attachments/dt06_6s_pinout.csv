@@ -1,0 +1,7 @@
+pin,circuit,color,gauge_awg,terminal,seal,note
+1,Sensor 5V supply,red,20,0462-201-20141,green,Power feed from ECU
+2,Sensor ground,black,20,0462-201-20141,green,Ground return
+3,Signal A,white,22,0462-201-20141,green,Twisted pair with pin 4 preferred
+4,Signal B,blue,22,0462-201-20141,green,Twisted pair with pin 3 preferred
+5,Shield drain,TBD,22,0462-201-20141,green,Customer must confirm shield termination
+6,Spare / option,TBD,20,0462-201-20141,green,Customer must confirm whether populated
