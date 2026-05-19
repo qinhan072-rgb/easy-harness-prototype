@@ -27,6 +27,7 @@ D:\Harness\easy-harness-project-materials
 - `D:\Harness\easy-harness-project-materials\handoff_20260515\`
 - `D:\Harness\easy-harness-project-materials\audit-snapshots\`
 - `D:\Harness\easy-harness-project-materials\NEW_AI_PROMPT.md`
+- `D:\Harness\easy-harness-project-materials\test-plans\`
 - local run logs and one-off exported SQL/CSV/debug files
 
 ## Do Not Push

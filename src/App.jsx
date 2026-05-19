@@ -1327,6 +1327,38 @@ function prepareDraftFiles(fileItems, currentCount = 0) {
   return { nextFiles, error };
 }
 
+function droppedFileIdentity(item = {}) {
+  const file = item.file || item;
+  if (!file) return "";
+  const relativePath = item.relativePath || file.webkitRelativePath || "";
+  return [
+    relativePath || file.name || "",
+    file.size || 0,
+    file.lastModified || 0,
+  ].join("|");
+}
+
+function dedupeDroppedFileItems(fileItems = []) {
+  const accepted = [];
+  const exactKeys = new Set();
+  const looseKeys = new Set();
+  fileItems.forEach((item) => {
+    const file = item?.file || item;
+    if (!file) return;
+    const exactKey = droppedFileIdentity(item);
+    const looseKey = [file.name || "", file.size || 0, file.lastModified || 0].join("|");
+    if (exactKeys.has(exactKey)) return;
+    if (!item.relativePath && looseKeys.has(looseKey)) return;
+    exactKeys.add(exactKey);
+    looseKeys.add(looseKey);
+    accepted.push({
+      file,
+      relativePath: item.relativePath || file.webkitRelativePath || "",
+    });
+  });
+  return accepted;
+}
+
 function readDirectoryEntries(reader) {
   return new Promise((resolve, reject) => {
     const entries = [];
@@ -1377,8 +1409,8 @@ async function collectDroppedFileItems(dataTransfer) {
   const items = Array.from(dataTransfer?.items || []).filter(
     (item) => item.kind === "file",
   );
+  const collected = [];
   if (items.length) {
-    const collected = [];
     for (const item of items) {
       const entry = item.webkitGetAsEntry?.();
       if (entry) {
@@ -1388,12 +1420,12 @@ async function collectDroppedFileItems(dataTransfer) {
         if (file) collected.push({ file, relativePath: file.webkitRelativePath || "" });
       }
     }
-    if (collected.length) return collected;
   }
-  return Array.from(dataTransfer?.files || []).map((file) => ({
+  const directFiles = Array.from(dataTransfer?.files || []).map((file) => ({
     file,
     relativePath: file.webkitRelativePath || "",
   }));
+  return dedupeDroppedFileItems([...collected, ...directFiles]);
 }
 
 function sampleFileDraft(name) {

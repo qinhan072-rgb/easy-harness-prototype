@@ -66,6 +66,18 @@ Use:
 D:\Harness\easy-harness-project-materials\test-fixtures\ai-attachment-intake-v1\
 ```
 
+Manual intake scenarios are listed at:
+
+```text
+D:\Harness\easy-harness-project-materials\test-plans\AI_INTAKE_TEST_PLAN.md
+```
+
+Chinese test instructions with exact customer messages and attachment lists:
+
+```text
+D:\Harness\easy-harness-project-materials\test-plans\AI_INTAKE_TEST_PLAN_ZH.md
+```
+
 Recommended first test:
 
 - Copy the `Full Mixed Intake` customer text from the fixture README.

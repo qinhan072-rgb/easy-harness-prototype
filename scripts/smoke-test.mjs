@@ -410,6 +410,9 @@ const checks = [
     name: "file and folder drag upload is wired",
     pass: app.includes("collectDroppedFileItems") &&
       app.includes("webkitGetAsEntry") &&
+      app.includes("dedupeDroppedFileItems") &&
+      app.includes("const directFiles = Array.from(dataTransfer?.files || [])") &&
+      app.includes("return dedupeDroppedFileItems([...collected, ...directFiles])") &&
       app.includes("drop-active") &&
       app.includes("handleDropUpload")
   },
