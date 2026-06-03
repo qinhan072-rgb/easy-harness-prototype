@@ -2,6 +2,15 @@
 
 `AI_AGENT_PRINCIPLES.md` is a good product baseline for the current stage.
 
+`VISUAL_DRAFT_AGENT_SPEC.md` locks the next Visual Draft behavior: the user
+must feel that Easy Harness received the material, understood the request, and
+organized it clearly. It is intentionally a product contract, not a model
+training note.
+
+`evals/visual_draft_agent_v0_1.json` stores the first stable Visual Draft eval
+cases so Agent behavior can survive prompt changes, model changes, and new
+conversations.
+
 My evaluation:
 
 - It correctly defines the Agent as a requirement transformer, not a general

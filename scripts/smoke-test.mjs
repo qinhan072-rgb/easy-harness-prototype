@@ -22,12 +22,17 @@ const gitignorePath = resolve(root, ".gitignore");
 const stage2DocPath = resolve(root, "docs", "setup", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "setup", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
 const aiAgentPrinciplesPath = resolve(root, "docs", "ai-agent", "AI_AGENT_PRINCIPLES.md");
+const visualDraftAgentSpecPath = resolve(root, "docs", "ai-agent", "VISUAL_DRAFT_AGENT_SPEC.md");
+const visualDraftAgentEvalPath = resolve(root, "docs", "ai-agent", "evals", "visual_draft_agent_v0_1.json");
 const repositoryBoundaryDocPath = resolve(root, "docs", "setup", "REPOSITORY_BOUNDARY.md");
 const paymentFunctionPath = resolve(root, "supabase", "functions", "create-payment-session", "index.ts");
 const shippingFunctionPath = resolve(root, "supabase", "functions", "quote-shipping-rates", "index.ts");
 const shipmentFunctionPath = resolve(root, "supabase", "functions", "create-shipment", "index.ts");
 const storageFunctionPath = resolve(root, "supabase", "functions", "create-storage-upload", "index.ts");
 const checkingFunctionPath = resolve(root, "supabase", "functions", "run-checking", "index.ts");
+const agentDraftLabApiPath = resolve(root, "scripts", "agent-draft-lab-api.mjs");
+const agentDraftLabPath = resolve(root, "src", "AgentDraftLab.jsx");
+const agentDraftLabEvalPath = resolve(root, "scripts", "agent-draft-lab-eval.mjs");
 
 function readIfExists(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -53,12 +58,17 @@ const gitignore = readIfExists(gitignorePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
 const aiAgentPrinciples = readIfExists(aiAgentPrinciplesPath);
+const visualDraftAgentSpec = readIfExists(visualDraftAgentSpecPath);
+const visualDraftAgentEval = readIfExists(visualDraftAgentEvalPath);
 const repositoryBoundaryDoc = readIfExists(repositoryBoundaryDocPath);
 const paymentFunction = readIfExists(paymentFunctionPath);
 const shippingFunction = readIfExists(shippingFunctionPath);
 const shipmentFunction = readIfExists(shipmentFunctionPath);
 const storageFunction = readIfExists(storageFunctionPath);
 const checkingFunction = readIfExists(checkingFunctionPath);
+const agentDraftLabApi = readIfExists(agentDraftLabApiPath);
+const agentDraftLab = readIfExists(agentDraftLabPath);
+const agentDraftLabEval = readIfExists(agentDraftLabEvalPath);
 
 const checks = [
   {
@@ -682,6 +692,76 @@ const checks = [
     pass: aiAgentPrinciples.includes("允许不关闭 Draft") &&
       checkingFunction.includes("It is acceptable not to close a Draft") &&
       checkingFunction.includes("do not invent a Draft")
+  },
+  {
+    name: "visual draft spec preserves customer-facing north star",
+    pass: visualDraftAgentSpec.includes("Received, understood, and clear") &&
+      visualDraftAgentSpec.includes("not an internal engineering report") &&
+      visualDraftAgentSpec.includes("not a manufacturing package") &&
+      visualDraftAgentSpec.includes("easy_harness_requirement_map_v0_1") &&
+      visualDraftAgentSpec.includes("requirement_map") &&
+      visualDraftAgentSpec.includes("fact_trace") &&
+      visualDraftAgentSpec.includes("evidence_coverage") &&
+      visualDraftAgentSpec.includes("question_plan") &&
+      visualDraftAgentSpec.includes("draft_readiness")
+  },
+  {
+    name: "visual draft eval cases preserve evidence and question policy",
+    pass: visualDraftAgentEval.includes("easy_harness_visual_draft_eval_v0_1") &&
+      visualDraftAgentEval.includes("dt06_mixed_attachment_pack") &&
+      visualDraftAgentEval.includes("battery_fixture_mixed_material") &&
+      visualDraftAgentEval.includes("cad_reference_only_missing_goal") &&
+      visualDraftAgentEval.includes("old_sample_copy_with_photos") &&
+      visualDraftAgentEval.includes("spreadsheet_pinout_missing_other_end") &&
+      visualDraftAgentEval.includes("requirement_map_must_include") &&
+      visualDraftAgentEval.includes("must_show_received") &&
+      visualDraftAgentEval.includes("must_allow_unknown") &&
+      visualDraftAgentEval.includes("must_not_ask")
+  },
+  {
+    name: "agent draft lab builds requirement map before visual draft",
+    pass: agentDraftLabApi.includes("normalizeRequirementMap") &&
+      agentDraftLabApi.includes("easy_harness_requirement_map_v0_1") &&
+      agentDraftLabApi.includes("requirement_map") &&
+      agentDraftLabApi.includes("connection_groups") &&
+      agentDraftLabApi.includes("The poster must be derived from requirement_map") &&
+      agentDraftLabApi.includes("customer_request_basis") &&
+      agentDraftLabApi.includes("draft_connection_basis")
+  },
+  {
+    name: "agent draft lab renderer uses requirement map as primary visual source",
+    pass: agentDraftLab.includes("boardsFromRequirementMap") &&
+      agentDraftLab.includes("wireGroupsFromRequirementMap") &&
+      agentDraftLab.includes("routeZonesFromRequirementMap") &&
+      agentDraftLab.includes("openItemsFromRequirementMap") &&
+      agentDraftLab.includes("evidenceFromRequirementMap") &&
+      agentDraftLab.includes("draft.requirementMap")
+  },
+  {
+    name: "agent draft lab eval covers core visual draft cases",
+    pass: packageJson.includes('"agent:eval"') &&
+      agentDraftLabEval.includes("visual_draft_spec") &&
+      agentDraftLabEval.includes("dt06_mixed_attachment_pack") &&
+      agentDraftLabEval.includes("spreadsheet_pinout_missing_other_end") &&
+      agentDraftLabEval.includes("cad_reference_only_missing_goal")
+  },
+  {
+    name: "formal run-checking carries visual draft closure guards",
+    pass: checkingFunction.includes("applyDraftClosureGuards") &&
+      checkingFunction.includes("isCadReferenceOnlyDraft") &&
+      checkingFunction.includes("isSingleConnectorOrPinoutBasisDraft") &&
+      checkingFunction.includes("Connector-A/pinout-only rule") &&
+      checkingFunction.includes("CAD-only rule") &&
+      checkingFunction.includes("Mixed-files rule") &&
+      checkingFunction.includes("What is the other end of the harness, or should Easy Harness treat it as unknown for now?")
+  },
+  {
+    name: "formal run-checking emits requirement map for future visual drafts",
+    pass: checkingFunction.includes("easy_harness_requirement_map_v0_1") &&
+      checkingFunction.includes("buildRequirementMap") &&
+      checkingFunction.includes("requirement_map: buildRequirementMap(draft)") &&
+      checkingFunction.includes("Unknown other end") &&
+      checkingFunction.includes("evidence_refs")
   },
   {
     name: "stage 2A env template names offline credentials",

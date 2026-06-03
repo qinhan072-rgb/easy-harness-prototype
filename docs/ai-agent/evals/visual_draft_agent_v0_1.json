@@ -1,0 +1,260 @@
+{
+  "schema_version": "easy_harness_visual_draft_eval_v0_1",
+  "purpose": "Keep Easy Harness Visual Draft behavior stable across prompts, models, and new conversations.",
+  "north_star": "Received, understood, and clear.",
+  "global_must": [
+    "Show that Easy Harness received all supplied materials.",
+    "Show the connection goal in customer language.",
+    "Build requirement_map_v0_1 before rendering the visual draft.",
+    "Preserve evidence boundaries for files that were only received or only lightly parsed.",
+    "Use requirement_map, fact_trace, evidence_coverage, question_plan, and draft_readiness.",
+    "Render the visible wiring poster from requirement_map as the primary source of endpoints, sections, connection groups, open items, and evidence.",
+    "Ask only useful customer questions.",
+    "Put engineering confirmation into Easy Harness review instead of pushing it onto the customer.",
+    "Never present the visual Draft as a final manufacturing package."
+  ],
+  "global_must_not": [
+    "Do not ask a long questionnaire.",
+    "Do not pretend to read attachment content without observations.",
+    "Do not close Draft when the connection goal is missing.",
+    "Do not ask for exact connector part numbers, terminals, crimps, or wire gauges unless the customer explicitly has them and the Draft cannot proceed without them.",
+    "Do not let internal schema language dominate the customer-facing output."
+  ],
+  "cases": [
+    {
+      "id": "dt06_mixed_attachment_pack",
+      "input": "I need a short custom harness for a Deutsch DT06-6S connector. Use the attached connector image, PDF note, CSV pinout, XLSX table, and CAD reference files. Target length is about 450 mm. This will be used on a 12V automotive sensor branch. Please organize what I gave you into an Easy Harness Draft and ask me only for missing information.",
+      "files_or_observations": [
+        "dt06_6s_connector_photo_mock.png",
+        "dt06_6s_reference_note.pdf",
+        "dt06_6s_pinout.csv",
+        "dt06_6s_pinout.xlsx",
+        "dt06_6s_connector_shell.step",
+        "bracket_outline.dxf",
+        "protective_boot_ascii.stl"
+      ],
+      "expected_readiness": "needs_customer_reply",
+      "requirement_map_must_include": {
+        "endpoints": [
+          "Deutsch DT06-6S connector",
+          "unknown other end"
+        ],
+        "harness_sections": [
+          "target length about 450 mm",
+          "12V automotive sensor branch"
+        ],
+        "open_items": [
+          "other end missing",
+          "quantity missing"
+        ]
+      },
+      "must_show_received": [
+        "connector image",
+        "PDF note",
+        "CSV pinout",
+        "XLSX table",
+        "CAD reference files"
+      ],
+      "must_understand": [
+        "Deutsch DT06-6S connector",
+        "target length is about 450 mm",
+        "12V automotive sensor branch",
+        "pinout files are available",
+        "CAD files are references"
+      ],
+      "question_policy": {
+        "max_questions": 2,
+        "required_question_meaning": [
+          "What is the other end of the harness?",
+          "What quantity is needed?"
+        ],
+        "must_allow_unknown": true,
+        "must_not_ask": [
+          "terminal part number",
+          "crimp spec",
+          "full manufacturing BOM",
+          "CAD conversion details"
+        ]
+      }
+    },
+    {
+      "id": "battery_fixture_mixed_material",
+      "input": "We need 15 pcs of a harness for a battery test fixture. One controller box connects to four temperature sensors, two small cooling fans, and one emergency stop switch. Main trunk about 900 mm. Sensor drops about 250 mm. Fans are 24V but I do not know current. I uploaded photos of the controller connector, the old sample, and a spreadsheet with pin names. Please organize what you can and tell me only what is really needed.",
+      "files_or_observations": [
+        "controller-connector-photo.jpg",
+        "old-sample-overview.png",
+        "pin-name-table.xlsx"
+      ],
+      "expected_readiness": "ready_for_easy_harness_review",
+      "requirement_map_must_include": {
+        "endpoints": [
+          "controller box",
+          "temperature sensors",
+          "cooling fans",
+          "emergency stop switch"
+        ],
+        "harness_sections": [
+          "main trunk about 900 mm",
+          "sensor drops about 250 mm"
+        ],
+        "connection_groups": [
+          "sensor wiring",
+          "fan power",
+          "emergency stop switch"
+        ]
+      },
+      "must_show_received": [
+        "controller connector photo",
+        "old sample photo",
+        "pin-name spreadsheet"
+      ],
+      "must_understand": [
+        "quantity is 15 pcs",
+        "controller box connects to temperature sensors, cooling fans, and emergency stop switch",
+        "main trunk is about 900 mm",
+        "sensor drops are about 250 mm",
+        "fans are 24V and current is unknown"
+      ],
+      "question_policy": {
+        "max_questions": 2,
+        "allowed_topics": [
+          "fan load current or device model if known",
+          "temperature sensor type or model if known"
+        ],
+        "must_allow_unknown": true,
+        "must_not_block_review": true
+      },
+      "easy_harness_review_should_include": [
+        "connector identification from photos or sample",
+        "pin-name spreadsheet validation",
+        "wire gauge and load rating review",
+        "final connector and production detail review"
+      ]
+    },
+    {
+      "id": "cad_reference_only_missing_goal",
+      "input": "I uploaded CAD-style reference files for the connector shell, bracket outline, and protective boot. Please use them as dimensional/context references, not final manufacturing drawings.",
+      "files_or_observations": [
+        "connector-shell.step",
+        "bracket-outline.dxf",
+        "protective-boot.stl"
+      ],
+      "expected_readiness": "connection_goal_missing",
+      "requirement_map_must_include": {
+        "endpoints": [
+          "unknown source",
+          "unknown target"
+        ],
+        "open_items": [
+          "connection goal missing"
+        ]
+      },
+      "must_show_received": [
+        "STEP reference",
+        "DXF reference",
+        "STL reference"
+      ],
+      "must_understand": [
+        "CAD files are references",
+        "they are not final manufacturing drawings",
+        "no connection goal is stated"
+      ],
+      "question_policy": {
+        "max_questions": 1,
+        "required_question_meaning": "What should this harness or cable connect, copy, or replace?",
+        "must_not_ask": [
+          "connector part number",
+          "wire gauge",
+          "terminal selection",
+          "CAD conversion details"
+        ]
+      }
+    },
+    {
+      "id": "old_sample_copy_with_photos",
+      "input": "I want to copy an old harness for an outdoor sensor assembly. The old harness connects one controller box to two external sensors. Approximate total length is 1.2 m. Quantity 3 pcs first. It is signal wiring only and carries no motor or battery power. I have photos of both connector ends and the old sample.",
+      "files_or_observations": [
+        "old-sample-front.jpg",
+        "old-sample-back.jpg",
+        "connector-end-a.jpg",
+        "connector-end-b.jpg"
+      ],
+      "expected_readiness": "ready_for_easy_harness_review",
+      "requirement_map_must_include": {
+        "endpoints": [
+          "controller box",
+          "external sensor 1",
+          "external sensor 2"
+        ],
+        "harness_sections": [
+          "old sample copy",
+          "total length about 1.2 m"
+        ],
+        "connection_groups": [
+          "signal wiring"
+        ]
+      },
+      "must_show_received": [
+        "old sample photos",
+        "both connector end photos"
+      ],
+      "must_understand": [
+        "copy old harness",
+        "controller box to two external sensors",
+        "outdoor sensor assembly",
+        "total length about 1.2 m",
+        "quantity 3 pcs",
+        "signal only, no motor or battery power"
+      ],
+      "question_policy": {
+        "max_questions": 1,
+        "allowed_topics": [
+          "whether the two sensor ends are identical or different"
+        ],
+        "must_allow_unknown": true
+      }
+    },
+    {
+      "id": "spreadsheet_pinout_missing_other_end",
+      "input": "The pin mapping is in my spreadsheet and CSV. Please use those files as the source of truth. Connector A is DT06-6S. I am not sure about wire colors for pins 5 and 6.",
+      "files_or_observations": [
+        "dt06_6s_pinout.csv",
+        "dt06_6s_pinout.xlsx"
+      ],
+      "expected_readiness": "needs_customer_reply",
+      "requirement_map_must_include": {
+        "endpoints": [
+          "Connector A DT06-6S",
+          "unknown other end"
+        ],
+        "open_items": [
+          "other end missing",
+          "quantity missing",
+          "length missing"
+        ]
+      },
+      "must_show_received": [
+        "CSV pinout",
+        "XLSX pinout"
+      ],
+      "must_understand": [
+        "Connector A is DT06-6S",
+        "pin mapping files are intended as source of truth",
+        "wire colors for pins 5 and 6 are uncertain",
+        "the other end is not stated"
+      ],
+      "question_policy": {
+        "max_questions": 2,
+        "required_question_meaning": [
+          "What is the other end of the harness?",
+          "What quantity and approximate length are needed?"
+        ],
+        "must_not_ask": [
+          "terminal part number",
+          "crimp spec",
+          "full manufacturing BOM"
+        ]
+      }
+    }
+  ]
+}

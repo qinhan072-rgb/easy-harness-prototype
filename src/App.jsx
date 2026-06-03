@@ -36,6 +36,7 @@ import {
   supabase,
   supabaseConfigured,
 } from "./supabaseClient.js";
+import AgentDraftLab from "./AgentDraftLab.jsx";
 
 const processingSteps = [
   "Upload received",
@@ -3035,6 +3036,12 @@ const seedServiceEvents = [
 ];
 
 function App() {
+  const labPath =
+    typeof window !== "undefined" &&
+    (window.location.pathname === "/agent-lab" ||
+      window.location.hash === "#agent-lab");
+  if (labPath) return <AgentDraftLab />;
+
   const [users, setUsers] = useStoredState("easy-harness.users", seedUsers);
   const [currentUserId, setCurrentUserId] = useStoredState(
     "easy-harness.currentUserId",
