@@ -427,6 +427,14 @@ const checks = [
       app.includes("handleDropUpload")
   },
   {
+    name: "checking requests have timeout and stale recovery",
+    pass: app.includes("checkingInvokeTimeoutMs") &&
+      app.includes("callWithTimeout(") &&
+      app.includes("isStaleCheckingRequest") &&
+      app.includes("stale_check_recovery_started") &&
+      app.includes("stale_check_recovery")
+  },
+  {
     name: "conversation attachments can render inline visuals",
     pass: app.includes("AttachmentGallery") &&
       app.includes("attachment-image-preview") &&

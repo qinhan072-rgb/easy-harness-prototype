@@ -77,6 +77,8 @@ const intakeOutcomeCopy = {
 const sampleFiles = ["connector-photo.jpg", "old-harness.png", "notes.pdf"];
 const maxFilesPerUpload = 8;
 const maxFileSizeBytes = 25 * 1024 * 1024;
+const checkingInvokeTimeoutMs = 90 * 1000;
+const staleCheckingRetryMs = 5 * 60 * 1000;
 const legacySmokeCopy =
   "Details Easy Harness still needs | Reply in the thread with what you know";
 void legacySmokeCopy;
@@ -1236,6 +1238,43 @@ function displayTime(value) {
   });
 }
 
+function callWithTimeout(promise, timeoutMs, timeoutMessage) {
+  let timerId;
+  return new Promise((resolve) => {
+    timerId = window.setTimeout(
+      () => resolve({ data: null, error: { message: timeoutMessage } }),
+      timeoutMs,
+    );
+    promise.then(
+      (value) => resolve(value),
+      (error) =>
+        resolve({
+          data: null,
+          error: {
+            message:
+              error?.message ||
+              timeoutMessage ||
+              "Easy Harness intake did not finish.",
+          },
+        }),
+    );
+  }).finally(() => window.clearTimeout(timerId));
+}
+
+function timestampMs(value) {
+  if (!value) return 0;
+  const parsed = new Date(value).getTime();
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function isStaleCheckingRequest(request) {
+  if (!request?.supabaseId || request.status !== "checking") return false;
+  const checkStatus = request.checkResult?.status || "";
+  if (!["", "pending", "queued"].includes(checkStatus)) return false;
+  const lastUpdated = timestampMs(request.updatedAtIso || request.createdAtIso);
+  return Boolean(lastUpdated && Date.now() - lastUpdated > staleCheckingRetryMs);
+}
+
 function isEmailLike(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
@@ -1779,6 +1818,8 @@ function localRequestFromSupabase(row, currentUser) {
     customer: row.customer_label || currentUser?.name || "Customer",
     title: row.title,
     status: row.status,
+    createdAtIso: row.created_at || "",
+    updatedAtIso: row.updated_at || row.created_at || "",
     checkResult: row.check_result || {
       status: row.check_status || "pending",
       adapter: "supabase",
@@ -3159,6 +3200,7 @@ function App() {
   const submittingRequestRef = useRef(false);
   const sendingUserMessageRef = useRef(false);
   const currentUserIdRef = useRef(currentUserId);
+  const checkingRecoveryAttemptsRef = useRef(new Set());
 
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
@@ -3260,6 +3302,37 @@ function App() {
     supabaseSessionReady,
     authSession?.adapter,
     authSession?.userId,
+  ]);
+
+  useEffect(() => {
+    if (!supabase || !currentUser?.id || !visibleRequests.length) return;
+    if (
+      supabaseConfigured &&
+      (!supabaseSessionReady ||
+        authSession?.adapter !== "supabase-auth" ||
+        authSession.userId !== currentUser.id)
+    )
+      return;
+
+    const staleRequest = visibleRequests.find(isStaleCheckingRequest);
+    if (!staleRequest) return;
+    const recoveryKey = staleRequest.supabaseId || staleRequest.id;
+    if (checkingRecoveryAttemptsRef.current.has(recoveryKey)) return;
+    checkingRecoveryAttemptsRef.current.add(recoveryKey);
+    recordServiceEvent(
+      platformAdapters.checking.id,
+      "stale_check_recovery_started",
+      "request",
+      staleRequest.id,
+      "Easy Harness is continuing a request that stayed in organizing state.",
+    );
+    void invokeSupabaseChecking(staleRequest, "stale_check_recovery");
+  }, [
+    authSession?.adapter,
+    authSession?.userId,
+    currentUser?.id,
+    supabaseSessionReady,
+    visibleRequests,
   ]);
 
   useEffect(() => {
@@ -4754,12 +4827,16 @@ function App() {
     );
 
     try {
-      const { data, error } = await supabase.functions.invoke("run-checking", {
-        body: {
-          requestId: request.supabaseId,
-          trigger,
-        },
-      });
+      const { data, error } = await callWithTimeout(
+        supabase.functions.invoke("run-checking", {
+          body: {
+            requestId: request.supabaseId,
+            trigger,
+          },
+        }),
+        checkingInvokeTimeoutMs,
+        "Easy Harness intake is taking longer than expected.",
+      );
 
       if (error || !data?.ok) {
         const failureMessage =
