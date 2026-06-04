@@ -8,6 +8,7 @@ import {
   FileText,
   Sparkles,
 } from "lucide-react";
+import RequirementMapVisual from "./RequirementMapVisual.jsx";
 
 const labCases = [
   {
@@ -1652,6 +1653,25 @@ function AgentDraftLab() {
     handleResetGeneratedDraft();
   }
 
+  if (window.location.pathname === "/agent-lab/formal") {
+    return (
+      <main className="formal-draft-preview-page">
+        <header>
+          <span>Internal formal Draft preview</span>
+          <h1>{draft.title}</h1>
+          <p>{draft.promise}</p>
+        </header>
+        <RequirementMapVisual
+          map={requirementMap}
+          fallback={{
+            title: draft.title,
+            connectionGoal: understanding.goal,
+          }}
+        />
+      </main>
+    );
+  }
+
   return (
     <main className="agent-lab-shell">
       <aside className="agent-lab-sidebar">
@@ -1790,6 +1810,16 @@ function AgentDraftLab() {
             </p>
             <DraftReadiness readiness={understanding.draftReadiness} />
             <RequirementMapPanel map={requirementMap} />
+            <section className="agent-lab-card formal-customer-visual">
+              <h3>Formal Customer Visual</h3>
+              <RequirementMapVisual
+                map={requirementMap}
+                fallback={{
+                  title: draft.title,
+                  connectionGoal: understanding.goal,
+                }}
+              />
+            </section>
 
             <div className="agent-lab-confidence">
               <span>Connection: {draft.confidence.connection}</span>

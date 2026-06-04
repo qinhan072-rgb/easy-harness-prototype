@@ -32,6 +32,7 @@ const storageFunctionPath = resolve(root, "supabase", "functions", "create-stora
 const checkingFunctionPath = resolve(root, "supabase", "functions", "run-checking", "index.ts");
 const agentDraftLabApiPath = resolve(root, "scripts", "agent-draft-lab-api.mjs");
 const agentDraftLabPath = resolve(root, "src", "AgentDraftLab.jsx");
+const requirementMapVisualPath = resolve(root, "src", "RequirementMapVisual.jsx");
 const agentDraftLabEvalPath = resolve(root, "scripts", "agent-draft-lab-eval.mjs");
 
 function readIfExists(path) {
@@ -39,6 +40,7 @@ function readIfExists(path) {
 }
 
 const app = readFileSync(appPath, "utf8");
+const requirementMapVisual = readIfExists(requirementMapVisualPath);
 const supabaseClient = readIfExists(supabaseClientPath);
 const packageJson = readIfExists(packagePath);
 const appIndex = readIfExists(appIndexPath);
@@ -422,6 +424,7 @@ const checks = [
       app.includes("webkitGetAsEntry") &&
       app.includes("dedupeDroppedFileItems") &&
       app.includes("const directFiles = Array.from(dataTransfer?.files || [])") &&
+      app.includes("DataTransfer can enter protected mode") &&
       app.includes("return dedupeDroppedFileItems([...collected, ...directFiles])") &&
       app.includes("drop-active") &&
       app.includes("handleDropUpload")
@@ -746,6 +749,15 @@ const checks = [
       agentDraftLab.includes("draft.requirementMap")
   },
   {
+    name: "formal customer draft renders the requirement map visually",
+    pass: app.includes("RequirementMapVisual") &&
+      app.includes("request?.checkResult?.requirement_map") &&
+      app.includes("draft-details-disclosure") &&
+      requirementMapVisual.includes("normalizeRequirementMap") &&
+      requirementMapVisual.includes("Visual draft") &&
+      requirementMapVisual.includes("known_signals")
+  },
+  {
     name: "agent draft lab eval covers core visual draft cases",
     pass: packageJson.includes('"agent:eval"') &&
       agentDraftLabEval.includes("visual_draft_spec") &&
@@ -764,12 +776,22 @@ const checks = [
       checkingFunction.includes("What is the other end of the harness, or should Easy Harness treat it as unknown for now?")
   },
   {
-    name: "formal run-checking emits requirement map for future visual drafts",
+    name: "formal run-checking asks the model for a requirement map and reconciles it",
     pass: checkingFunction.includes("easy_harness_requirement_map_v0_1") &&
+      checkingFunction.includes('"requirement_map"') &&
+      checkingFunction.includes("Before writing the customer summary, organize your understanding into requirement_map") &&
+      checkingFunction.includes("buildDeterministicRequirementMap") &&
       checkingFunction.includes("buildRequirementMap") &&
       checkingFunction.includes("requirement_map: buildRequirementMap(draft)") &&
+      checkingFunction.includes("requirementMap: buildRequirementMap(draft)") &&
       checkingFunction.includes("Unknown other end") &&
       checkingFunction.includes("evidence_refs")
+  },
+  {
+    name: "formal intake deduplicates question intent and normalizes known details",
+    pass: checkingFunction.includes("seenFields") &&
+      checkingFunction.includes("canonicalKnownDetailKey") &&
+      checkingFunction.includes("end_b_lead_length")
   },
   {
     name: "stage 2A env template names offline credentials",

@@ -37,6 +37,7 @@ import {
   supabaseConfigured,
 } from "./supabaseClient.js";
 import AgentDraftLab from "./AgentDraftLab.jsx";
+import RequirementMapVisual from "./RequirementMapVisual.jsx";
 
 const processingSteps = [
   "Upload received",
@@ -1446,25 +1447,31 @@ async function collectEntryFiles(entry, prefix = "") {
 }
 
 async function collectDroppedFileItems(dataTransfer) {
-  const items = Array.from(dataTransfer?.items || []).filter(
-    (item) => item.kind === "file",
-  );
-  const collected = [];
-  if (items.length) {
-    for (const item of items) {
-      const entry = item.webkitGetAsEntry?.();
-      if (entry) {
-        collected.push(...(await collectEntryFiles(entry)));
-      } else {
-        const file = item.getAsFile?.();
-        if (file) collected.push({ file, relativePath: file.webkitRelativePath || "" });
-      }
-    }
-  }
+  // DataTransfer can enter protected mode after the first async boundary.
+  // Snapshot every file and entry while the drop event is still active.
   const directFiles = Array.from(dataTransfer?.files || []).map((file) => ({
     file,
     relativePath: file.webkitRelativePath || "",
   }));
+  const items = Array.from(dataTransfer?.items || [])
+    .filter((item) => item.kind === "file")
+    .map((item) => ({
+      entry: item.webkitGetAsEntry?.() || null,
+      file: item.getAsFile?.() || null,
+    }));
+  const collected = [];
+  if (items.length) {
+    for (const item of items) {
+      if (item.entry) {
+        collected.push(...(await collectEntryFiles(item.entry)));
+      } else if (item.file) {
+        collected.push({
+          file: item.file,
+          relativePath: item.file.webkitRelativePath || "",
+        });
+      }
+    }
+  }
   return dedupeDroppedFileItems([...collected, ...directFiles]);
 }
 
@@ -3079,7 +3086,7 @@ const seedServiceEvents = [
 function App() {
   const labPath =
     typeof window !== "undefined" &&
-    (window.location.pathname === "/agent-lab" ||
+    (window.location.pathname.startsWith("/agent-lab") ||
       window.location.hash === "#agent-lab");
   if (labPath) return <AgentDraftLab />;
 
@@ -4777,12 +4784,7 @@ function App() {
     const checkResult = data.checkResult || {};
     const draft = normalizeDraftForView(checkResult, request);
     const status = draft.draft_meta?.draft_status || data.draftStatus || "";
-    const readyForReview =
-      status === "ready_for_easy_harness_review" ||
-      status === "closed_for_easy_harness_review" ||
-      data.checkStatus === "accepted" ||
-      data.status === "in_review";
-    if (readyForReview) {
+    if (status !== "not_harness_related") {
       blocks.push({
         type: "draft_summary",
         draftId: `${request.id}-D1`,
@@ -4797,9 +4799,10 @@ function App() {
         intentType: draft.user_intent?.intent_type || "",
         fromSide: draft.user_intent?.from_side || "",
         toSide: draft.user_intent?.to_side || [],
+        requirementMap: checkResult.requirement_map || null,
         knownDetails: knownRequirementItems(draft.known_requirements),
         files: (draft.provided_evidence || [])
-          .map((item) => item.filename || item.content_summary || item.type)
+          .map((item) => item.filename)
           .filter(Boolean),
         reviewItems: easyHarnessReviewItems(draft).slice(0, 5),
       });
@@ -8311,9 +8314,8 @@ function ThreadDraftSummary({ block, request }) {
   const files = block.files || [];
   const fromSide = block.fromSide && block.fromSide !== "unknown" ? block.fromSide : "Request";
   const toSides = Array.isArray(block.toSide) ? block.toSide.filter(Boolean) : [];
-  const diagramLabel = toSides.length
-    ? `${fromSide} → ${toSides.join(", ")}`
-    : block.connectionGoal || block.title || request.title;
+  const requirementMap =
+    block.requirementMap || request?.checkResult?.requirement_map || null;
   return (
     <div className="thread-draft-summary">
       <div className="draft-record-top">
@@ -8325,11 +8327,15 @@ function ThreadDraftSummary({ block, request }) {
         <span className="draft-state">{block.status || "Ready for review"}</span>
       </div>
 
-      <div className="draft-connection-diagram" aria-label="Draft connection summary">
-        <span>{fromSide}</span>
-        <strong>→</strong>
-        <span>{toSides.length ? toSides.join(", ") : diagramLabel}</span>
-      </div>
+      <RequirementMapVisual
+        map={requirementMap}
+        fallback={{
+          title: block.title || request.title,
+          connectionGoal: block.connectionGoal,
+          fromSide,
+          toSides,
+        }}
+      />
 
       {!!details.length && (
         <div className="summary-chips draft-summary-chips">
@@ -8340,8 +8346,8 @@ function ThreadDraftSummary({ block, request }) {
       )}
 
       {!!knownDetails.length && (
-        <div className="draft-summary-section">
-          <strong>Known details</strong>
+        <details className="draft-summary-section draft-details-disclosure">
+          <summary>Known details</summary>
           <div className="draft-detail-table">
             {knownDetails.slice(0, 8).map((item) => {
               const [label, value] = splitDetailRow(item);
@@ -8353,14 +8359,14 @@ function ThreadDraftSummary({ block, request }) {
               );
             })}
           </div>
-        </div>
+        </details>
       )}
 
       {!!files.length && (
         <div className="draft-summary-section">
           <strong>Files received</strong>
           <ul>
-            {files.slice(0, 5).map((item) => (
+            {files.slice(0, maxFilesPerUpload).map((item) => (
               <li key={item}>{formatMissingInfoItem(item)}</li>
             ))}
           </ul>
@@ -8591,6 +8597,29 @@ function normalizeUnknownItemList(items = []) {
     .filter((item) => item && !isPlaceholderUnknown(item));
 }
 
+function userQuestionSemanticKey(item = "") {
+  const text = String(item).toLowerCase();
+  if (/\bquantity|how many\b/.test(text)) return "quantity";
+  if (/\blength|measurement|measure it\b/.test(text)) return "length";
+  if (/\bother end|connector b|end b|connect, copy, or replace\b/.test(text))
+    return "other_end";
+  if (/\bcurrent|power|voltage\b/.test(text)) return "power";
+  return text.replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+function semanticallyUniqueQuestions(items = [], limit = 3) {
+  const output = [];
+  const seen = new Set();
+  for (const item of items) {
+    const key = userQuestionSemanticKey(item);
+    if (!item || seen.has(key)) continue;
+    seen.add(key);
+    output.push(item);
+    if (output.length >= limit) break;
+  }
+  return output;
+}
+
 function userNeededNextItems(draft = {}) {
   const status = draft?.draft_meta?.draft_status || "";
   if (isReadyDraftStatus(status)) return [];
@@ -8599,10 +8628,12 @@ function userNeededNextItems(draft = {}) {
     ...normalizeUnknownItemList(unknowns.ask_user_now),
     ...normalizeUnknownItemList(unknowns.ask_user_if_likely_known),
   ];
-  if (directQuestions.length) return [...new Set(directQuestions)].slice(0, 3);
-  return (draft?.user_facing_summary?.needed_next || [])
-    .filter((item) => !isEasyHarnessReviewOnlyItem(item))
-    .slice(0, 3);
+  if (directQuestions.length) return semanticallyUniqueQuestions(directQuestions);
+  return semanticallyUniqueQuestions(
+    (draft?.user_facing_summary?.needed_next || []).filter(
+      (item) => !isEasyHarnessReviewOnlyItem(item),
+    ),
+  );
 }
 
 function isEasyHarnessReviewOnlyItem(item = "") {
@@ -8689,21 +8720,52 @@ function unknownItemLabel(item) {
 
 function detailValueLabel(value) {
   if (!value) return "";
-  if (typeof value === "string") return value;
+  if (typeof value === "string") {
+    const label = value.trim();
+    return ["", "unknown", "not specified", "n/a", "none", "null"].includes(
+      label.toLowerCase(),
+    )
+      ? ""
+      : label;
+  }
   if (typeof value === "object")
-    return value.value && value.value !== "unknown" ? value.value : "";
+    return detailValueLabel(value.value || value.label || "");
   return String(value);
 }
 
+function canonicalKnownDetailKey(key = "") {
+  const normalized = key.toLowerCase();
+  if (/^(qty|quantity|pieces|piece_count|order_quantity)$/.test(normalized))
+    return "quantity";
+  if (
+    /^(overall_length_mm|overall_length|harness_length|length|estimated_length|approximate_length|full_length|cable_length)$/.test(
+      normalized,
+    )
+  )
+    return "overall_length";
+  if (/^(end_a_lead_length_mm|end_a_lead_length)$/.test(normalized))
+    return "end_a_lead_length";
+  if (/^(end_b_lead_length_mm|end_b_lead_length)$/.test(normalized))
+    return "end_b_lead_length";
+  if (/^(connector_end_a|end_a_connector)$/.test(normalized))
+    return "end_a_connector";
+  if (/^(connector_end_b|end_b_connector)$/.test(normalized))
+    return "end_b_connector";
+  return normalized;
+}
+
 function knownRequirementItems(knownRequirements = {}) {
-  return Object.entries(knownRequirements)
-    .map(([key, value]) => {
-      const label = detailValueLabel(value);
-      if (!label) return null;
-      return `${key.replaceAll("_", " ")}: ${label}`;
-    })
-    .filter(Boolean)
-    .slice(0, 6);
+  const details = [];
+  const seen = new Set();
+  for (const [key, value] of Object.entries(knownRequirements)) {
+    const label = detailValueLabel(value);
+    const canonicalKey = canonicalKnownDetailKey(key);
+    if (!label || seen.has(canonicalKey)) continue;
+    seen.add(canonicalKey);
+    details.push(`${canonicalKey.replaceAll("_", " ")}: ${label}`);
+    if (details.length >= 8) break;
+  }
+  return details;
 }
 
 function unknownsByOwner(draft) {
@@ -8760,7 +8822,7 @@ function IntakeDraftCard({ checkResult, request }) {
   const compactDetails = summary.compact_details || [];
   const neededNext = userNeededNextItems(draft);
   const reviewItems = easyHarnessReviewItems(draft);
-  const evidence = draft.provided_evidence || [];
+  const evidence = (draft.provided_evidence || []).filter((item) => item.filename);
   const userAction = neededNext.length
     ? "Please reply with the key detail below so Easy Harness can continue."
     : isReadyDraftStatus(status)
@@ -8813,9 +8875,9 @@ function IntakeDraftCard({ checkResult, request }) {
         <div className="summary-section">
           <span>Files received</span>
           <ul>
-            {evidence.slice(0, 3).map((item, index) => (
+            {evidence.slice(0, maxFilesPerUpload).map((item, index) => (
               <li key={`${item.filename || item.type}-${index}`}>
-                {item.filename || item.content_summary || item.type}
+                {item.filename}
               </li>
             ))}
           </ul>

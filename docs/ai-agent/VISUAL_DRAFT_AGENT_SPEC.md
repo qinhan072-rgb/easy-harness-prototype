@@ -1,6 +1,6 @@
 # Easy Harness Visual Draft Agent Spec
 
-Status: experimental product contract for Agent Lab and future Draft UI.
+Status: product contract for Agent Lab and the formal customer Draft UI.
 
 This document exists so the Agent's capability is not stored in a chat memory.
 The model may change, prompts may change, and the UI may improve, but the
@@ -188,7 +188,8 @@ The current experimental route is:
 
 ```text
 customer input + attachment observations
-  -> requirement_map_v0_1
+  -> model-interpreted requirement_map_v0_1
+  -> deterministic evidence/closure reconciliation
   -> easy_harness_visual_draft_spec_v0_1
   -> deterministic visual renderer
 ```
@@ -226,8 +227,20 @@ the customer-facing Easy Harness Draft:
   of treating the request as review-ready.
 - Quantity and approximate length are asked only when they are missing and
   materially affect Draft closure.
-- `check_result.requirement_map` is emitted as a deterministic helper object for
-  future visual Draft rendering.
+- The Draft model must output `requirement_map` as its semantic connection
+  interpretation. Deterministic post-processing validates its topology, owns
+  current customer questions and evidence boundaries, and supplies an honest
+  minimal fallback when the model map is incomplete.
+- `check_result.requirement_map` is the reconciled map used for formal visual
+  Draft rendering.
+- The customer thread renders the visual Draft from `requirement_map` for both
+  incomplete and review-ready requests. Unknown endpoints and incomplete
+  connections stay visibly uncertain.
+- The detailed known-requirements table remains available as supporting detail,
+  but the visual Draft is the primary customer-facing representation.
+- Customer questions are deduplicated by meaning, and known-detail aliases are
+  normalized before they are shown so one Draft does not display conflicting
+  known/unknown values.
 
 Changing `supabase/functions/run-checking/index.ts` requires redeploying the
 Supabase Edge Function; a Vercel frontend deployment alone does not update the

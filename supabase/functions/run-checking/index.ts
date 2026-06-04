@@ -219,6 +219,7 @@ type EasyHarnessDraft = {
     needed_next: string[];
     next_step: string;
   };
+  requirement_map: RequirementMap;
   draft_closure: {
     can_close_user_draft: boolean;
     closure_status: DraftStatus;
@@ -1356,6 +1357,7 @@ const draftSchema = {
     "unknowns",
     "risk_flags",
     "user_facing_summary",
+    "requirement_map",
     "draft_closure",
   ],
   properties: {
@@ -1485,6 +1487,135 @@ const draftSchema = {
         what_we_have: { type: "array", items: { type: "string" }, maxItems: 6 },
         needed_next: { type: "array", items: { type: "string" }, maxItems: 3 },
         next_step: { type: "string" },
+      },
+    },
+    requirement_map: {
+      type: "object",
+      additionalProperties: false,
+      required: [
+        "schema_version",
+        "connection_goal",
+        "endpoints",
+        "harness_sections",
+        "connection_groups",
+        "known_facts",
+        "open_items",
+        "easy_harness_review_items",
+        "evidence_refs",
+      ],
+      properties: {
+        schema_version: {
+          type: "string",
+          enum: ["easy_harness_requirement_map_v0_1"],
+        },
+        connection_goal: { type: "string" },
+        endpoints: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "id",
+              "label",
+              "role",
+              "known_from",
+              "status",
+              "evidence_refs",
+            ],
+            properties: {
+              id: { type: "string" },
+              label: { type: "string" },
+              role: { type: "string" },
+              known_from: { type: "string" },
+              status: { type: "string" },
+              evidence_refs: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        harness_sections: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "id",
+              "label",
+              "type",
+              "length_basis",
+              "route_basis",
+              "status",
+            ],
+            properties: {
+              id: { type: "string" },
+              label: { type: "string" },
+              type: { type: "string" },
+              length_basis: { type: "string" },
+              route_basis: { type: "string" },
+              status: { type: "string" },
+            },
+          },
+        },
+        connection_groups: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: [
+              "id",
+              "label",
+              "from",
+              "to",
+              "function",
+              "known_signals",
+              "status",
+              "evidence_refs",
+              "review_needed",
+            ],
+            properties: {
+              id: { type: "string" },
+              label: { type: "string" },
+              from: { type: "string" },
+              to: { type: "string" },
+              function: { type: "string" },
+              known_signals: { type: "array", items: { type: "string" } },
+              status: { type: "string" },
+              evidence_refs: { type: "array", items: { type: "string" } },
+              review_needed: { type: "array", items: { type: "string" } },
+            },
+          },
+        },
+        known_facts: { type: "array", items: { type: "string" } },
+        open_items: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["item", "owner", "why_it_matters", "blocks_review"],
+            properties: {
+              item: { type: "string" },
+              owner: { type: "string" },
+              why_it_matters: { type: "string" },
+              blocks_review: { type: "boolean" },
+            },
+          },
+        },
+        easy_harness_review_items: {
+          type: "array",
+          items: { type: "string" },
+        },
+        evidence_refs: {
+          type: "array",
+          items: {
+            type: "object",
+            additionalProperties: false,
+            required: ["source", "supports", "boundary"],
+            properties: {
+              source: { type: "string" },
+              supports: { type: "string" },
+              boundary: { type: "string" },
+            },
+          },
+        },
       },
     },
     draft_closure: {
@@ -2095,6 +2226,11 @@ function customerQuestionLabel(item: UnknownItem | string) {
 
 function questionField(question: string) {
   const text = question.toLowerCase();
+  if (
+    /\bquantity|how many\b/.test(text) &&
+    /\blength|measurement|sample that can be measured\b/.test(text)
+  )
+    return "quantity_and_length";
   if (/\b(other end|opposite end|connect to what|connect, copy, or replace|connection goal)\b/.test(text))
     return "connection_goal_or_other_end";
   if (/\bquantity|how many\b/.test(text)) return "quantity";
@@ -2116,11 +2252,29 @@ function customerQuestionSet(draft: EasyHarnessDraft, limit = 3) {
   ];
   const output: string[] = [];
   const seen = new Set<string>();
+  const seenFields = new Set<string>();
   for (const raw of rawQuestions) {
     const question = normalizeString(raw, "");
     const key = question.toLowerCase();
-    if (!question || seen.has(key)) continue;
+    const field = questionField(question);
+    const overlapsCombinedField =
+      field === "quantity_and_length"
+        ? seenFields.has("quantity") || seenFields.has("length_or_measurement_basis")
+        : ["quantity", "length_or_measurement_basis"].includes(field) &&
+          seenFields.has("quantity_and_length");
+    if (
+      !question ||
+      seen.has(key) ||
+      overlapsCombinedField ||
+      (field !== "draft_blocking_detail" && seenFields.has(field))
+    )
+      continue;
     seen.add(key);
+    seenFields.add(field);
+    if (field === "quantity_and_length") {
+      seenFields.add("quantity");
+      seenFields.add("length_or_measurement_basis");
+    }
     output.push(question);
     if (output.length >= limit) break;
   }
@@ -2228,9 +2382,35 @@ function deriveMissingKnownRequirements(draft: EasyHarnessDraft) {
   if (quantity) setKnownRequirementIfMissing(draft, "quantity", `${quantity[1]} ${quantity[2]}`);
 
   const length = firstMatchText(text, [
-    /\b(?:length|full length|total length|about|approx\.?|approximately|around)?\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
+    /\b(?:overall|full|total|harness|cable)\s+length\s*(?:is|of|[:=])?\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
+    /\b(?:target|approximate|estimated)\s+length\s*(?:is|of|[:=])?\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
+    /\b(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\s+(?:signal\s+)?(?:wire\s+)?(?:harness|cable|loom|assembly)\b/i,
+    /\b(?:length|about|approx\.?|approximately|around)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
   ]);
   if (length) setKnownRequirementIfMissing(draft, "harness_length", `${length[1]} ${length[2]}`);
+
+  const endALeadLength = firstMatchText(text, [
+    /\b(?:end|connector)\s*a\b.{0,70}?\b(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
+  ]);
+  if (endALeadLength) {
+    setKnownRequirementIfMissing(
+      draft,
+      "end_a_lead_length",
+      `${endALeadLength[1]} ${endALeadLength[2]}`,
+    );
+  }
+
+  const endBLeadLength = firstMatchText(text, [
+    /\b(?:end|connector)\s*b\b.{0,70}?\b(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
+    /\b(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\s+(?:labeled\s+)?(?:bare\s+wire|flying|free)\s+leads?\b/i,
+  ]);
+  if (endBLeadLength) {
+    setKnownRequirementIfMissing(
+      draft,
+      "end_b_lead_length",
+      `${endBLeadLength[1]} ${endBLeadLength[2]}`,
+    );
+  }
 
   const voltage = firstMatchText(text, [/\b(\d+(?:\.\d+)?)\s*(v|volt|volts)\b/i]);
   if (voltage) setKnownRequirementIfMissing(draft, "voltage", `${voltage[1]} ${voltage[2]}`);
@@ -2481,6 +2661,137 @@ function normalizeArrayObjects(
     .slice(0, limit) as Array<Record<string, unknown>>;
 }
 
+function normalizeRequirementMapValue(value: unknown): RequirementMap {
+  const raw =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const endpointIds = new Map<string, string>();
+  const usedEndpointIds = new Set<string>();
+  const endpoints = normalizeArrayObjects(raw.endpoints, 10)
+    .map((item, index) => {
+      const label = normalizeString(item.label, "");
+      if (!label) return null;
+      const rawId = normalizeString(item.id, "") || `endpoint_${index + 1}`;
+      const baseId = slugId(rawId || label, `endpoint_${index + 1}`);
+      let id = baseId;
+      let suffix = 2;
+      while (usedEndpointIds.has(id)) {
+        id = `${baseId}_${suffix}`;
+        suffix += 1;
+      }
+      usedEndpointIds.add(id);
+      endpointIds.set(rawId, id);
+      endpointIds.set(slugId(rawId, rawId), id);
+      return {
+        id,
+        label,
+        role: normalizeString(item.role, index === 0 ? "source" : "target"),
+        known_from: normalizeString(item.known_from, "Easy Harness Draft"),
+        status: normalizeString(item.status, "partial"),
+        evidence_refs: normalizeList(item.evidence_refs, 8),
+      };
+    })
+    .filter(Boolean) as RequirementMapEndpoint[];
+  const endpointId = (value: unknown, fallback: string) => {
+    const rawId = normalizeString(value, "");
+    return (
+      endpointIds.get(rawId) ||
+      endpointIds.get(slugId(rawId, rawId)) ||
+      fallback
+    );
+  };
+  const sections = normalizeArrayObjects(raw.harness_sections, 8)
+    .map((item, index) => {
+      const label =
+        normalizeString(item.label, "") || normalizeString(item.type, "");
+      if (!label) return null;
+      return {
+        id: slugId(normalizeString(item.id, "") || label, `section_${index + 1}`),
+        label,
+        type: normalizeString(item.type, "route_section"),
+        length_basis: normalizeString(item.length_basis, ""),
+        route_basis: normalizeString(item.route_basis, ""),
+        status: normalizeString(item.status, "partial"),
+      };
+    })
+    .filter(Boolean) as RequirementMapSection[];
+  const groups = normalizeArrayObjects(raw.connection_groups, 12)
+    .map((item, index) => {
+      if (endpoints.length < 2) return null;
+      const from = endpointId(item.from, endpoints[0].id);
+      const to = endpointId(
+        item.to,
+        endpoints[Math.min(index + 1, endpoints.length - 1)].id,
+      );
+      if (!from || !to || from === to) return null;
+      return {
+        id: slugId(
+          normalizeString(item.id, "") ||
+            normalizeString(item.label, "") ||
+            `connection_group_${index + 1}`,
+          `connection_group_${index + 1}`,
+        ),
+        label: normalizeString(item.label, "Harness connection"),
+        from,
+        to,
+        function: normalizeString(item.function, "draft connection"),
+        known_signals: normalizeList(item.known_signals, 12),
+        status: normalizeString(item.status, "partial"),
+        evidence_refs: normalizeList(item.evidence_refs, 8),
+        review_needed: normalizeList(item.review_needed, 8),
+      };
+    })
+    .filter(Boolean) as RequirementMapConnectionGroup[];
+  const openItems = normalizeArrayObjects(raw.open_items, 8)
+    .map((item) => {
+      const question =
+        normalizeString(item.item, "") ||
+        normalizeString(item.question, "") ||
+        normalizeString(item.reason, "");
+      if (!question) return null;
+      return {
+        item: question,
+        owner: normalizeString(item.owner, "customer_or_easy_harness"),
+        why_it_matters: normalizeString(
+          item.why_it_matters,
+          "This affects Draft clarity or Easy Harness review.",
+        ),
+        blocks_review:
+          typeof item.blocks_review === "boolean" ? item.blocks_review : false,
+      };
+    })
+    .filter(Boolean) as RequirementMapOpenItem[];
+  const evidenceRefs = normalizeArrayObjects(raw.evidence_refs, 12)
+    .map((item) => {
+      const source = normalizeString(item.source, "");
+      if (!source) return null;
+      return {
+        source,
+        supports: normalizeString(item.supports, "Draft evidence"),
+        boundary: normalizeString(
+          item.boundary,
+          "Customer-provided Draft evidence.",
+        ),
+      };
+    })
+    .filter(Boolean) as RequirementMapEvidenceRef[];
+  return {
+    schema_version: "easy_harness_requirement_map_v0_1",
+    connection_goal: normalizeString(raw.connection_goal, ""),
+    endpoints,
+    harness_sections: sections,
+    connection_groups: groups,
+    known_facts: normalizeList(raw.known_facts, 12),
+    open_items: openItems,
+    easy_harness_review_items: normalizeList(
+      raw.easy_harness_review_items,
+      10,
+    ),
+    evidence_refs: evidenceRefs,
+  };
+}
+
 function normalizeDraft(
   value: Record<string, unknown>,
   provider = "deepseek",
@@ -2660,6 +2971,7 @@ function normalizeDraft(
           : "Reply with what you know. Unknown items can be reviewed later.",
       ),
     },
+    requirement_map: normalizeRequirementMapValue(value.requirement_map),
     draft_closure: {
       can_close_user_draft: canClose,
       closure_status: closureStatus,
@@ -2802,9 +3114,27 @@ function requirementMapOpenItem(item: UnknownItem): RequirementMapOpenItem {
   };
 }
 
-function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
+function buildDeterministicRequirementMap(draft: EasyHarnessDraft): RequirementMap {
   const endpoints: RequirementMapEndpoint[] = [];
-  const fromSide = normalizeString(draft.user_intent.from_side, "");
+  const connectorForEnd = (end: string) => {
+    const item = draft.captured_professional_details.connectors.find(
+      (connector) =>
+        normalizeString(connector.end, "").toLowerCase() === end.toLowerCase(),
+    );
+    return item
+      ? normalizeString(
+          item.value || item.part_number || item.label || item.type,
+          "",
+        )
+      : "";
+  };
+  const statedFromSide = normalizeString(draft.user_intent.from_side, "");
+  const fromSide =
+    statedFromSide && statedFromSide !== "unknown"
+      ? statedFromSide
+      : fieldText(draft.known_requirements.connector_end_a) ||
+        fieldText(draft.known_requirements.end_a_connector) ||
+        connectorForEnd("A");
   if (fromSide && fromSide !== "unknown") {
     endpoints.push(requirementMapEndpoint(fromSide, "source", endpoints.length));
   }
@@ -2821,6 +3151,16 @@ function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
         unknown ? "unknown" : "identified",
       ),
     );
+  }
+  if (endpoints.length < 2) {
+    const endB =
+      fieldText(draft.known_requirements.connector_end_b) ||
+      fieldText(draft.known_requirements.end_b_connector) ||
+      fieldText(draft.known_requirements.end_b_type) ||
+      connectorForEnd("B");
+    if (endB) {
+      endpoints.push(requirementMapEndpoint(endB, "target", endpoints.length));
+    }
   }
   if (!endpoints.length && isCadReferenceOnlyDraft(draft)) {
     endpoints.push(
@@ -2854,6 +3194,8 @@ function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
   const sections: RequirementMapSection[] = [];
   const length =
     fieldText(draft.known_requirements.harness_length) ||
+    fieldText(draft.known_requirements.overall_length) ||
+    fieldText(draft.known_requirements.overall_length_mm) ||
     fieldText(draft.known_requirements.length) ||
     fieldText(draft.known_requirements.estimated_length);
   if (length) {
@@ -2893,7 +3235,7 @@ function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
     });
   }
 
-  const knownSignals = draft.captured_professional_details.pinout
+  const capturedSignals = draft.captured_professional_details.pinout
     .map((item) =>
       [item.pin, item.signal, item.function, item.color]
         .map((value) => normalizeString(value, ""))
@@ -2902,32 +3244,56 @@ function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
     )
     .filter(Boolean)
     .slice(0, 12);
-  const groups: RequirementMapConnectionGroup[] = [
-    {
-      id: "draft_connection_basis",
-      label: knownSignals.length ? "Pinout / signal basis" : "Draft connection basis",
-      from: endpoints[0]?.id || "source",
-      to: endpoints[1]?.id || "target",
-      function: draft.ai_interpretation.likely_use || "unknown",
-      known_signals: knownSignals,
-      status: draft.draft_closure.can_close_user_draft ? "draft_from_evidence" : "incomplete",
-      evidence_refs: draft.provided_evidence
-        .map((item) => item.filename || "")
-        .filter(Boolean)
-        .slice(0, 6),
-      review_needed: draft.unknowns.easy_harness_review
-        .map((item) => item.reason || item.field)
-        .slice(0, 4),
-    },
-  ];
-
-  const evidenceRefs = draft.provided_evidence.map((item) => ({
-    source: item.filename || item.type || "Customer-provided material",
-    supports: item.what_it_may_show || item.content_summary || "Draft evidence",
-    boundary: item.needs_review
-      ? "Use as draft evidence until Easy Harness confirms the details."
-      : "Customer-provided draft evidence.",
+  const pinoutRequirement =
+    fieldText(draft.known_requirements.pinout) ||
+    fieldText(draft.known_requirements.pin_mapping);
+  const knownSignals = capturedSignals.length
+    ? capturedSignals
+    : pinoutRequirement
+      ? pinoutRequirement
+          .split(/[,;|]+/)
+          .map((item) => item.trim())
+          .filter(Boolean)
+          .slice(0, 12)
+      : [];
+  const targets = endpoints.slice(1);
+  const groups: RequirementMapConnectionGroup[] = targets.map((target, index) => ({
+    id: `draft_connection_basis_${index + 1}`,
+    label:
+      targets.length === 1 && knownSignals.length
+        ? "Pinout / signal basis"
+        : `Connection to ${target.label}`,
+    from: endpoints[0]?.id || "source",
+    to: target.id,
+    function: draft.ai_interpretation.likely_use || "unknown",
+    known_signals: targets.length === 1 ? knownSignals : [],
+    status:
+      target.status === "unknown" || !draft.draft_closure.can_close_user_draft
+        ? "incomplete"
+        : "draft_from_evidence",
+    evidence_refs: draft.provided_evidence
+      .map((item) => item.filename || "")
+      .filter(Boolean)
+      .slice(0, 6),
+    review_needed: draft.unknowns.easy_harness_review
+      .map((item) => item.reason || item.field)
+      .slice(0, 4),
   }));
+
+  const evidenceRefs = draft.provided_evidence.map((item) => {
+    const source =
+      item.filename ||
+      (/\b(conversation|customer)[_\s-]*text\b/i.test(item.type || "")
+        ? "Your written instructions"
+        : item.content_summary || "Customer-provided material");
+    return {
+      source,
+      supports: item.what_it_may_show || item.content_summary || "Draft evidence",
+      boundary: item.needs_review
+        ? "Use as draft evidence until Easy Harness confirms the details."
+        : "Customer-provided draft evidence.",
+    };
+  });
 
   return {
     schema_version: "easy_harness_requirement_map_v0_1",
@@ -2951,6 +3317,66 @@ function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
       .filter(Boolean)
       .slice(0, 8),
     evidence_refs: evidenceRefs.slice(0, 10),
+  };
+}
+
+function uniqueRequirementMapStrings(...lists: string[][]) {
+  const seen = new Set<string>();
+  const output: string[] = [];
+  for (const item of lists.flat()) {
+    const value = normalizeString(item, "");
+    const key = value.toLowerCase();
+    if (!value || seen.has(key)) continue;
+    seen.add(key);
+    output.push(value);
+  }
+  return output;
+}
+
+function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
+  const fallback = buildDeterministicRequirementMap(draft);
+  const interpreted = draft.requirement_map;
+  if (
+    draft.draft_meta.draft_status === "needs_harness_context" ||
+    isCadReferenceOnlyDraft(draft) ||
+    !hasExplicitOtherEndBasis(draft)
+  ) {
+    return fallback;
+  }
+  const hasInterpretedTopology =
+    interpreted.endpoints.length >= 2 &&
+    interpreted.connection_groups.length > 0;
+  if (!hasInterpretedTopology) return fallback;
+
+  const endpointIds = new Set(interpreted.endpoints.map((endpoint) => endpoint.id));
+  const interpretedGroups = interpreted.connection_groups.filter(
+    (group) =>
+      endpointIds.has(group.from) &&
+      endpointIds.has(group.to) &&
+      group.from !== group.to,
+  );
+  if (!interpretedGroups.length) return fallback;
+
+  return {
+    schema_version: "easy_harness_requirement_map_v0_1",
+    connection_goal: interpreted.connection_goal || fallback.connection_goal,
+    endpoints: interpreted.endpoints,
+    harness_sections: interpreted.harness_sections.length
+      ? interpreted.harness_sections
+      : fallback.harness_sections,
+    connection_groups: interpretedGroups,
+    known_facts: uniqueRequirementMapStrings(
+      interpreted.known_facts,
+      fallback.known_facts,
+    ).slice(0, 12),
+    // Closure guards and semantic question dedupe own the customer-facing open items.
+    open_items: fallback.open_items,
+    easy_harness_review_items: uniqueRequirementMapStrings(
+      interpreted.easy_harness_review_items,
+      fallback.easy_harness_review_items,
+    ).slice(0, 10),
+    // File evidence and boundaries come from the verified attachment layer.
+    evidence_refs: fallback.evidence_refs,
   };
 }
 
@@ -3068,22 +3494,56 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
 
 function fieldValueLabel(value: unknown) {
   if (!value) return "";
-  if (typeof value === "string") return value === "unknown" ? "" : value;
+  if (typeof value === "string") {
+    const label = value.trim();
+    return ["", "unknown", "not specified", "n/a", "none", "null"].includes(
+      label.toLowerCase(),
+    )
+      ? ""
+      : label;
+  }
   if (typeof value === "object") {
     const record = value as Record<string, unknown>;
-    return normalizeString(record.value, "") || normalizeString(record.label, "");
+    return fieldValueLabel(
+      normalizeString(record.value, "") || normalizeString(record.label, ""),
+    );
   }
   return String(value);
 }
 
+function canonicalKnownDetailKey(key: string) {
+  const normalized = key.toLowerCase();
+  if (/^(qty|quantity|pieces|piece_count|order_quantity)$/.test(normalized))
+    return "quantity";
+  if (
+    /^(overall_length_mm|overall_length|harness_length|length|estimated_length|approximate_length|full_length|cable_length)$/.test(
+      normalized,
+    )
+  )
+    return "overall_length";
+  if (/^(end_a_lead_length_mm|end_a_lead_length)$/.test(normalized))
+    return "end_a_lead_length";
+  if (/^(end_b_lead_length_mm|end_b_lead_length)$/.test(normalized))
+    return "end_b_lead_length";
+  if (/^(connector_end_a|end_a_connector)$/.test(normalized))
+    return "end_a_connector";
+  if (/^(connector_end_b|end_b_connector)$/.test(normalized))
+    return "end_b_connector";
+  return normalized;
+}
+
 function knownDetailLabels(draft: EasyHarnessDraft) {
-  return Object.entries(draft.known_requirements)
-    .map(([key, value]) => {
-      const label = fieldValueLabel(value);
-      return label ? `${key.replaceAll("_", " ")}: ${label}` : "";
-    })
-    .filter(Boolean)
-    .slice(0, 8);
+  const details: string[] = [];
+  const seen = new Set<string>();
+  for (const [key, value] of Object.entries(draft.known_requirements)) {
+    const label = fieldValueLabel(value);
+    const canonicalKey = canonicalKnownDetailKey(key);
+    if (!label || seen.has(canonicalKey)) continue;
+    seen.add(canonicalKey);
+    details.push(`${canonicalKey.replaceAll("_", " ")}: ${label}`);
+    if (details.length >= 8) break;
+  }
+  return details;
 }
 
 function unknownLabel(item: UnknownItem) {
@@ -3103,7 +3563,12 @@ function buildMessageBlocks(draft: EasyHarnessDraft, customerMessage: string, re
   const blocks: Array<Record<string, unknown>> = [
     { type: "text", text: customerMessage },
   ];
-  if (draft.draft_closure.can_close_user_draft) {
+  if (draft.draft_meta.draft_status !== "not_harness_related") {
+    const summaryStatus = draft.draft_closure.can_close_user_draft
+      ? "Ready for Easy Harness review"
+      : draft.draft_meta.draft_status === "needs_harness_context"
+        ? "Connection goal needed"
+        : "Draft needs a few details";
     blocks.push({
       type: "draft_summary",
       draftId: `${requestRow.request_number}-D1`,
@@ -3112,15 +3577,16 @@ function buildMessageBlocks(draft: EasyHarnessDraft, customerMessage: string, re
         draft.user_intent.connection_goal ||
         requestRow.title ||
         "Harness request",
-      status: "Ready for Easy Harness review",
+      status: summaryStatus,
       compactDetails: draft.user_facing_summary.compact_details,
       connectionGoal: draft.user_intent.connection_goal,
       intentType: draft.user_intent.intent_type,
       fromSide: draft.user_intent.from_side,
       toSide: draft.user_intent.to_side,
+      requirementMap: buildRequirementMap(draft),
       knownDetails: knownDetailLabels(draft),
       files: draft.provided_evidence
-        .map((item) => item.filename || item.content_summary || item.type)
+        .map((item) => item.filename)
         .filter(Boolean),
       reviewItems: draftReviewItems(draft),
     });
@@ -3984,6 +4450,10 @@ async function callDraftModel(
             "Do not use keyword workflows or case-specific scripts. Words like old harness, battery, sensor, pinout, photo, sample, CAN, or connector are evidence only. They are not instructions to enter a fixed questionnaire or fixed reply path.",
             "Use the whole conversation to judge intent, evidence, missing blockers, and next action. A keyword may support the judgment, but it must not determine the workflow by itself.",
             "Capture all explicit details. If the user provides connector model, connector type, terminal, wire gauge, length, quantity, voltage, current, pinout, material, shielding, environment, IP rating, test requirement, BOM, drawing, or compliance detail, preserve it in known_requirements and/or captured_professional_details.",
+            "Before writing the customer summary, organize your understanding into requirement_map. This is the semantic connection plan that will drive the customer-facing visual Draft; it is not a manufacturing drawing and not a free-form image prompt.",
+            "In requirement_map.endpoints, represent distinct devices, boards, connectors, bare-wire ends, samples, or unknown ends separately when the current evidence supports that distinction. Do not collapse several supported target devices into one generic target.",
+            "In requirement_map.connection_groups, describe the meaningful harness branches or functional wire groups between those endpoints. Associate signals only when customer text or attachment_observations supports the association; otherwise keep the group partial or incomplete.",
+            "In requirement_map.harness_sections, include route or length sections only when supplied or reasonably organized from evidence. Mark uncertain endpoints, groups, routes, and options as unknown or partial instead of inventing precision.",
             "Do not ask for terminal part numbers, exact wire gauge, strip length, crimp details, connector brand, IPC class, FAI, packaging, test fixture, controlled drawing revision, or factory production details unless they truly block the Draft stage.",
             "Ask at most three customer-facing questions, and prefer one or two. Only ask questions that block Draft closure and that the user is likely to know.",
             "It is acceptable not to close a Draft. If the connection goal is not clear, do not invent a Draft; ask the smallest connection-goal question.",
