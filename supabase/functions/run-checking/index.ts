@@ -4000,7 +4000,7 @@ function latestMessageCanReceiveAgentReply(
   );
 }
 
-function isRecentCheckingQueue(requestRow: RequestRow, maxAgeMs = 10 * 60 * 1000) {
+function isRecentCheckingQueue(requestRow: RequestRow, maxAgeMs = 6 * 60 * 1000) {
   const updatedAt = new Date(
     requestRow.updated_at || requestRow.created_at,
   ).getTime();

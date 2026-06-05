@@ -441,8 +441,10 @@ const checks = [
     pass: app.includes("checkingInvokeTimeoutMs") &&
       app.includes("12 * 60 * 1000") &&
       app.includes("checkingPollIntervalMs") &&
-      app.includes("20 * 60 * 1000") &&
+      app.includes("8 * 60 * 1000") &&
       app.includes("This can take a few minutes when files need careful organization") &&
+      app.includes("Easy Harness is still organizing your request") &&
+      app.includes("summary-working-indicator") &&
       app.includes("callWithTimeout(") &&
       app.includes("isStaleCheckingRequest") &&
       app.includes("stale_check_recovery_started") &&

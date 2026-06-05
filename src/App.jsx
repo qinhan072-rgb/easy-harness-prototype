@@ -80,7 +80,7 @@ const maxFilesPerUpload = 8;
 const maxFileSizeBytes = 25 * 1024 * 1024;
 const checkingInvokeTimeoutMs = 12 * 60 * 1000;
 const checkingPollIntervalMs = 4000;
-const staleCheckingRetryMs = 20 * 60 * 1000;
+const staleCheckingRetryMs = 8 * 60 * 1000;
 const legacySmokeCopy =
   "Details Easy Harness still needs | Reply in the thread with what you know";
 void legacySmokeCopy;
@@ -7928,6 +7928,8 @@ function RequestWorkspace({
   const draftStatus = draftForView.draft_meta?.draft_status || "";
   const missingItems = userNeededNextItems(draftForView);
   const agentActive = agentActivity?.requestId === request.id;
+  const organizingRequest = request.status === "checking";
+  const showAgentActivity = agentActive || organizingRequest;
   const shouldShowMissingInfo =
     perspective === "user" &&
     missingItems.length > 0 &&
@@ -7946,10 +7948,10 @@ function RequestWorkspace({
             />
           )}
           <MessageList request={request} perspective={perspective} />
-          {agentActive && (
+          {showAgentActivity && (
             <AgentActivityCard
-              mode={agentActivity.mode}
-              startedAt={agentActivity.startedAt}
+              mode={agentActivity?.mode || "queued"}
+              startedAt={agentActivity?.startedAt || request.updatedAtIso}
             />
           )}
           <UserComposer
@@ -8014,6 +8016,7 @@ function MissingInfoPrompt({ items, checkResult }) {
 
 function AgentActivityCard({ mode, startedAt }) {
   const isInitial = mode === "initial";
+  const isQueued = mode === "queued";
   return (
     <article className="message message-easy agent-activity-card">
       <div className="message-avatar pulsing-avatar">
@@ -8026,14 +8029,18 @@ function AgentActivityCard({ mode, startedAt }) {
         </div>
         <div className="agent-thinking">
           <strong>
-            {isInitial
-              ? "Easy Harness is analyzing your request…"
-              : "Easy Harness is thinking through your update…"}
+            {isQueued
+              ? "Easy Harness is still organizing your request..."
+              : isInitial
+                ? "Easy Harness is analyzing your request..."
+                : "Easy Harness is thinking through your update..."}
           </strong>
           <p>
-            {isInitial
-              ? "Reading your description and uploaded files, then preparing the next intake result."
-              : "Reviewing the new details and updating the intake draft."}
+            {isQueued
+              ? "Reading the thread and uploaded files. The Draft will appear here when the intake result is ready."
+              : isInitial
+                ? "Reading your description and uploaded files, then preparing the next intake result."
+                : "Reviewing the new details and updating the intake draft."}
           </p>
           <div className="thinking-dots" aria-label="Agent is working">
             <span></span>
@@ -8048,7 +8055,6 @@ function AgentActivityCard({ mode, startedAt }) {
     </article>
   );
 }
-
 function formatMissingInfoItem(item) {
   const raw = String(item || "").trim();
   if (!raw) return "Review item";
@@ -8785,13 +8791,23 @@ function IntakeDraftCard({ checkResult, request }) {
   );
 
   if (!hasDraft) {
+    const isOrganizing = request.status === "checking";
     return (
       <div className="side-card request-summary-card quiet">
         <span className="summary-kicker">Current step</span>
         <h2>{statusCopy[request.status] || "Request received"}</h2>
         <p>
-          Easy Harness will show the next step here after the intake check finishes.
+          {isOrganizing
+            ? "Easy Harness is organizing the thread and uploaded files. This page will update when the Draft is ready."
+            : "Easy Harness will show the next step here after the intake check finishes."}
         </p>
+        {isOrganizing && (
+          <div className="summary-working-indicator" aria-label="Easy Harness is working">
+            <span></span>
+            <span></span>
+            <span></span>
+          </div>
+        )}
       </div>
     );
   }

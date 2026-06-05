@@ -4371,6 +4371,30 @@ button:disabled {
   animation-delay: 0.32s;
 }
 
+.summary-working-indicator {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  margin-top: 12px;
+}
+
+.summary-working-indicator span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: #0ea897;
+  opacity: 0.35;
+  animation: thinkingDot 1.2s infinite ease-in-out;
+}
+
+.summary-working-indicator span:nth-child(2) {
+  animation-delay: 0.16s;
+}
+
+.summary-working-indicator span:nth-child(3) {
+  animation-delay: 0.32s;
+}
+
 .pulsing-avatar {
   animation: agentPulse 1.5s infinite ease-in-out;
 }
