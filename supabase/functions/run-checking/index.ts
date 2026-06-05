@@ -3972,6 +3972,110 @@ function parserNeededObservationCount(observations: AttachmentObservation[]) {
   return observations.filter((item) => item.status === "parser_needed").length;
 }
 
+const checkingProgressMessageText =
+  "Easy Harness is carefully organizing your request and files. This can take a few minutes when files need careful organization.";
+
+function isCheckingProgressMessage(body = "") {
+  return body.trim() === checkingProgressMessageText;
+}
+
+function latestMessageCanReceiveAgentReply(
+  message?: {
+    id?: string;
+    author_role?: string;
+    body?: string;
+  },
+  queuedCustomerMessageId = "",
+) {
+  if (!message) return false;
+  if (
+    message.author_role === "customer" &&
+    (!queuedCustomerMessageId || message.id === queuedCustomerMessageId)
+  ) {
+    return true;
+  }
+  return (
+    message.author_role === "easy_harness" &&
+    isCheckingProgressMessage(message.body || "")
+  );
+}
+
+function isRecentCheckingQueue(requestRow: RequestRow, maxAgeMs = 10 * 60 * 1000) {
+  const updatedAt = new Date(
+    requestRow.updated_at || requestRow.created_at,
+  ).getTime();
+  return Number.isFinite(updatedAt) && Date.now() - updatedAt < maxAgeMs;
+}
+
+async function insertCheckingProgressMessage(
+  supabase: ReturnType<typeof createClient>,
+  requestId: string,
+) {
+  const { data: latestRows } = await supabase
+    .from("request_messages")
+    .select("id,author_role,body,created_at")
+    .eq("request_id", requestId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  const latestMessage = latestRows?.[0];
+  if (!latestMessage || latestMessage.author_role !== "customer") return false;
+
+  const { error } = await supabase.from("request_messages").insert({
+    request_id: requestId,
+    author_id: null,
+    author_role: "easy_harness",
+    body: checkingProgressMessageText,
+    blocks: [{ type: "text", text: checkingProgressMessageText }],
+    visibility: "thread",
+  });
+
+  if (error) {
+    logCheckingEvent("progress_message_failed", {
+      request_id: requestId,
+      error: error.message,
+    });
+    return false;
+  }
+  return true;
+}
+
+async function latestThreadMessage(
+  supabase: ReturnType<typeof createClient>,
+  requestId: string,
+) {
+  const { data: latestRows } = await supabase
+    .from("request_messages")
+    .select("id,author_role,body,created_at")
+    .eq("request_id", requestId)
+    .order("created_at", { ascending: false })
+    .limit(1);
+  return latestRows?.[0];
+}
+
+function runCheckingJobInBackground(
+  job: Promise<unknown>,
+  payload: Record<string, unknown>,
+) {
+  const guardedJob = job.catch((error) => {
+    const message =
+      error instanceof Error ? error.message : "Unknown background checking error";
+    logCheckingEvent("background_unhandled", {
+      ...payload,
+      error: message.slice(0, 500),
+    });
+  });
+  const edgeRuntime = (
+    globalThis as unknown as {
+      EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+    }
+  ).EdgeRuntime;
+  if (edgeRuntime?.waitUntil) {
+    edgeRuntime.waitUntil(guardedJob);
+    return;
+  }
+  void guardedJob;
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return optionsResponse();
   if (request.method !== "POST")
@@ -4084,6 +4188,8 @@ Deno.serve(async (request) => {
     );
 
   const latestMessage = messages?.[messages.length - 1];
+  const queuedCustomerMessageId =
+    latestMessage?.author_role === "customer" ? latestMessage.id : "";
   if (
     !payload.force &&
     latestMessage &&
@@ -4105,6 +4211,27 @@ Deno.serve(async (request) => {
       status: requestRow.status,
       checkStatus: requestRow.check_status,
       checkResult: requestRow.check_result,
+    });
+  }
+
+  if (
+    !payload.force &&
+    latestMessage?.author_role === "easy_harness" &&
+    isCheckingProgressMessage(latestMessage.body || "") &&
+    requestRow.status === "checking" &&
+    requestRow.check_status === "pending" &&
+    isRecentCheckingQueue(requestRow)
+  ) {
+    return jsonResponse({
+      ok: true,
+      queued: true,
+      async: true,
+      code: "checking_already_queued",
+      requestId: requestRow.id,
+      requestNumber: requestRow.request_number,
+      status: "checking",
+      checkStatus: "pending",
+      message: "",
     });
   }
 
@@ -4144,6 +4271,43 @@ Deno.serve(async (request) => {
       ? storageById.get(attachment.storage_object_id)
       : undefined,
   }));
+  const trigger = payload.trigger || "manual";
+  const queuedAt = new Date().toISOString();
+  const { error: queueError } = await supabase
+    .from("requests")
+    .update({
+      status: "checking",
+      check_status: "pending",
+      updated_at: queuedAt,
+    })
+    .eq("id", requestRow.id);
+
+  if (queueError)
+    return jsonResponse(
+      {
+        ok: false,
+        code: "checking_queue_failed",
+        message: queueError.message,
+      },
+      500,
+    );
+
+  await insertCheckingProgressMessage(supabase, requestRow.id);
+
+  await supabase.from("integration_events").insert({
+    adapter: adapterId,
+    action: "draft_check_queued",
+    target_type: "request",
+    target_id: requestRow.id,
+    detail: "Easy Harness request checking queued for background processing.",
+    payload: {
+      requestNumber: requestRow.request_number,
+      trigger,
+      async: true,
+    },
+  });
+
+  const checkingJob = (async () => {
   const modelInputMeta = {
     attachmentVisionEnabled: attachmentVisionEnabled(),
     qwenFileExtractEnabled: qwenFileExtractEnabled(),
@@ -4266,6 +4430,28 @@ Deno.serve(async (request) => {
       attachment_observations: modelInputMeta.attachmentObservations,
     });
 
+    const latestBeforeSave = await latestThreadMessage(supabase, requestRow.id);
+    if (
+      !latestMessageCanReceiveAgentReply(
+        latestBeforeSave,
+        queuedCustomerMessageId,
+      )
+    ) {
+      logCheckingEvent("superseded", {
+        request_number: requestRow.request_number,
+        reason: "newer_thread_message_before_primary_save",
+        latest_role: latestBeforeSave?.author_role || "",
+      });
+      return jsonResponse({
+        ok: true,
+        superseded: true,
+        requestId: requestRow.id,
+        requestNumber: requestRow.request_number,
+        status: requestRow.status,
+        checkStatus: requestRow.check_status,
+      });
+    }
+
     const { error: updateError } = await supabase
       .from("requests")
       .update({
@@ -4305,13 +4491,18 @@ Deno.serve(async (request) => {
 
     const { data: latestRows } = await supabase
       .from("request_messages")
-      .select("id,author_role,created_at")
+      .select("id,author_role,body,created_at")
       .eq("request_id", requestRow.id)
       .order("created_at", { ascending: false })
       .limit(1);
-    const latestRole = latestRows?.[0]?.author_role || "";
+    const latestMessageBeforeReply = latestRows?.[0];
     let insertedMessage = true;
-    if (latestRole === "customer") {
+    if (
+      latestMessageCanReceiveAgentReply(
+        latestMessageBeforeReply,
+        queuedCustomerMessageId,
+      )
+    ) {
       const { error: messageInsertError } = await supabase
         .from("request_messages")
         .insert({
@@ -4434,15 +4625,45 @@ Deno.serve(async (request) => {
       },
     });
 
+    const latestBeforeFallbackSave = await latestThreadMessage(
+      supabase,
+      requestRow.id,
+    );
+    if (
+      !latestMessageCanReceiveAgentReply(
+        latestBeforeFallbackSave,
+        queuedCustomerMessageId,
+      )
+    ) {
+      logCheckingEvent("superseded", {
+        request_number: requestRow.request_number,
+        reason: "newer_thread_message_before_fallback_save",
+        latest_role: latestBeforeFallbackSave?.author_role || "",
+      });
+      return jsonResponse({
+        ok: true,
+        superseded: true,
+        requestId: requestRow.id,
+        requestNumber: requestRow.request_number,
+        status: requestRow.status,
+        checkStatus: requestRow.check_status,
+      });
+    }
+
     const { data: latestRows } = await supabase
       .from("request_messages")
-      .select("id,author_role,created_at")
+      .select("id,author_role,body,created_at")
       .eq("request_id", requestRow.id)
       .order("created_at", { ascending: false })
       .limit(1);
-    const latestRole = latestRows?.[0]?.author_role || "";
+    const latestMessageBeforeReply = latestRows?.[0];
     let insertedMessage = false;
-    if (latestRole === "customer") {
+    if (
+      latestMessageCanReceiveAgentReply(
+        latestMessageBeforeReply,
+        queuedCustomerMessageId,
+      )
+    ) {
       const { error: messageInsertError } = await supabase
         .from("request_messages")
         .insert({
@@ -4496,4 +4717,22 @@ Deno.serve(async (request) => {
       message: insertedMessage ? customerMessage : "",
     });
   }
+  })();
+
+  runCheckingJobInBackground(checkingJob, {
+    request_number: requestRow.request_number,
+    trigger,
+  });
+
+  return jsonResponse({
+    ok: true,
+    queued: true,
+    async: true,
+    requestId: requestRow.id,
+    requestNumber: requestRow.request_number,
+    status: "checking",
+    checkStatus: "pending",
+    readiness: "checking",
+    message: "",
+  });
 });

@@ -440,12 +440,29 @@ const checks = [
     name: "checking requests have timeout and stale recovery",
     pass: app.includes("checkingInvokeTimeoutMs") &&
       app.includes("12 * 60 * 1000") &&
+      app.includes("checkingPollIntervalMs") &&
       app.includes("20 * 60 * 1000") &&
       app.includes("This can take a few minutes when files need careful organization") &&
       app.includes("callWithTimeout(") &&
       app.includes("isStaleCheckingRequest") &&
       app.includes("stale_check_recovery_started") &&
       app.includes("stale_check_recovery")
+  },
+  {
+    name: "checking requests queue long draft work instead of blocking the UI",
+    pass: checkingFunction.includes("checkingProgressMessageText") &&
+      checkingFunction.includes("Easy Harness is carefully organizing your request and files") &&
+      checkingFunction.includes("draft_check_queued") &&
+      checkingFunction.includes("checking_already_queued") &&
+      checkingFunction.includes("runCheckingJobInBackground") &&
+      checkingFunction.includes("EdgeRuntime") &&
+      checkingFunction.includes("waitUntil") &&
+      checkingFunction.includes("latestMessageCanReceiveAgentReply") &&
+      checkingFunction.includes("queuedCustomerMessageId") &&
+      checkingFunction.includes("superseded") &&
+      checkingFunction.includes("queued: true") &&
+      app.includes('status: "queued"') &&
+      app.includes("This page will keep checking for the result")
   },
   {
     name: "conversation attachments can render inline visuals",

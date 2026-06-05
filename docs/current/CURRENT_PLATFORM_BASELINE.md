@@ -66,6 +66,10 @@ platform yet.
   against the supplied text, attachment observations, and any model-visible
   images before saving. This increases latency, but reduces unsupported
   topology, premature Draft closure, and repeated customer questions.
+- `run-checking` queues long Draft work in the Edge Function background path.
+  The customer thread gets a short "organizing" Easy Harness message first, then
+  the deeper model run writes the final Draft/message when it finishes. This
+  keeps the page responsive without reducing the Agent's evidence review.
 - `run-checking` has an optional Qwen image-input path. When
   `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`, it can send selected uploaded image
   attachments to Qwen through short-lived Supabase signed URLs and records how

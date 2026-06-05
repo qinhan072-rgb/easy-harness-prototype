@@ -46,6 +46,19 @@ Easy Harness review instead of forcing the customer to answer factory details.
 Set it to `false` only as an operational fallback if provider latency or
 availability becomes unacceptable.
 
+## Runtime Behavior
+
+`run-checking` returns quickly after it validates access, marks the request as
+organizing, and saves a short Easy Harness progress message in the customer
+thread. The deeper Draft generation, attachment observations, and evidence audit
+continue in the Edge Function background path and write the final Draft/message
+when complete.
+
+This is deliberate: cost and model thinking time are less important than giving
+the Agent enough room to understand the uploaded evidence. The frontend keeps
+polling the request while it is organizing so the customer does not need to
+manually refresh to see the finished Draft.
+
 ## Attachment Observations
 
 Qwen 3.6 can accept image input through DashScope's OpenAI-compatible chat API,

@@ -79,6 +79,7 @@ const sampleFiles = ["connector-photo.jpg", "old-harness.png", "notes.pdf"];
 const maxFilesPerUpload = 8;
 const maxFileSizeBytes = 25 * 1024 * 1024;
 const checkingInvokeTimeoutMs = 12 * 60 * 1000;
+const checkingPollIntervalMs = 4000;
 const staleCheckingRetryMs = 20 * 60 * 1000;
 const legacySmokeCopy =
   "Details Easy Harness still needs | Reply in the thread with what you know";
@@ -3291,7 +3292,7 @@ function App() {
       if (disposed) return;
       await loadSupabaseRequestData(currentUser);
     };
-    const timer = window.setInterval(refresh, 8000);
+    const timer = window.setInterval(refresh, checkingPollIntervalMs);
     return () => {
       disposed = true;
       window.clearInterval(timer);
@@ -4856,29 +4857,29 @@ function App() {
           blocks: [
             {
               type: "text",
-              text: "Easy Harness has the request details and files. No action is needed right now; Easy Harness will continue from here.",
+              text: "Easy Harness is carefully organizing your request and files. This can take a few minutes when files need careful organization.",
             },
           ],
         };
         const fallbackCheckResult = {
-          status: "in_review",
+          status: "queued",
           adapter: platformAdapters.checking.id,
           reason:
-            "The automated draft check did not complete. The request remains queued for Easy Harness review.",
+            "The request is still queued for Easy Harness organization. This page will keep checking for the result.",
           missing: [],
           checkedAt: new Date().toISOString(),
           error: failureMessage,
         };
         const fallbackRequest = {
           ...request,
-          status: "in_review",
+          status: "checking",
           checkResult: fallbackCheckResult,
           updated: "Just now",
           messages: appendMessageIfMissing(request.messages || [], fallbackMessage),
         };
         updateRequest(request.id, (current) => ({
           ...current,
-          status: "in_review",
+          status: "checking",
           checkResult: fallbackCheckResult,
           updated: "Just now",
           messages: appendMessageIfMissing(current.messages || [], fallbackMessage),
