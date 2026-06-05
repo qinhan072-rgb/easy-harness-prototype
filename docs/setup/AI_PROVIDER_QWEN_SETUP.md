@@ -19,6 +19,7 @@ QWEN_API_KEY=<your Qwen/DashScope API key>
 QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
+AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=false
 AI_DRAFT_MAX_VISION_IMAGES=4
 AI_DRAFT_SIGNED_URL_TTL_SECONDS=600
@@ -36,6 +37,14 @@ AI_DRAFT_CAD_METADATA_MAX_BYTES=10000000
 
 `QWEN_MODEL` can be changed later without changing frontend code. Keep the
 Draft Agent contract stable even when testing another model.
+
+`AI_DRAFT_ENABLE_EVIDENCE_AUDIT` defaults to enabled in code. The second pass
+audits the first Draft against the original customer text, attachment
+observations, and any model-visible image inputs. It should remove unsupported
+topology, avoid repeated questions, and keep supplier/manufacturing work under
+Easy Harness review instead of forcing the customer to answer factory details.
+Set it to `false` only as an operational fallback if provider latency or
+availability becomes unacceptable.
 
 ## Attachment Observations
 

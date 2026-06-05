@@ -61,6 +61,11 @@ platform yet.
   first live provider for the next deployment pass.
 - AI intake receives customer text, conversation history, attachment metadata,
   and an internal `attachment_observations` layer.
+- `run-checking` now performs a two-pass Draft generation by default. The first
+  pass organizes the Draft; the second evidence-audit pass checks the Draft
+  against the supplied text, attachment observations, and any model-visible
+  images before saving. This increases latency, but reduces unsupported
+  topology, premature Draft closure, and repeated customer questions.
 - `run-checking` has an optional Qwen image-input path. When
   `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`, it can send selected uploaded image
   attachments to Qwen through short-lived Supabase signed URLs and records how

@@ -33,19 +33,10 @@
         "bracket_outline.dxf",
         "protective_boot_ascii.stl"
       ],
-      "expected_readiness": "needs_customer_reply",
+      "expected_readiness": "connection_goal_missing",
       "requirement_map_must_include": {
         "endpoints": [
-          "Deutsch DT06-6S connector",
-          "unknown other end"
-        ],
-        "harness_sections": [
-          "target length about 450 mm",
-          "12V automotive sensor branch"
-        ],
-        "open_items": [
-          "other end missing",
-          "quantity missing"
+          "Deutsch DT06-6S connector"
         ]
       },
       "must_show_received": [
@@ -63,12 +54,8 @@
         "CAD files are references"
       ],
       "question_policy": {
-        "max_questions": 2,
-        "required_question_meaning": [
-          "What is the other end of the harness?",
-          "What quantity is needed?"
-        ],
-        "must_allow_unknown": true,
+        "max_questions": 1,
+        "required_question_meaning": "What should this harness or cable connect, copy, or replace?",
         "must_not_ask": [
           "terminal part number",
           "crimp spec",
@@ -116,7 +103,7 @@
         "fans are 24V and current is unknown"
       ],
       "question_policy": {
-        "max_questions": 2,
+        "max_questions": 0,
         "allowed_topics": [
           "fan load current or device model if known",
           "temperature sensor type or model if known"
@@ -140,15 +127,7 @@
         "protective-boot.stl"
       ],
       "expected_readiness": "connection_goal_missing",
-      "requirement_map_must_include": {
-        "endpoints": [
-          "unknown source",
-          "unknown target"
-        ],
-        "open_items": [
-          "connection goal missing"
-        ]
-      },
+      "requirement_map_must_include": {},
       "must_show_received": [
         "STEP reference",
         "DXF reference",
@@ -221,16 +200,10 @@
         "dt06_6s_pinout.csv",
         "dt06_6s_pinout.xlsx"
       ],
-      "expected_readiness": "needs_customer_reply",
+      "expected_readiness": "connection_goal_missing",
       "requirement_map_must_include": {
         "endpoints": [
-          "Connector A DT06-6S",
-          "unknown other end"
-        ],
-        "open_items": [
-          "other end missing",
-          "quantity missing",
-          "length missing"
+          "Connector A DT06-6S"
         ]
       },
       "must_show_received": [
@@ -244,11 +217,8 @@
         "the other end is not stated"
       ],
       "question_policy": {
-        "max_questions": 2,
-        "required_question_meaning": [
-          "What is the other end of the harness?",
-          "What quantity and approximate length are needed?"
-        ],
+        "max_questions": 1,
+        "required_question_meaning": "What should this harness or cable connect, copy, or replace?",
         "must_not_ask": [
           "terminal part number",
           "crimp spec",

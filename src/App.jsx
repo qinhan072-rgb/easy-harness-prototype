@@ -78,8 +78,8 @@ const intakeOutcomeCopy = {
 const sampleFiles = ["connector-photo.jpg", "old-harness.png", "notes.pdf"];
 const maxFilesPerUpload = 8;
 const maxFileSizeBytes = 25 * 1024 * 1024;
-const checkingInvokeTimeoutMs = 90 * 1000;
-const staleCheckingRetryMs = 5 * 60 * 1000;
+const checkingInvokeTimeoutMs = 12 * 60 * 1000;
+const staleCheckingRetryMs = 20 * 60 * 1000;
 const legacySmokeCopy =
   "Details Easy Harness still needs | Reply in the thread with what you know";
 void legacySmokeCopy;
@@ -1101,11 +1101,10 @@ function makeRequestId(existingRequests = []) {
 }
 
 function inferTitle(text) {
-  const value = String(text || "").toLowerCase();
   const firstLine = String(text || "")
     .split(/\n+/)
     .map((line) => line.trim())
-    .find((line) => line.length >= 18 && /\b(harness|cable|wire|connector|adapter|loom)\b/i.test(line));
+    .find((line) => line.length >= 8);
   if (firstLine) {
     return firstLine
       .replace(/^i\s+(need|want|am looking for)\s+(a|an|the)?\s*/i, "")
@@ -1113,10 +1112,6 @@ function inferTitle(text) {
       .slice(0, 72)
       .replace(/[.,;:!?]+$/, "");
   }
-  if (/\b(copy|replace|replacement|remake|replicate)\b/.test(value))
-    return "Replacement Harness Request";
-  if (/\b(sensor|controller)\b/.test(value))
-    return "Sensor Harness Request";
   return "Uploaded Harness Design Request";
 }
 
@@ -8045,7 +8040,7 @@ function AgentActivityCard({ mode, startedAt }) {
             <span></span>
           </div>
           <small>
-            This may take about a minute. You can keep this page open while the Draft updates.
+            This can take a few minutes when files need careful organization. You can keep this page open while the Draft updates.
           </small>
         </div>
       </div>
@@ -8624,21 +8619,11 @@ function userNeededNextItems(draft = {}) {
   const status = draft?.draft_meta?.draft_status || "";
   if (isReadyDraftStatus(status)) return [];
   const unknowns = draft?.unknowns || {};
-  const directQuestions = [
-    ...normalizeUnknownItemList(unknowns.ask_user_now),
-    ...normalizeUnknownItemList(unknowns.ask_user_if_likely_known),
-  ];
+  const directQuestions = normalizeUnknownItemList(unknowns.ask_user_now);
   if (directQuestions.length) return semanticallyUniqueQuestions(directQuestions);
   return semanticallyUniqueQuestions(
-    (draft?.user_facing_summary?.needed_next || []).filter(
-      (item) => !isEasyHarnessReviewOnlyItem(item),
-    ),
+    draft?.user_facing_summary?.needed_next || [],
   );
-}
-
-function isEasyHarnessReviewOnlyItem(item = "") {
-  const text = String(item).toLowerCase();
-  return /easy harness|review|visual|identify|connector identification|finalize|terminal|seal|wire sizing|engineering|supplier/.test(text);
 }
 
 function isPlaceholderUnknown(item = "") {
@@ -8657,8 +8642,7 @@ function easyHarnessReviewItems(draft = {}) {
   const unknowns = draft?.unknowns || {};
   const direct = normalizeUnknownItemList(unknowns.easy_harness_review);
   const later = normalizeUnknownItemList(unknowns.later_supplier_or_engineering_confirmation);
-  const fromSummary = (draft?.user_facing_summary?.needed_next || []).filter(isEasyHarnessReviewOnlyItem);
-  return [...new Set([...direct, ...fromSummary, ...later])]
+  return [...new Set([...direct, ...later])]
     .filter((item) => !isPlaceholderUnknown(item))
     .slice(0, 8);
 }

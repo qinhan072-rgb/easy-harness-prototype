@@ -4990,6 +4990,46 @@ button:disabled {
   stroke: #e0e9e6;
 }
 
+.requirement-map-empty {
+  display: grid;
+  gap: 8px;
+  min-height: 150px;
+  align-content: center;
+  justify-items: start;
+  border: 1px dashed #d7b76f;
+  border-radius: 7px;
+  padding: 20px;
+  background: #fffaf0;
+}
+
+.requirement-map-empty > strong {
+  color: #573d13;
+  font-size: 14px;
+}
+
+.requirement-map-empty > span {
+  max-width: 620px;
+  color: #765d32;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.requirement-map-empty > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.requirement-map-empty > div span {
+  border: 1px solid #e5c98e;
+  border-radius: 6px;
+  padding: 5px 7px;
+  background: #fff;
+  color: #624a22;
+  font-size: 11px;
+  font-weight: 730;
+}
+
 .requirement-visual-node rect {
   fill: #fff;
   stroke: #159688;
@@ -5780,6 +5820,31 @@ button:disabled {
   display: block;
   width: 100%;
   min-height: 390px;
+}
+
+.agent-lab-empty-topology {
+  display: grid;
+  gap: 10px;
+  min-height: 260px;
+  align-content: center;
+  border: 1px dashed #d7b76f;
+  border-radius: 8px;
+  padding: 24px;
+  background: #fffaf0;
+}
+
+.agent-lab-empty-topology strong {
+  color: #573d13;
+  font-size: 18px;
+}
+
+.agent-lab-empty-topology p,
+.agent-lab-empty-topology span {
+  margin: 0;
+  max-width: 720px;
+  color: #765d32;
+  font-size: 13px;
+  line-height: 1.55;
 }
 
 .visual-bg {

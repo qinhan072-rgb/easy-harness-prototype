@@ -436,28 +436,11 @@ const labCases = [
       "I uploaded CAD-style reference files for the connector shell, bracket outline, and protective boot. Please use them as dimensional/context references, not final manufacturing drawings.",
     files: ["connector-shell.step", "bracket-outline.dxf", "protective-boot.stl"],
     draft: {
+      visualType: "ai_poster",
       title: "CAD references received, connection goal missing",
       promise:
         "The files are acknowledged as useful references, but Easy Harness should not pretend a harness requirement exists before the connection goal is stated.",
-      sourceNode: {
-        title: "Unknown source",
-        subtitle: "Connection goal needed",
-        unknown: true,
-      },
-      trunk: {
-        title: "Harness to define",
-        subtitle: "CAD references only",
-        unknown: true,
-      },
-      branches: [
-        {
-          id: "unknown-target",
-          title: "Unknown target",
-          subtitle: "Device/port not stated",
-          tone: "warning",
-          unknown: true,
-        },
-      ],
+      files: ["connector-shell.step", "bracket-outline.dxf", "protective-boot.stl"],
       known: [
         "CAD-style reference files received",
         "Use as dimensional/context references",
@@ -590,30 +573,12 @@ function VisualDraftCanvas({ draft }) {
 }
 
 function layoutBoards(boards = []) {
-  const fallback = [
-    {
-      id: "source",
-      title: "Source device",
-      subtitle: "Customer basis",
-      role: "source",
-      tone: "dark",
-      ports: ["PWR", "GND", "I/O"],
-    },
-    {
-      id: "target",
-      title: "Target device",
-      subtitle: "Harness end",
-      role: "target",
-      tone: "teal",
-      ports: ["Signals"],
-    },
-  ];
-  const safeBoards = boards.length ? boards : fallback;
-  const sourceIndex = safeBoards.findIndex((board) =>
+  if (!boards.length) return [];
+  const sourceIndex = boards.findIndex((board) =>
     /source|controller|ecu|main/i.test(`${board.role} ${board.title}`),
   );
-  const source = safeBoards[sourceIndex >= 0 ? sourceIndex : 0];
-  const targets = safeBoards.filter((_, index) => index !== (sourceIndex >= 0 ? sourceIndex : 0));
+  const source = boards[sourceIndex >= 0 ? sourceIndex : 0];
+  const targets = boards.filter((_, index) => index !== (sourceIndex >= 0 ? sourceIndex : 0));
   const sourceLayout = {
     ...source,
     x: 62,
@@ -660,13 +625,13 @@ function endpointTone(endpoint, index) {
   return "teal";
 }
 
-function boardsFromRequirementMap(requirementMap, fallbackBoards = []) {
+function boardsFromRequirementMap(requirementMap) {
   const endpoints = Array.isArray(requirementMap?.endpoints)
     ? requirementMap.endpoints.filter((endpoint) => endpoint && typeof endpoint === "object")
     : [];
-  if (!endpoints.length) return fallbackBoards;
+  if (!endpoints.length) return [];
 
-  const boards = endpoints.slice(0, 6).map((endpoint, index) => {
+  return endpoints.slice(0, 6).map((endpoint, index) => {
     const role = shortVisualLabel(endpoint.role || (index === 0 ? "source" : "target"), "target", 14);
     const status = shortVisualLabel(endpoint.status || "identified", "identified", 14);
     const evidenceCount = Array.isArray(endpoint.evidenceRefs) ? endpoint.evidenceRefs.length : 0;
@@ -678,27 +643,16 @@ function boardsFromRequirementMap(requirementMap, fallbackBoards = []) {
       id: endpoint.id || `endpoint_${index + 1}`,
       title: shortVisualLabel(endpoint.label, `Endpoint ${index + 1}`, 28),
       subtitle: shortVisualLabel(endpoint.knownFrom || endpoint.status || "Customer-provided basis", "Customer basis", 34),
-      role: endpoint.role || (index === 0 ? "source" : "target"),
+      role: endpoint.role || "endpoint",
       tone: endpointTone(endpoint, index),
       ports: ports.slice(0, 6),
     };
   });
-  if (boards.length === 1) {
-    boards.push({
-      id: "unknown_destination",
-      title: "Other end unknown",
-      subtitle: "Needed to complete request scope",
-      role: "unknown_target",
-      tone: "amber",
-      ports: ["unknown", "reply useful"],
-    });
-  }
-  return boards;
 }
 
-function resolveEndpointRef(ref, boards, fallbackId) {
+function resolveEndpointRef(ref, boards) {
   const value = `${ref || ""}`.trim();
-  if (!value) return fallbackId;
+  if (!value) return "";
   const exact = boards.find((board) => board.id === value);
   if (exact) return exact.id;
   const normalized = value.toLowerCase().replace(/[^a-z0-9]+/g, "");
@@ -707,35 +661,37 @@ function resolveEndpointRef(ref, boards, fallbackId) {
     const title = `${board.title || ""}`.toLowerCase().replace(/[^a-z0-9]+/g, "");
     return id === normalized || title === normalized;
   });
-  return loose?.id || fallbackId;
+  return loose?.id || "";
 }
 
-function wireGroupsFromRequirementMap(requirementMap, fallbackGroups = [], boards = []) {
+function wireGroupsFromRequirementMap(requirementMap, boards = []) {
   const groups = Array.isArray(requirementMap?.connectionGroups)
     ? requirementMap.connectionGroups.filter((group) => group && typeof group === "object")
     : [];
-  if (!groups.length) return fallbackGroups;
+  if (!groups.length) return [];
 
-  return groups.slice(0, 10).map((group, index) => {
-    const fallbackTarget = boards[Math.min(index + 1, Math.max(1, boards.length - 1))]?.id || boards[1]?.id;
-    const status = `${group.status || ""}`.toLowerCase();
-    return {
-      id: group.id || `connection_group_${index + 1}`,
-      label: shortVisualLabel(group.label, `Connection group ${index + 1}`, 30),
-      from: resolveEndpointRef(group.from, boards, boards[0]?.id),
-      to: resolveEndpointRef(group.to, boards, fallbackTarget),
-      route_zone: group.routeZone || group.route_zone || "",
-      purpose: shortVisualLabel(group.function || "draft connection", "draft connection", 28),
-      signals: Array.isArray(group.knownSignals)
-        ? group.knownSignals.map((item) => shortVisualLabel(item, "signal", 20)).slice(0, 8)
-        : [],
-      optional: /unknown|missing|optional|partial|review/.test(status),
-      confidence: group.status || "draft",
-    };
-  });
+  return groups
+    .slice(0, 10)
+    .map((group, index) => {
+      const status = `${group.status || ""}`.toLowerCase();
+      return {
+        id: group.id || `connection_group_${index + 1}`,
+        label: shortVisualLabel(group.label, `Connection group ${index + 1}`, 30),
+        from: resolveEndpointRef(group.from, boards),
+        to: resolveEndpointRef(group.to, boards),
+        route_zone: group.routeZone || group.route_zone || "",
+        purpose: shortVisualLabel(group.function || "draft connection", "draft connection", 28),
+        signals: Array.isArray(group.knownSignals)
+          ? group.knownSignals.map((item) => shortVisualLabel(item, "signal", 20)).slice(0, 8)
+          : [],
+        optional: /unknown|missing|optional|partial|review/.test(status),
+        confidence: group.status || "draft",
+      };
+    })
+    .filter((group) => group.from && group.to && group.from !== group.to);
 }
 
-function routeZonesFromRequirementMap(requirementMap, poster = {}) {
+function routeZonesFromRequirementMap(requirementMap) {
   const sections = Array.isArray(requirementMap?.harnessSections)
     ? requirementMap.harnessSections.filter((section) => section && typeof section === "object")
     : [];
@@ -744,8 +700,7 @@ function routeZonesFromRequirementMap(requirementMap, poster = {}) {
     .filter(Boolean)
     .map((label) => shortVisualLabel(label, "Harness route", 18).toUpperCase());
   if (labels.length) return labels;
-  if (Array.isArray(poster.route_zones) && poster.route_zones.length) return poster.route_zones;
-  return ["MAIN HARNESS", "BRANCH HARNESS", "AUX HARNESS"];
+  return [];
 }
 
 function openItemsFromRequirementMap(requirementMap, poster = {}, draft = {}) {
@@ -802,21 +757,9 @@ function AiPosterWiringDraftCanvas({ draft }) {
   const poster = draft.poster || {};
   const requirementMap = draft.requirementMap || {};
   const hasRequirementMap = Boolean(requirementMap.schemaVersion);
-  const boards = boardsFromRequirementMap(requirementMap, poster.boards || []);
+  const boards = boardsFromRequirementMap(requirementMap);
   const layouts = layoutBoards(boards);
-  const source = layouts[0];
-  const wireGroupsFromPoster = poster.wire_groups?.length
-    ? poster.wire_groups
-    : [
-        {
-          id: "draft_link",
-          label: "Draft harness",
-          from: source.id,
-          to: layouts[1]?.id,
-          signals: ["connection basis"],
-        },
-      ];
-  const wireGroups = wireGroupsFromRequirementMap(requirementMap, wireGroupsFromPoster, boards);
+  const wireGroups = wireGroupsFromRequirementMap(requirementMap, boards);
   const colors = [
     "#d84332",
     "#2067d5",
@@ -831,10 +774,31 @@ function AiPosterWiringDraftCanvas({ draft }) {
     "#8b5a2b",
     "#2c3b37",
   ];
-  const routeZones = routeZonesFromRequirementMap(requirementMap, poster);
+  const routeZones = routeZonesFromRequirementMap(requirementMap);
   const unknownItems = openItemsFromRequirementMap(requirementMap, poster, draft);
   const callouts = calloutsFromRequirementMap(requirementMap, poster);
   const evidence = evidenceFromRequirementMap(requirementMap, poster, draft);
+  const hasSupportedTopology = boards.length >= 2 && wireGroups.length > 0;
+
+  if (!hasSupportedTopology) {
+    return (
+      <section className="agent-lab-visual poster-mode">
+        <div className="agent-lab-section-head">
+          <div>
+            <span>Requirement Map Visual Draft</span>
+            <h2>{draft.title}</h2>
+          </div>
+          <Cable size={22} />
+        </div>
+        <div className="agent-lab-empty-topology">
+          <strong>Connection layout not confirmed yet</strong>
+          <p>The current evidence has been organized, but it does not support an honest connection diagram yet.</p>
+          {!!evidence.length && <span>Evidence received: {evidence.slice(0, 4).join(" / ")}</span>}
+          {!!unknownItems.length && <span>Next clarification: {unknownItems[0]}</span>}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="agent-lab-visual poster-mode">
@@ -1244,8 +1208,8 @@ function getDraftUnderstanding(draft) {
       ? understanding.factTrace
       : understood.map((fact) => ({
           fact,
-          source: "Customer message or listed file",
-          status: "understood",
+          source: "Agent-organized draft; source not linked",
+          status: "needs evidence link",
         }));
   const questionPlan =
     understanding.questionPlan?.length

@@ -6,12 +6,7 @@ const evalPath = resolve(root, "docs", "ai-agent", "evals", "visual_draft_agent_
 const artifactDir = resolve(root, "..", "easy-harness-project-materials", "test-artifacts");
 const artifactPath = resolve(artifactDir, "agent-draft-lab-eval-latest.json");
 const apiUrl = (process.env.AGENT_DRAFT_LAB_URL || "http://127.0.0.1:8787").replace(/\/$/, "");
-const timeoutMs = Number(process.env.AGENT_DRAFT_LAB_EVAL_TIMEOUT_MS || 180000);
-const coreCaseIds = new Set([
-  "dt06_mixed_attachment_pack",
-  "spreadsheet_pinout_missing_other_end",
-  "cad_reference_only_missing_goal",
-]);
+const timeoutMs = Number(process.env.AGENT_DRAFT_LAB_EVAL_TIMEOUT_MS || 360000);
 
 function parseArgs() {
   const args = process.argv.slice(2);
@@ -122,6 +117,14 @@ function evaluateCase(caseSpec, apiResult) {
     readiness === caseSpec.expected_readiness,
     `expected ${caseSpec.expected_readiness}, got ${readiness || "missing"}`,
   );
+  if (readiness === "connection_goal_missing") {
+    addCheck(
+      checks,
+      "topology:not_fabricated",
+      !Array.isArray(map.connectionGroups) || map.connectionGroups.length === 0,
+      `${Array.isArray(map.connectionGroups) ? map.connectionGroups.length : 0} connection group(s)`,
+    );
+  }
 
   for (const [area, phrases] of Object.entries(caseSpec.requirement_map_must_include || {})) {
     const areaText = flattenText(getMapArea(map, area));
@@ -188,7 +191,8 @@ function evaluateCase(caseSpec, apiResult) {
     addCheck(
       checks,
       "question:allow_unknown",
-      /(unknown|do not know|if known|if available|mark unknown|identify)/i.test(questionText),
+      !questionText ||
+        /(unknown|do not know|if known|if available|mark unknown|identify)/i.test(questionText),
       questionText.slice(0, 220),
     );
   }
@@ -237,8 +241,6 @@ async function main() {
   let cases = evalSpec.cases || [];
   if (options.cases) {
     cases = cases.filter((item) => options.cases.has(item.id));
-  } else if (!options.all) {
-    cases = cases.filter((item) => coreCaseIds.has(item.id));
   }
 
   if (!cases.length) {
@@ -268,7 +270,7 @@ async function main() {
     generated_at: new Date().toISOString(),
     apiUrl,
     model: health.model,
-    selected: options.all ? "all" : "core",
+    selected: options.cases ? [...options.cases] : "all",
     pass: results.every((result) => result.pass),
     results,
   };

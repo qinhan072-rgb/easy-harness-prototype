@@ -71,6 +71,13 @@ const checkingFunction = readIfExists(checkingFunctionPath);
 const agentDraftLabApi = readIfExists(agentDraftLabApiPath);
 const agentDraftLab = readIfExists(agentDraftLabPath);
 const agentDraftLabEval = readIfExists(agentDraftLabEvalPath);
+let visualDraftEvalCases = [];
+try {
+  const parsed = JSON.parse(visualDraftAgentEval);
+  visualDraftEvalCases = Array.isArray(parsed?.cases) ? parsed.cases : [];
+} catch {
+  visualDraftEvalCases = [];
+}
 
 const checks = [
   {
@@ -432,6 +439,9 @@ const checks = [
   {
     name: "checking requests have timeout and stale recovery",
     pass: app.includes("checkingInvokeTimeoutMs") &&
+      app.includes("12 * 60 * 1000") &&
+      app.includes("20 * 60 * 1000") &&
+      app.includes("This can take a few minutes when files need careful organization") &&
       app.includes("callWithTimeout(") &&
       app.includes("isStaleCheckingRequest") &&
       app.includes("stale_check_recovery_started") &&
@@ -591,6 +601,19 @@ const checks = [
       envExample.includes("QWEN_MODEL=qwen3.6-plus")
   },
   {
+    name: "formal ai draft runs evidence audit before saving",
+    pass: checkingFunction.includes("draftEvidenceAuditEnabled") &&
+      checkingFunction.includes("AI_DRAFT_ENABLE_EVIDENCE_AUDIT") &&
+      checkingFunction.includes("buildEvidenceAuditPrompt") &&
+      checkingFunction.includes("callDraftJsonCompletion") &&
+      checkingFunction.includes("draft_model_passes: passes") &&
+      checkingFunction.includes("evidence_audit_enabled: evidenceAuditEnabled") &&
+      checkingFunction.includes("This pass protects evidence honesty, Draft closure, and customer trust") &&
+      envExample.includes("AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true") &&
+      aiAgentPrinciples.includes("Evidence Audit") &&
+      visualDraftAgentSpec.includes("formal run-checking AI evidence audit")
+  },
+  {
     name: "ai draft supports optional qwen attachment vision",
     pass: checkingFunction.includes("AI_DRAFT_ENABLE_ATTACHMENT_VISION") &&
       checkingFunction.includes("createSignedAttachmentImageUrls") &&
@@ -641,17 +664,19 @@ const checks = [
     name: "ai draft keeps customer questions consistent across message and summary",
     pass: checkingFunction.includes("finalizeCustomerQuestions") &&
       checkingFunction.includes("customerQuestionSet") &&
-      checkingFunction.includes("questionField(question)") &&
+      checkingFunction.includes("canonicalQuestionField") &&
+      checkingFunction.includes("...draft.unknowns.ask_user_now.map") &&
       checkingFunction.includes("draft_closure: {") &&
       checkingFunction.includes("questions_to_ask: questions") &&
       checkingFunction.includes("user_facing_summary: {") &&
       checkingFunction.includes("needed_next: questions")
   },
   {
-    name: "cad-only intake acknowledges received reference files",
-    pass: checkingFunction.includes("I received the CAD reference files") &&
-      checkingFunction.includes("dimensional/context references") &&
-      checkingFunction.includes("Before Easy Harness can prepare the Draft")
+    name: "fallback intake acknowledges evidence without imitating semantic understanding",
+    pass: checkingFunction.includes("buildLocalDraftFromRequest") &&
+      checkingFunction.includes("I received the uploaded files and will use the supported observations as request evidence.") &&
+      checkingFunction.includes("Review the supplied files and supported observations before relying on file details.") &&
+      checkingFunction.includes("What should this harness or cable connect, copy, or replace?")
   },
   {
     name: "repository boundary ignores generated local artifacts",
@@ -671,13 +696,17 @@ const checks = [
     name: "ai agent does not title requests from one keyword",
     pass: !app.includes('if (value.includes("battery")) return "Battery Pack Adapter Harness"') &&
       app.includes("firstLine") &&
+      !app.includes('return "Replacement Harness Request"') &&
+      !app.includes('return "Sensor Harness Request"') &&
       checkingFunction.includes("Do not rename the request based on a single keyword")
   },
   {
-    name: "ai agent softens file-review claims",
-    pass: checkingFunction.includes("Do not phrase review items as if this run already inspected those contents") &&
+    name: "ai agent enforces file evidence boundaries generically",
+    pass: checkingFunction.includes("applyGenericReviewBoundaries") &&
+      checkingFunction.includes("Review the supplied files and observations before relying on unresolved file details.") &&
+      checkingFunction.includes("Do not phrase review items as if this run already inspected those contents") &&
       checkingFunction.includes("not file-content claims") &&
-      checkingFunction.includes("Inspect uploaded files during Easy Harness review before relying on connector")
+      !checkingFunction.includes("softenEvidenceBoundaryText")
   },
   {
     name: "ai agent forbids keyword workflows",
@@ -717,13 +746,11 @@ const checks = [
       visualDraftAgentSpec.includes("draft_readiness")
   },
   {
-    name: "visual draft eval cases preserve evidence and question policy",
+    name: "visual draft eval suite is diverse and preserves evidence and question policy",
     pass: visualDraftAgentEval.includes("easy_harness_visual_draft_eval_v0_1") &&
-      visualDraftAgentEval.includes("dt06_mixed_attachment_pack") &&
-      visualDraftAgentEval.includes("battery_fixture_mixed_material") &&
-      visualDraftAgentEval.includes("cad_reference_only_missing_goal") &&
-      visualDraftAgentEval.includes("old_sample_copy_with_photos") &&
-      visualDraftAgentEval.includes("spreadsheet_pinout_missing_other_end") &&
+      visualDraftEvalCases.length >= 5 &&
+      new Set(visualDraftEvalCases.map((item) => item.id)).size === visualDraftEvalCases.length &&
+      visualDraftEvalCases.every((item) => item.input && item.expected_readiness) &&
       visualDraftAgentEval.includes("requirement_map_must_include") &&
       visualDraftAgentEval.includes("must_show_received") &&
       visualDraftAgentEval.includes("must_allow_unknown") &&
@@ -736,8 +763,8 @@ const checks = [
       agentDraftLabApi.includes("requirement_map") &&
       agentDraftLabApi.includes("connection_groups") &&
       agentDraftLabApi.includes("The poster must be derived from requirement_map") &&
-      agentDraftLabApi.includes("customer_request_basis") &&
-      agentDraftLabApi.includes("draft_connection_basis")
+      agentDraftLabApi.includes("A connection goal must come from supplied evidence") &&
+      agentDraftLabApi.includes("If topology is not supported, leave those arrays empty")
   },
   {
     name: "agent draft lab renderer uses requirement map as primary visual source",
@@ -755,25 +782,27 @@ const checks = [
       app.includes("draft-details-disclosure") &&
       requirementMapVisual.includes("normalizeRequirementMap") &&
       requirementMapVisual.includes("Visual draft") &&
-      requirementMapVisual.includes("known_signals")
+      requirementMapVisual.includes("known_signals") &&
+      requirementMapVisual.includes("hasSupportedTopology") &&
+      requirementMapVisual.includes("Connection layout not confirmed yet") &&
+      !requirementMapVisual.includes("derived_group") &&
+      !requirementMapVisual.includes("Other end to confirm")
   },
   {
-    name: "agent draft lab eval covers core visual draft cases",
+    name: "agent draft lab eval runs the full regression set by default",
     pass: packageJson.includes('"agent:eval"') &&
       agentDraftLabEval.includes("visual_draft_spec") &&
-      agentDraftLabEval.includes("dt06_mixed_attachment_pack") &&
-      agentDraftLabEval.includes("spreadsheet_pinout_missing_other_end") &&
-      agentDraftLabEval.includes("cad_reference_only_missing_goal")
+      agentDraftLabEval.includes('selected: options.cases ? [...options.cases] : "all"') &&
+      !agentDraftLabEval.includes("coreCaseIds")
   },
   {
-    name: "formal run-checking carries visual draft closure guards",
+    name: "runtime agents use generic evidence and closure guards without scenario routes",
     pass: checkingFunction.includes("applyDraftClosureGuards") &&
-      checkingFunction.includes("isCadReferenceOnlyDraft") &&
-      checkingFunction.includes("isSingleConnectorOrPinoutBasisDraft") &&
-      checkingFunction.includes("Connector-A/pinout-only rule") &&
-      checkingFunction.includes("CAD-only rule") &&
-      checkingFunction.includes("Mixed-files rule") &&
-      checkingFunction.includes("What is the other end of the harness, or should Easy Harness treat it as unknown for now?")
+      checkingFunction.includes("hasConnectionGoalBasis") &&
+      checkingFunction.includes("There is no fixed checklist that every request must satisfy") &&
+      agentDraftLabApi.includes("There is no universal Draft checklist") &&
+      !/(dt06|deutsch|cad-only rule|connector-a-only rule|connector-a\/pinout-only rule|mixed-files rule|12v automotive sensor branch)/i.test(checkingFunction) &&
+      !/(dt06|deutsch|cad-only rule|connector-a-only rule|connector-a\/pinout-only rule|mixed-files rule|12v automotive sensor branch)/i.test(agentDraftLabApi)
   },
   {
     name: "formal run-checking asks the model for a requirement map and reconciles it",
@@ -784,7 +813,10 @@ const checks = [
       checkingFunction.includes("buildRequirementMap") &&
       checkingFunction.includes("requirement_map: buildRequirementMap(draft)") &&
       checkingFunction.includes("requirementMap: buildRequirementMap(draft)") &&
-      checkingFunction.includes("Unknown other end") &&
+      checkingFunction.includes("endpointIds.has(group.from)") &&
+      checkingFunction.includes("endpointIds.has(group.to)") &&
+      !checkingFunction.includes("Unknown other end") &&
+      !checkingFunction.includes("Route basis to review") &&
       checkingFunction.includes("evidence_refs")
   },
   {

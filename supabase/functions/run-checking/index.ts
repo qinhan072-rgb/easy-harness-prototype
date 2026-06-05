@@ -316,6 +316,14 @@ function envFlag(name: string) {
   );
 }
 
+function envFlagDefault(name: string, fallback: boolean) {
+  const raw = (Deno.env.get(name) || "").trim().toLowerCase();
+  if (!raw) return fallback;
+  if (["1", "true", "yes", "on"].includes(raw)) return true;
+  if (["0", "false", "no", "off"].includes(raw)) return false;
+  return fallback;
+}
+
 function envNumber(name: string, fallback: number, min: number, max: number) {
   const raw = Deno.env.get(name);
   if (raw === undefined || raw === null || raw.trim() === "") return fallback;
@@ -1693,28 +1701,6 @@ function normalizeString(value: unknown, fallback = "") {
   return typeof value === "string" ? value.trim() : fallback;
 }
 
-function softenEvidenceBoundaryText(value = "") {
-  return value
-    .replace(
-      /\bvisual identification and confirmation of connector housing and terminal models from photos\b/gi,
-      "Inspect uploaded photos during Easy Harness review before confirming connector housing or terminal details",
-    )
-    .replace(
-      /\bvisual identification\b/gi,
-      "photo review during Easy Harness review",
-    )
-    .replace(
-      /\bpinout verification and mapping validation against the uploaded CSV\b/gi,
-      "Review the uploaded pinout file during Easy Harness review before relying on pinout mapping",
-    )
-    .replace(
-      /\bagainst the uploaded CSV\b/gi,
-      "during Easy Harness review",
-    )
-    .replace(/\bfrom photos\b/gi, "during Easy Harness review")
-    .replace(/\boptimized for\b/gi, "selected for");
-}
-
 function normalizeList(value: unknown, limit = 12) {
   return Array.isArray(value)
     ? value
@@ -1797,84 +1783,26 @@ function hasKnownRequirement(draft: EasyHarnessDraft, keys: string[]) {
   return keys.some((key) => isKnownFieldValue(draft.known_requirements[key]));
 }
 
-function draftTextBlob(draft: EasyHarnessDraft) {
-  const knownText = Object.entries(draft.known_requirements)
-    .map(([key, value]) => `${key}: ${fieldText(value)}`)
-    .filter((line) => !line.endsWith(": "))
-    .join(" | ");
-  const evidenceText = draft.provided_evidence
-    .map((item) =>
-      [item.filename, item.content_summary, item.what_it_may_show]
-        .filter(Boolean)
-        .join(" "),
-    )
-    .join(" | ");
-  return [
-    draft.user_intent.intent_type,
-    draft.user_intent.connection_goal,
-    draft.user_intent.desired_outcome,
-    draft.user_facing_summary.request_line,
-    draft.user_facing_summary.compact_details.join(" "),
-    draft.user_facing_summary.what_we_have.join(" "),
-    draft.ai_interpretation.short_understanding,
-    draft.ai_interpretation.likely_harness_type,
-    draft.ai_interpretation.likely_use,
-    knownText,
-    evidenceText,
-  ]
-    .filter(Boolean)
-    .join(" | ")
-    .toLowerCase();
-}
-
-function matchesAny(text: string, patterns: RegExp[]) {
-  return patterns.some((pattern) => pattern.test(text));
-}
-
 function hasQuantityBasis(draft: EasyHarnessDraft) {
-  if (
-    hasKnownRequirement(draft, [
-      "quantity",
-      "qty",
-      "pieces",
-      "piece_count",
-      "order_quantity",
-    ])
-  )
-    return true;
-  const text = draftTextBlob(draft);
-  return matchesAny(text, [
-    /\b\d+\s*(pcs?|pieces?|units?|sets?|pairs?|samples?)\b/i,
-    /\b(one|two|three|four|five|six|seven|eight|nine|ten)\s*(pcs?|pieces?|units?|sets?|pairs?|samples?)\b/i,
-    /\bprototype\s*(sample|piece|unit)?\b/i,
-    /\bsample\s*(piece|unit|order)?\b/i,
+  return hasKnownRequirement(draft, [
+    "quantity",
+    "qty",
+    "pieces",
+    "piece_count",
+    "order_quantity",
   ]);
 }
 
 function hasLengthOrScaleBasis(draft: EasyHarnessDraft) {
-  if (
-    hasKnownRequirement(draft, [
-      "length",
-      "estimated_length",
-      "approximate_length",
-      "full_length",
-      "cable_length",
-      "harness_length",
-      "scale",
-      "dimensions",
-    ])
-  )
-    return true;
-  const text = draftTextBlob(draft);
-  if (
-    matchesAny(text, [
-      /\b\d+(?:\.\d+)?\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
-    ])
-  )
-    return true;
-  return matchesAny(text, [
-    /\b(full|complete)\s+(physical\s+)?(sample|old harness|harness sample)\s+(can be measured|for measurement|available to measure)\b/i,
-    /\b(old harness|sample)\s+(will be sent|can be sent|available for measurement)\b/i,
+  return hasKnownRequirement(draft, [
+    "length",
+    "estimated_length",
+    "approximate_length",
+    "full_length",
+    "cable_length",
+    "harness_length",
+    "scale",
+    "dimensions",
   ]);
 }
 
@@ -1896,96 +1824,25 @@ function hasUseOrEnvironmentBasis(draft: EasyHarnessDraft) {
     ])
   )
     return true;
-  const text = draftTextBlob(draft);
-  return matchesAny(text, [
-    /\b(outdoor|indoor|vehicle|automotive|agricultural|field|machine|equipment|robot|prototype|controller|sensor|motor|battery|power|signal|data|can\b|rs485|waterproof|moisture|vibration|high temperature|low temperature)\b/i,
-  ]);
-}
-
-function hasRequestScope(draft: EasyHarnessDraft) {
-  const text = draftTextBlob(draft);
-  const hasIntent = Boolean(
-    normalizeString(draft.user_intent.connection_goal, "") ||
-      normalizeString(draft.user_intent.desired_outcome, "") ||
-      normalizeString(draft.user_facing_summary.request_line, ""),
-  );
-  const knownType = normalizeString(
-    draft.user_intent.intent_type,
-    "unknown",
-  ).toLowerCase();
-  return (
-    hasIntent ||
-    (knownType && knownType !== "unknown") ||
-    matchesAny(text, [
-      /\bconnect\b.+\b(to|with)\b/i,
-      /\b(copy|replace|remake|replicate)\b.+\b(harness|cable|loom)\b/i,
-      /\b(adapter|pigtail|extension cable|wiring loom|wire harness|cable assembly)\b/i,
-    ])
-  );
-}
-
-function hasPowerLoadRisk(draft: EasyHarnessDraft) {
-  const text = draftTextBlob(draft);
-  return matchesAny(text, [
-    /\b(battery|motor|heater|actuator|pump|inverter|driver|motor controller|power load|high current)\b/i,
-  ]);
+  return false;
 }
 
 function hasVoltageBasis(draft: EasyHarnessDraft) {
-  if (hasKnownRequirement(draft, ["voltage", "volts", "v_rating"])) return true;
-  const text = draftTextBlob(draft);
-  return matchesAny(text, [/\b\d+(?:\.\d+)?\s*(v|volt|volts)\b/i]);
+  return hasKnownRequirement(draft, ["voltage", "volts", "v_rating"]);
 }
 
 function hasCurrentOrPowerBasis(draft: EasyHarnessDraft) {
-  if (
-    hasKnownRequirement(draft, [
-      "current",
-      "max_current",
-      "maximum_current",
-      "power",
-      "wattage",
-      "load",
-      "amp",
-      "amps",
-      "a_rating",
-    ])
-  )
-    return true;
-  const text = draftTextBlob(draft);
-  return matchesAny(text, [
-    /\b\d+(?:\.\d+)?\s*(a|amp|amps|w|watt|watts|kw)\b/i,
-    /\b(low|small|signal[-\s]?level|logic[-\s]?level)\s+(current|power)\b/i,
+  return hasKnownRequirement(draft, [
+    "current",
+    "max_current",
+    "maximum_current",
+    "power",
+    "wattage",
+    "load",
+    "amp",
+    "amps",
+    "a_rating",
   ]);
-}
-
-function hasPowerBasis(draft: EasyHarnessDraft) {
-  return hasVoltageBasis(draft) || hasCurrentOrPowerBasis(draft);
-}
-
-function hasExplicitPowerConductor(draft: EasyHarnessDraft) {
-  const text = draftTextBlob(draft);
-  return matchesAny(text, [
-    /\b(pin\s*\d+\s*[=:]\s*\d+(?:\.\d+)?\s*v)\b/i,
-    /\b(12v|24v|48v|5v)\b.+\b(gnd|ground)\b/i,
-    /\b(power|supply|vcc|vin|battery\s*positive|positive supply)\b/i,
-  ]);
-}
-
-function needsCurrentOrPowerBeforeDraft(draft: EasyHarnessDraft) {
-  if (hasExplicitSignalOnlyNoPower(draft)) return false;
-  return (hasPowerLoadRisk(draft) || hasExplicitPowerConductor(draft)) && !hasCurrentOrPowerBasis(draft);
-}
-
-function addQuestionOnce(
-  target: UnknownItem[],
-  field: string,
-  reason: string,
-  question: string,
-) {
-  if (target.some((item) => item.field === field || item.question === question))
-    return;
-  target.push({ field, reason, question });
 }
 
 function addUnknownOnce(target: UnknownItem[], field: string, reason: string, question?: string) {
@@ -1994,93 +1851,99 @@ function addUnknownOnce(target: UnknownItem[], field: string, reason: string, qu
   target.push({ field, reason, question });
 }
 
-function removeQuestionsMatching(target: UnknownItem[], patterns: RegExp[]) {
-  return target.filter((item) => {
-    const text = [item.field, item.reason, item.question || ""].join(" ");
-    return !patterns.some((pattern) => pattern.test(text));
+function isMeaningfulDraftText(value: unknown) {
+  const text = normalizeString(value, "");
+  const lower = text.toLowerCase();
+  if (
+    !text ||
+    [
+      "unknown",
+      "not specified",
+      "n/a",
+      "none",
+      "tbd",
+      "harness request",
+      "customer wiring harness request",
+      "customer request basis",
+      "source",
+      "target",
+      "other end",
+      "endpoint",
+    ].includes(lower)
+  )
+    return false;
+  if (
+    /\b(connection goal|source|target|other end)\b.{0,60}\b(missing|needed|unknown|not stated|to confirm)\b/i.test(
+      text,
+    ) ||
+    /^define what\b.{0,100}\b(connects?|copies|replaces)\b/i.test(text)
+  )
+    return false;
+  return true;
+}
+
+function supportedRequirementMapEndpoints(draft: EasyHarnessDraft) {
+  return draft.requirement_map.endpoints.filter((endpoint) => {
+    const status = normalizeString(endpoint.status, "").toLowerCase();
+    const role = normalizeString(endpoint.role, "").toLowerCase();
+    return (
+      isMeaningfulDraftText(endpoint.label) &&
+      !/\b(unknown|missing|unclear|tbd|confirm)\b/.test(status) &&
+      !/\bunknown\b/.test(role)
+    );
   });
 }
 
-function prependQuestionOnce(
-  target: UnknownItem[],
-  field: string,
-  reason: string,
-  question: string,
-) {
-  const existing = target.filter(
-    (item) => item.field !== field && item.question !== question,
+function hasSupportedConnectionGroup(draft: EasyHarnessDraft) {
+  const endpointIds = new Set(
+    supportedRequirementMapEndpoints(draft).map((endpoint) => endpoint.id),
   );
-  target.splice(0, target.length, { field, reason, question }, ...existing);
-}
-
-function draftIntentText(draft: EasyHarnessDraft) {
-  return [
-    draft.user_intent.intent_type,
-    draft.user_intent.connection_goal,
-    draft.user_intent.from_side,
-    draft.user_intent.to_side.join(" "),
-    draft.user_intent.desired_outcome,
-    draft.user_facing_summary.request_line,
-    draft.user_facing_summary.compact_details.join(" "),
-    draft.user_facing_summary.what_we_have.join(" "),
-    draft.ai_interpretation.short_understanding,
-    draft.ai_interpretation.likely_harness_type,
-    Object.entries(draft.known_requirements)
-      .map(([key, value]) => `${key}: ${fieldText(value)}`)
-      .join(" "),
-  ]
-    .filter(Boolean)
-    .join(" | ");
-}
-
-function hasExplicitOtherEndBasis(draft: EasyHarnessDraft) {
-  if (isKnownFieldValue(draft.known_requirements.connector_end_b)) return true;
-  const usableTargets = draft.user_intent.to_side.filter((item) => {
-    const text = normalizeString(item, "").toLowerCase();
-    return text && !/\b(unknown|target|other end|connector b|end b|tbd)\b/.test(text);
+  return draft.requirement_map.connection_groups.some((group) => {
+    const status = normalizeString(group.status, "").toLowerCase();
+    return (
+      endpointIds.has(group.from) &&
+      endpointIds.has(group.to) &&
+      group.from !== group.to &&
+      !/\b(unknown|missing)\b/.test(status)
+    );
   });
-  if (usableTargets.length) return true;
-  const text = draftIntentText(draft);
-  return matchesAny(text, [
-    /\b(other end|end b|connector b)\b.{0,80}\b(is|can be|should be|bare wire|flying lead|labeled lead|pigtail)\b/i,
-    /\b(bare wire|flying lead|labeled lead|pigtail)\b/i,
-    /\b(from|connects?)\b.{3,80}\b(to)\b.{3,80}\b(controller|ecu|sensor|motor|fan|board|device|connector|bare wire|lead)\b/i,
-    /\bto\s+(two|three|four|five|\d+)\s+(external\s+)?(sensors?|fans?|motors?|devices?)\b/i,
-  ]);
 }
 
-function hasExplicitBuildAction(draft: EasyHarnessDraft) {
-  const text = draftIntentText(draft);
-  return matchesAny(text, [
-    /\b(connects?|connect)\b/i,
-    /\b(copy|replace|remake|replicate)\b/i,
-    /\b(adapter|pigtail|extension cable|wiring loom|wire harness|cable assembly)\b/i,
-    /\bend\s*a\b/i,
-    /\bend\s*b\b/i,
-    /\bconnector\s*a\b/i,
-  ]);
+function hasSampleOrReferenceCopyBasis(draft: EasyHarnessDraft) {
+  const intentType = normalizeString(draft.user_intent.intent_type, "").toLowerCase();
+  const hasMeaningfulGoal = [
+    draft.user_intent.connection_goal,
+    draft.requirement_map.connection_goal,
+  ].some(isMeaningfulDraftText);
+  return (
+    ["copy_old_harness", "replacement"].includes(intentType) &&
+    hasMeaningfulGoal &&
+    draft.provided_evidence.length > 0
+  );
 }
 
-function isCadReferenceOnlyDraft(draft: EasyHarnessDraft) {
-  const evidence = draft.provided_evidence || [];
-  const filenames = evidence.map((item) => item.filename || "").filter(Boolean);
-  const cadCount = filenames.filter((filename) =>
-    /\.(step|stp|dxf|dwg|stl|obj|iges|igs|3mf|amf|fcstd)$/i.test(filename),
-  ).length;
-  const hasCadEvidence = cadCount > 0 && cadCount === filenames.length;
-  const text = draftIntentText(draft);
-  const referenceOnly =
-    hasCadEvidence ||
-    /\b(cad[-\s]?style|cad reference|dimensional\/context|dimensional context|not final manufacturing drawings?)\b/i.test(text);
-  return referenceOnly && !hasExplicitBuildAction(draft);
+function hasKnownTargetBasis(draft: EasyHarnessDraft) {
+  if (isKnownFieldValue(draft.known_requirements.connector_end_b)) return true;
+  if (isKnownFieldValue(draft.known_requirements.end_b_connector)) return true;
+  if (isKnownFieldValue(draft.known_requirements.end_b_type)) return true;
+  if (draft.user_intent.to_side.some(isMeaningfulDraftText)) return true;
+  return supportedRequirementMapEndpoints(draft).some((endpoint) =>
+    /\b(target|branch_end|auxiliary)\b/i.test(endpoint.role),
+  );
 }
 
-function isSingleConnectorOrPinoutBasisDraft(draft: EasyHarnessDraft) {
-  const text = draftIntentText(draft);
-  const hasConnectorOrPinout = matchesAny(text, [
-    /\b(connector\s*a|end\s*a|dt06|deutsch|pinout|pin mapping|spreadsheet|csv|xlsx)\b/i,
-  ]) || draft.captured_professional_details.pinout.length > 0;
-  return hasConnectorOrPinout && !hasExplicitOtherEndBasis(draft);
+function hasConnectionGoalBasis(draft: EasyHarnessDraft) {
+  if (hasSampleOrReferenceCopyBasis(draft)) return true;
+  const hasMeaningfulGoal = [
+    draft.user_intent.connection_goal,
+    draft.requirement_map.connection_goal,
+  ].some(isMeaningfulDraftText);
+  if (!hasMeaningfulGoal) return false;
+  return (
+    hasKnownTargetBasis(draft) ||
+    supportedRequirementMapEndpoints(draft).length >= 2 ||
+    hasSupportedConnectionGroup(draft)
+  );
 }
 
 function setNeedsQuestionDraftState(
@@ -2129,90 +1992,26 @@ function setNeedsQuestionDraftState(
 function applyDraftClosureGuards(draft: EasyHarnessDraft): EasyHarnessDraft {
   if (draft.draft_meta.draft_status === "not_harness_related") return draft;
 
-  if (isCadReferenceOnlyDraft(draft)) {
+  if (!hasConnectionGoalBasis(draft)) {
     const question: UnknownItem = {
       field: "connection_goal",
       reason:
-        "CAD reference files were received, but the current request does not say what the harness should connect, copy, or replace.",
+        "The current evidence does not yet support a clear connection, copy, or replacement goal.",
       question: "What should this harness or cable connect, copy, or replace?",
     };
-    const easyReview = [...draft.unknowns.easy_harness_review];
-    addUnknownOnce(
-      easyReview,
-      "cad_reference_files",
-      "Use the CAD files as dimensional/context references during Easy Harness review, not as final manufacturing drawings.",
-    );
     return setNeedsQuestionDraftState(
       {
         ...draft,
         user_intent: {
           ...draft.user_intent,
           connection_goal: "",
-          from_side: "unknown",
-          to_side: [],
           intent_confidence: "vague",
         },
-        unknowns: { ...draft.unknowns, easy_harness_review: easyReview },
       },
       "needs_harness_context",
-      "CAD reference files were received, but a connection goal is still needed before an Easy Harness Draft can be prepared.",
+      "Easy Harness received the available material, but the evidence does not yet support a clear connection goal.",
       [question],
       "needs_harness_context",
-    );
-  }
-
-  if (isSingleConnectorOrPinoutBasisDraft(draft)) {
-    const questions: UnknownItem[] = [
-      {
-        field: "other_end",
-        reason:
-          "The current request gives one connector or pinout basis, but not the far end of the harness.",
-        question: "What is the other end of the harness, or should Easy Harness treat it as unknown for now?",
-      },
-    ];
-    if (!hasQuantityBasis(draft)) {
-      questions.push({
-        field: "quantity",
-        reason: "Quantity changes quote scope and preparation.",
-        question: "What quantity is needed, if known?",
-      });
-    }
-    if (!hasLengthOrScaleBasis(draft)) {
-      questions.push({
-        field: "length_or_measurement_basis",
-        reason: "Approximate length is needed to scale the Draft and quote basis.",
-        question: "What approximate length is needed, if known?",
-      });
-    }
-    if (!hasQuantityBasis(draft) && !hasLengthOrScaleBasis(draft)) {
-      questions.splice(1, 2, {
-        field: "quantity_and_length",
-        reason: "Quantity and approximate length set the quote scope and basic route scale.",
-        question: "What quantity and approximate length are needed, if known?",
-      });
-    }
-
-    const askLikelyKnown = removeQuestionsMatching(
-      draft.unknowns.ask_user_if_likely_known,
-      [/terminal part number/i, /crimp/i, /manufacturing bom/i],
-    );
-    const guardedDraft = {
-      ...draft,
-      user_intent: {
-        ...draft.user_intent,
-        to_side: ["Unknown other end"],
-      },
-      unknowns: {
-        ...draft.unknowns,
-        ask_user_if_likely_known: askLikelyKnown,
-      },
-    };
-    return setNeedsQuestionDraftState(
-      guardedDraft,
-      "needs_key_clarification",
-      "The connector or pinout basis is useful, but the other end and basic scope must be clarified before the Draft is review-ready.",
-      questions,
-      "ask_key_details",
     );
   }
 
@@ -2243,20 +2042,86 @@ function questionField(question: string) {
   return "draft_blocking_detail";
 }
 
+function canonicalQuestionField(value: string) {
+  const field = normalizeString(value, "").toLowerCase().replace(/[\s-]+/g, "_");
+  if (/^(qty|quantity|pieces|piece_count|order_quantity)$/.test(field))
+    return "quantity";
+  if (
+    /^(length|overall_length|harness_length|estimated_length|approximate_length|length_or_measurement_basis)$/.test(
+      field,
+    )
+  )
+    return "length_or_measurement_basis";
+  if (/^(quantity_and_length|length_and_quantity)$/.test(field))
+    return "quantity_and_length";
+  if (/^(connection_goal|request_scope|connection_goal_or_other_end)$/.test(field))
+    return "connection_goal_or_other_end";
+  if (/^(other_end|target|end_b|connector_end_b)$/.test(field))
+    return "other_end";
+  if (/^(use_context|environment|application|use_case)$/.test(field))
+    return "use_context";
+  if (/^(voltage|current|power|current_or_power|voltage_current_or_power)$/.test(field))
+    return "voltage_current_or_power";
+  return questionField(value);
+}
+
+function questionFieldIsKnown(draft: EasyHarnessDraft, field: string) {
+  if (field === "quantity") return hasQuantityBasis(draft);
+  if (field === "length_or_measurement_basis") return hasLengthOrScaleBasis(draft);
+  if (field === "quantity_and_length")
+    return hasQuantityBasis(draft) && hasLengthOrScaleBasis(draft);
+  if (field === "connection_goal_or_other_end")
+    return hasConnectionGoalBasis(draft);
+  if (field === "other_end") return hasKnownTargetBasis(draft);
+  if (field === "use_context") return hasUseOrEnvironmentBasis(draft);
+  if (field === "voltage_current_or_power")
+    return hasVoltageBasis(draft) && hasCurrentOrPowerBasis(draft);
+  return false;
+}
+
+function resolvedQuestionLabel(
+  draft: EasyHarnessDraft,
+  question: string,
+  field: string,
+) {
+  if (field !== "quantity_and_length") {
+    return questionFieldIsKnown(draft, field) ? "" : question;
+  }
+  const hasQuantity = hasQuantityBasis(draft);
+  const hasLength = hasLengthOrScaleBasis(draft);
+  if (hasQuantity && hasLength) return "";
+  if (hasQuantity)
+    return "What approximate length or measurement basis should Easy Harness use, if known?";
+  if (hasLength) return "What quantity is needed, if known?";
+  return question;
+}
+
 function customerQuestionSet(draft: EasyHarnessDraft, limit = 3) {
-  const rawQuestions = [
-    ...draft.draft_closure.questions_to_ask,
-    ...draft.user_facing_summary.needed_next,
-    ...draft.unknowns.ask_user_now.map(customerQuestionLabel),
-    ...draft.unknowns.ask_user_if_likely_known.map(customerQuestionLabel),
+  const rawQuestions: Array<{ question: string; field: string }> = [
+    ...draft.unknowns.ask_user_now.map((item) => ({
+      question: customerQuestionLabel(item),
+      field: canonicalQuestionField(item.field || customerQuestionLabel(item)),
+    })),
+    ...draft.draft_closure.questions_to_ask.map((question) => ({
+      question,
+      field: canonicalQuestionField(question),
+    })),
+    ...draft.user_facing_summary.needed_next.map((question) => ({
+      question,
+      field: canonicalQuestionField(question),
+    })),
   ];
   const output: string[] = [];
   const seen = new Set<string>();
   const seenFields = new Set<string>();
   for (const raw of rawQuestions) {
-    const question = normalizeString(raw, "");
+    const question = resolvedQuestionLabel(
+      draft,
+      normalizeString(raw.question, ""),
+      raw.field,
+    );
     const key = question.toLowerCase();
-    const field = questionField(question);
+    const field = canonicalQuestionField(raw.field || question);
     const overlapsCombinedField =
       field === "quantity_and_length"
         ? seenFields.has("quantity") || seenFields.has("length_or_measurement_basis")
@@ -2294,7 +2159,7 @@ function questionItemFor(draft: EasyHarnessDraft, question: string): UnknownItem
   ].find((item) => customerQuestionLabel(item).toLowerCase() === question.toLowerCase());
   if (existing) return { ...existing, question };
   return {
-    field: questionField(question),
+    field: canonicalQuestionField(question),
     reason: "This detail is needed before Easy Harness can prepare the Draft.",
     question,
   };
@@ -2333,207 +2198,21 @@ function finalizeCustomerQuestions(draft: EasyHarnessDraft): EasyHarnessDraft {
   };
 }
 
-function setKnownRequirementIfMissing(
-  draft: EasyHarnessDraft,
-  key: string,
-  value: string,
-  source = "derived_from_conversation",
-  confidence: FieldValue["confidence"] = "partial",
-) {
-  if (!value) return;
-  if (isKnownFieldValue(draft.known_requirements[key])) return;
-  draft.known_requirements[key] = { value, source, confidence };
-}
-
-function connectionTextForExtraction(draft: EasyHarnessDraft) {
-  return [
-    draft.user_intent.connection_goal,
-    draft.user_intent.desired_outcome,
-    draft.user_intent.from_side,
-    draft.user_intent.to_side.join(" "),
-    draft.user_facing_summary.request_line,
-    draft.user_facing_summary.compact_details.join(" "),
-    draft.user_facing_summary.what_we_have.join(" "),
-    draft.ai_interpretation.short_understanding,
-    Object.entries(draft.known_requirements)
-      .map(([key, value]) => `${key}: ${fieldText(value)}`)
-      .join(" "),
-  ]
-    .filter(Boolean)
-    .join(" | ");
-}
-
-function firstMatchText(text: string, patterns: RegExp[]) {
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match) return match;
-  }
-  return null;
-}
-
-function deriveMissingKnownRequirements(draft: EasyHarnessDraft) {
-  const text = connectionTextForExtraction(draft);
-  const lower = text.toLowerCase();
-
-  const quantity = firstMatchText(text, [
-    /\b(?:quantity|qty|need|needs|make|order|for)\s*[:=]?\s*(\d{1,6})\s*(pcs?|pieces?|units?|sets?|pairs?|samples?)\b/i,
-    /\b(\d{1,6})\s*(pcs?|pieces?|units?|sets?|pairs?|samples?)\b/i,
-  ]);
-  if (quantity) setKnownRequirementIfMissing(draft, "quantity", `${quantity[1]} ${quantity[2]}`);
-
-  const length = firstMatchText(text, [
-    /\b(?:overall|full|total|harness|cable)\s+length\s*(?:is|of|[:=])?\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
-    /\b(?:target|approximate|estimated)\s+length\s*(?:is|of|[:=])?\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
-    /\b(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\s+(?:signal\s+)?(?:wire\s+)?(?:harness|cable|loom|assembly)\b/i,
-    /\b(?:length|about|approx\.?|approximately|around)\s*[:=]?\s*(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
-  ]);
-  if (length) setKnownRequirementIfMissing(draft, "harness_length", `${length[1]} ${length[2]}`);
-
-  const endALeadLength = firstMatchText(text, [
-    /\b(?:end|connector)\s*a\b.{0,70}?\b(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
-  ]);
-  if (endALeadLength) {
-    setKnownRequirementIfMissing(
-      draft,
-      "end_a_lead_length",
-      `${endALeadLength[1]} ${endALeadLength[2]}`,
-    );
-  }
-
-  const endBLeadLength = firstMatchText(text, [
-    /\b(?:end|connector)\s*b\b.{0,70}?\b(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\b/i,
-    /\b(\d+(?:\.\d+)?)\s*(mm|cm|m|meter|meters|in|inch|inches|ft|feet)\s+(?:labeled\s+)?(?:bare\s+wire|flying|free)\s+leads?\b/i,
-  ]);
-  if (endBLeadLength) {
-    setKnownRequirementIfMissing(
-      draft,
-      "end_b_lead_length",
-      `${endBLeadLength[1]} ${endBLeadLength[2]}`,
-    );
-  }
-
-  const voltage = firstMatchText(text, [/\b(\d+(?:\.\d+)?)\s*(v|volt|volts)\b/i]);
-  if (voltage) setKnownRequirementIfMissing(draft, "voltage", `${voltage[1]} ${voltage[2]}`);
-
-  const current = firstMatchText(text, [/\b(\d+(?:\.\d+)?)\s*(a|amp|amps)\b/i]);
-  if (current) setKnownRequirementIfMissing(draft, "current", `${current[1]} ${current[2]}`);
-
-  const power = firstMatchText(text, [/\b(\d+(?:\.\d+)?)\s*(w|watt|watts|kw)\b/i]);
-  if (power) setKnownRequirementIfMissing(draft, "power", `${power[1]} ${power[2]}`);
-
-  if (/\b(signal[-\s]?only|no\s+power|does\s+not\s+carry\s+power|not\s+carry\s+power|without\s+power)\b/i.test(text)) {
-    setKnownRequirementIfMissing(draft, "power", "none (signal only)", "derived_from_conversation", "confirmed");
-    addUnknownOnce(
-      draft.unknowns.not_applicable,
-      "voltage_current_for_load",
-      "Not needed at intake because the customer specified signal only / no power.",
-    );
-  }
-
-  if (/\b(can[-\s]?h|can[-\s]?l|can bus|can\s+signal)\b/i.test(text)) {
-    setKnownRequirementIfMissing(draft, "signal_type", "CAN bus", "derived_from_conversation", "partial");
-    if (!draft.ai_interpretation.likely_use || draft.ai_interpretation.likely_use === "unknown") {
-      draft.ai_interpretation.likely_use = "signal";
-    }
-  }
-
-  const envParts: string[] = [];
-  if (/\boutdoor\b/i.test(text)) envParts.push("outdoor");
-  if (/\bindoor\b/i.test(text)) envParts.push("indoor");
-  if (/\bfield\s+equipment\b/i.test(text)) envParts.push("field equipment");
-  if (/\bIP\s*6[56789]\b/i.test(text)) {
-    const ip = text.match(/\bIP\s*6[56789]\b/i)?.[0]?.replace(/\s+/g, "") || "IP-rated";
-    envParts.push(ip);
-  }
-  if (envParts.length) {
-    setKnownRequirementIfMissing(draft, "environment", [...new Set(envParts)].join(", "));
-  } else if (isKnownFieldValue(draft.known_requirements.environmental)) {
-    setKnownRequirementIfMissing(draft, "environment", fieldText(draft.known_requirements.environmental));
-  }
-
-  const pinAssignments: Array<Record<string, unknown>> = [];
-  const pinPattern = /\bpin\s*(\d{1,3})\s*(?:[:=\-]|\s+)\s*([A-Za-z0-9+/_\- ]{1,40})(?=\s*(?:,|;|\||$|\.))/gi;
-  let match: RegExpExecArray | null;
-  while ((match = pinPattern.exec(text)) && pinAssignments.length < 30) {
-    const signal = match[2].trim().replace(/\s+/g, " ");
-    if (signal) pinAssignments.push({ pin: match[1], signal, source: "derived_from_conversation" });
-  }
-  if (pinAssignments.length && !draft.captured_professional_details.pinout.length) {
-    draft.captured_professional_details.pinout = pinAssignments;
-  }
-
-  if (isKnownFieldValue(draft.known_requirements.connector_end_a)) {
-    const value = fieldText(draft.known_requirements.connector_end_a);
-    if (!draft.captured_professional_details.connectors.some((item) => item.end === "A" || item.value === value)) {
-      draft.captured_professional_details.connectors.push({ end: "A", value, source: "known_requirements" });
-    }
-  }
-  if (isKnownFieldValue(draft.known_requirements.connector_end_b)) {
-    const value = fieldText(draft.known_requirements.connector_end_b);
-    if (!draft.captured_professional_details.connectors.some((item) => item.end === "B" || item.value === value)) {
-      draft.captured_professional_details.connectors.push({ end: "B", value, source: "known_requirements" });
-    }
-  }
-
-  if (draft.draft_closure.can_close_user_draft) {
-    if (/\bconnector\b/i.test(lower)) {
-      addUnknownOnce(
-        draft.unknowns.easy_harness_review,
-        "connector_part_selection",
-        "Select or verify connector brand/part numbers from the stated connector type, files, photos, or sample.",
-      );
-    }
-    if (/\bip\s*6[56789]|waterproof|outdoor\b/i.test(lower)) {
-      addUnknownOnce(
-        draft.unknowns.easy_harness_review,
-        "environmental_sealing_review",
-        "Review waterproofing/sealing approach against the stated outdoor/IP preference.",
-      );
-    }
-    if (/\bshield|drain|can[-\s]?h|can[-\s]?l|can bus\b/i.test(lower)) {
-      addUnknownOnce(
-        draft.unknowns.easy_harness_review,
-        "signal_and_shielding_review",
-        "Review CAN signal cable, shielding, drain connection, and continuity expectations.",
-      );
-    }
-    if (draft.provided_evidence.length) {
-      addUnknownOnce(
-        draft.unknowns.easy_harness_review,
-        "attachment_review",
-        "Inspect uploaded files during Easy Harness review before relying on connector, pinout, layout, or other file details.",
-      );
-    }
-  }
-
-  return draft;
-}
-
-function softenEasyHarnessReviewLanguage(draft: EasyHarnessDraft): EasyHarnessDraft {
-  const softenItem = (item: UnknownItem) => ({
-    ...item,
-    reason: softenEvidenceBoundaryText(item.reason || ""),
-    question: item.question
-      ? softenEvidenceBoundaryText(item.question)
-      : item.question,
-  });
-
+function applyGenericReviewBoundaries(draft: EasyHarnessDraft): EasyHarnessDraft {
+  if (!draft.provided_evidence.some((item) => item.needs_review)) return draft;
+  const easyHarnessReview = [...draft.unknowns.easy_harness_review];
+  addUnknownOnce(
+    easyHarnessReview,
+    "attachment_evidence_review",
+    "Review the supplied files and observations before relying on unresolved file details.",
+  );
   return {
     ...draft,
     unknowns: {
       ...draft.unknowns,
-      easy_harness_review: draft.unknowns.easy_harness_review.map(softenItem),
-      later_supplier_or_engineering_confirmation:
-        draft.unknowns.later_supplier_or_engineering_confirmation.map(
-          softenItem,
-        ),
+      easy_harness_review: easyHarnessReview,
     },
   };
-}
-
-function hasExplicitSignalOnlyNoPower(draft: EasyHarnessDraft) {
-  const text = draftTextBlob(draft);
-  return /\b(signal[-\s]?only|no\s+power|does\s+not\s+carry\s+power|not\s+carry\s+power|without\s+power)\b/i.test(text);
 }
 
 function enforceDraftReadiness(draft: EasyHarnessDraft): EasyHarnessDraft {
@@ -2543,68 +2222,9 @@ function enforceDraftReadiness(draft: EasyHarnessDraft): EasyHarnessDraft {
     draft.draft_meta.draft_status === "closed_for_easy_harness_review";
   if (!claimedReady) return draft;
 
-  const blockingQuestions: UnknownItem[] = [];
-  if (!hasRequestScope(draft)) {
-    addQuestionOnce(
-      blockingQuestions,
-      "request_scope",
-      "The request scope is not clear enough to form a usable draft.",
-      "What should this harness or cable connect, copy, or replace?",
-    );
-  }
-  if (!hasQuantityBasis(draft)) {
-    addQuestionOnce(
-      blockingQuestions,
-      "quantity",
-      "Quantity is a basic order detail needed before preparing a usable draft.",
-      "How many harnesses do you need?",
-    );
-  }
-  if (!hasLengthOrScaleBasis(draft)) {
-    addQuestionOnce(
-      blockingQuestions,
-      "length_or_measurement_basis",
-      "Approximate length or a clear measurement basis is needed before preparing a usable draft.",
-      "What is the approximate full length, or do you have a full sample that can be measured?",
-    );
-  }
-  if (!hasUseOrEnvironmentBasis(draft)) {
-    addQuestionOnce(
-      blockingQuestions,
-      "use_context",
-      "Basic use context helps Easy Harness prepare a draft that can be reviewed properly.",
-      "Where will this harness be used, or what equipment is it for?",
-    );
-  }
-  if (needsCurrentOrPowerBeforeDraft(draft)) {
-    const hasVoltage = hasVoltageBasis(draft);
-    addQuestionOnce(
-      blockingQuestions,
-      hasVoltage ? "current_or_power" : "voltage_current_or_power",
-      hasVoltage
-        ? "A power-carrying harness needs expected current or power before the user-side draft can be treated as ready."
-        : "A power-carrying harness needs voltage and expected current or power before the user-side draft can be treated as ready.",
-      hasVoltage
-        ? "What maximum current or power is expected on the power line? Approximate is fine."
-        : "What voltage and maximum current or power will this harness carry? Approximate is fine.",
-    );
-  }
-
-  if (!blockingQuestions.length) return draft;
-
-  const selected = blockingQuestions.slice(0, 3);
-  const existingAskNow = draft.unknowns.ask_user_now || [];
-  const askNow = [...selected];
-  for (const item of existingAskNow) {
-    if (askNow.length >= 6) break;
-    if (
-      !askNow.some(
-        (existing) => existing.field === item.field || existing.question === item.question,
-      )
-    ) {
-      askNow.push(item);
-    }
-  }
+  const questions = customerQuestionSet(draft, 3);
+  if (!questions.length) return draft;
+  const askNow = questions.map((question) => questionItemFor(draft, question));
 
   return {
     ...draft,
@@ -2622,17 +2242,17 @@ function enforceDraftReadiness(draft: EasyHarnessDraft): EasyHarnessDraft {
     },
     user_facing_summary: {
       ...draft.user_facing_summary,
-      needed_next: selected.map((item) => item.question || item.field),
-      next_step: "Add these basics so Easy Harness can prepare the draft.",
+      needed_next: questions,
+      next_step: "Reply with the requested clarification, or mark it unknown.",
     },
     draft_closure: {
       ...draft.draft_closure,
       can_close_user_draft: false,
       closure_status: "needs_key_clarification",
       closure_reason:
-        "The request intent is understood, but basic order details are still needed before an Easy Harness Draft can be prepared.",
+        "The connection goal is understood, but the Agent marked a customer clarification as blocking Draft closure.",
       next_action: "ask_user",
-      questions_to_ask: selected.map((item) => item.question || item.field),
+      questions_to_ask: questions,
       customer_message_type: "ask_key_details",
     },
   };
@@ -2686,20 +2306,17 @@ function normalizeRequirementMapValue(value: unknown): RequirementMap {
       return {
         id,
         label,
-        role: normalizeString(item.role, index === 0 ? "source" : "target"),
+        role: normalizeString(item.role, "endpoint"),
         known_from: normalizeString(item.known_from, "Easy Harness Draft"),
         status: normalizeString(item.status, "partial"),
         evidence_refs: normalizeList(item.evidence_refs, 8),
       };
     })
     .filter(Boolean) as RequirementMapEndpoint[];
-  const endpointId = (value: unknown, fallback: string) => {
+  const endpointId = (value: unknown) => {
     const rawId = normalizeString(value, "");
-    return (
-      endpointIds.get(rawId) ||
-      endpointIds.get(slugId(rawId, rawId)) ||
-      fallback
-    );
+    if (!rawId) return "";
+    return endpointIds.get(rawId) || endpointIds.get(slugId(rawId, rawId)) || "";
   };
   const sections = normalizeArrayObjects(raw.harness_sections, 8)
     .map((item, index) => {
@@ -2719,11 +2336,8 @@ function normalizeRequirementMapValue(value: unknown): RequirementMap {
   const groups = normalizeArrayObjects(raw.connection_groups, 12)
     .map((item, index) => {
       if (endpoints.length < 2) return null;
-      const from = endpointId(item.from, endpoints[0].id);
-      const to = endpointId(
-        item.to,
-        endpoints[Math.min(index + 1, endpoints.length - 1)].id,
-      );
+      const from = endpointId(item.from);
+      const to = endpointId(item.to);
       if (!from || !to || from === to) return null;
       return {
         id: slugId(
@@ -2987,10 +2601,9 @@ function normalizeDraft(
       customer_message_type: messageType,
     },
   };
-  const derived = deriveMissingKnownRequirements(draft);
-  const guarded = applyDraftClosureGuards(derived);
+  const guarded = applyDraftClosureGuards(applyGenericReviewBoundaries(draft));
   return finalizeCustomerQuestions(
-    enforceDraftReadiness(softenEasyHarnessReviewLanguage(guarded)),
+    enforceDraftReadiness(guarded),
   );
 }
 
@@ -3105,12 +2718,15 @@ function requirementMapEndpoint(
   };
 }
 
-function requirementMapOpenItem(item: UnknownItem): RequirementMapOpenItem {
+function requirementMapOpenItem(
+  item: UnknownItem,
+  blocksReview: boolean,
+): RequirementMapOpenItem {
   return {
     item: item.question || item.reason || item.field,
     owner: "customer",
     why_it_matters: item.reason || "This affects Draft closure or review confidence.",
-    blocks_review: true,
+    blocks_review: blocksReview,
   };
 }
 
@@ -3140,15 +2756,16 @@ function buildDeterministicRequirementMap(draft: EasyHarnessDraft): RequirementM
   }
   for (const side of draft.user_intent.to_side) {
     const label = normalizeString(side, "");
-    if (!label) continue;
-    const unknown = /\bunknown|other end|target\b/i.test(label);
+    if (!label || /\bunknown|other end|target to confirm|not stated\b/i.test(label)) {
+      continue;
+    }
     endpoints.push(
       requirementMapEndpoint(
-        unknown ? "Unknown other end" : label,
-        unknown ? "unknown_target" : "target",
+        label,
+        "target",
         endpoints.length,
-        unknown ? "Not stated in current customer input" : "Easy Harness Draft",
-        unknown ? "unknown" : "identified",
+        "Easy Harness Draft",
+        "identified",
       ),
     );
   }
@@ -3161,34 +2778,6 @@ function buildDeterministicRequirementMap(draft: EasyHarnessDraft): RequirementM
     if (endB) {
       endpoints.push(requirementMapEndpoint(endB, "target", endpoints.length));
     }
-  }
-  if (!endpoints.length && isCadReferenceOnlyDraft(draft)) {
-    endpoints.push(
-      requirementMapEndpoint(
-        "Unknown source",
-        "unknown_source",
-        0,
-        "CAD references received; source not stated",
-        "unknown",
-      ),
-      requirementMapEndpoint(
-        "Unknown target",
-        "unknown_target",
-        1,
-        "CAD references received; target not stated",
-        "unknown",
-      ),
-    );
-  }
-  if (!endpoints.length) {
-    endpoints.push(
-      requirementMapEndpoint("Customer request basis", "source_or_reference", 0, "Customer message or supplied files", "partial"),
-      requirementMapEndpoint("Unknown other end", "unknown_target", 1, "Not stated in current customer input", "unknown"),
-    );
-  } else if (endpoints.length === 1) {
-    endpoints.push(
-      requirementMapEndpoint("Unknown other end", "unknown_target", 1, "Not stated in current customer input", "unknown"),
-    );
   }
 
   const sections: RequirementMapSection[] = [];
@@ -3222,64 +2811,6 @@ function buildDeterministicRequirementMap(draft: EasyHarnessDraft): RequirementM
       status: "provided",
     });
   }
-  if (!sections.length) {
-    sections.push({
-      id: "route_basis_to_review",
-      label: "Route basis to review",
-      type: "route_section",
-      length_basis: "",
-      route_basis: draft.provided_evidence.length
-        ? "Use supplied files as review references"
-        : "Not yet clear from current input",
-      status: "unknown",
-    });
-  }
-
-  const capturedSignals = draft.captured_professional_details.pinout
-    .map((item) =>
-      [item.pin, item.signal, item.function, item.color]
-        .map((value) => normalizeString(value, ""))
-        .filter(Boolean)
-        .join(" "),
-    )
-    .filter(Boolean)
-    .slice(0, 12);
-  const pinoutRequirement =
-    fieldText(draft.known_requirements.pinout) ||
-    fieldText(draft.known_requirements.pin_mapping);
-  const knownSignals = capturedSignals.length
-    ? capturedSignals
-    : pinoutRequirement
-      ? pinoutRequirement
-          .split(/[,;|]+/)
-          .map((item) => item.trim())
-          .filter(Boolean)
-          .slice(0, 12)
-      : [];
-  const targets = endpoints.slice(1);
-  const groups: RequirementMapConnectionGroup[] = targets.map((target, index) => ({
-    id: `draft_connection_basis_${index + 1}`,
-    label:
-      targets.length === 1 && knownSignals.length
-        ? "Pinout / signal basis"
-        : `Connection to ${target.label}`,
-    from: endpoints[0]?.id || "source",
-    to: target.id,
-    function: draft.ai_interpretation.likely_use || "unknown",
-    known_signals: targets.length === 1 ? knownSignals : [],
-    status:
-      target.status === "unknown" || !draft.draft_closure.can_close_user_draft
-        ? "incomplete"
-        : "draft_from_evidence",
-    evidence_refs: draft.provided_evidence
-      .map((item) => item.filename || "")
-      .filter(Boolean)
-      .slice(0, 6),
-    review_needed: draft.unknowns.easy_harness_review
-      .map((item) => item.reason || item.field)
-      .slice(0, 4),
-  }));
-
   const evidenceRefs = draft.provided_evidence.map((item) => {
     const source =
       item.filename ||
@@ -3303,15 +2834,21 @@ function buildDeterministicRequirementMap(draft: EasyHarnessDraft): RequirementM
       "Customer wiring harness request",
     endpoints,
     harness_sections: sections,
-    connection_groups: groups,
+    // Deterministic code may preserve structured endpoints, but it must not
+    // invent semantic connections that the model did not support.
+    connection_groups: [],
     known_facts: [
       ...draft.user_facing_summary.what_we_have,
       ...draft.user_facing_summary.compact_details,
     ].filter(Boolean).slice(0, 10),
     open_items: [
-      ...draft.unknowns.ask_user_now,
-      ...draft.unknowns.ask_user_if_likely_known,
-    ].map(requirementMapOpenItem).slice(0, 8),
+      ...draft.unknowns.ask_user_now.map((item) =>
+        requirementMapOpenItem(item, true)
+      ),
+      ...draft.unknowns.ask_user_if_likely_known.map((item) =>
+        requirementMapOpenItem(item, false)
+      ),
+    ].slice(0, 8),
     easy_harness_review_items: draft.unknowns.easy_harness_review
       .map((item) => item.reason || item.field)
       .filter(Boolean)
@@ -3338,17 +2875,21 @@ function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
   const interpreted = draft.requirement_map;
   if (
     draft.draft_meta.draft_status === "needs_harness_context" ||
-    isCadReferenceOnlyDraft(draft) ||
-    !hasExplicitOtherEndBasis(draft)
+    !hasConnectionGoalBasis(draft)
   ) {
-    return fallback;
+    return {
+      ...fallback,
+      endpoints: [],
+      connection_groups: [],
+    };
   }
+  const interpretedEndpoints = supportedRequirementMapEndpoints(draft);
   const hasInterpretedTopology =
-    interpreted.endpoints.length >= 2 &&
+    interpretedEndpoints.length >= 2 &&
     interpreted.connection_groups.length > 0;
   if (!hasInterpretedTopology) return fallback;
 
-  const endpointIds = new Set(interpreted.endpoints.map((endpoint) => endpoint.id));
+  const endpointIds = new Set(interpretedEndpoints.map((endpoint) => endpoint.id));
   const interpretedGroups = interpreted.connection_groups.filter(
     (group) =>
       endpointIds.has(group.from) &&
@@ -3360,7 +2901,7 @@ function buildRequirementMap(draft: EasyHarnessDraft): RequirementMap {
   return {
     schema_version: "easy_harness_requirement_map_v0_1",
     connection_goal: interpreted.connection_goal || fallback.connection_goal,
-    endpoints: interpreted.endpoints,
+    endpoints: interpretedEndpoints,
     harness_sections: interpreted.harness_sections.length
       ? interpreted.harness_sections
       : fallback.harness_sections,
@@ -3436,13 +2977,8 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
   const evidenceFilenames = draft.provided_evidence
     .map((item) => item.filename || "")
     .filter(Boolean);
-  const cadEvidenceCount = evidenceFilenames.filter((filename) =>
-    /\.(step|stp|dxf|stl|obj|iges|igs)$/i.test(filename),
-  ).length;
   const evidenceIntro = evidenceFilenames.length
-    ? cadEvidenceCount === evidenceFilenames.length
-      ? "I received the CAD reference files and can use them as dimensional/context references."
-      : "I received the uploaded files and will use them as request context."
+    ? "I received the uploaded files and will use the supported observations as request evidence."
     : "";
 
   if (messageType === "not_harness_related") {
@@ -3595,26 +3131,6 @@ function buildMessageBlocks(draft: EasyHarnessDraft, customerMessage: string, re
 }
 
 
-function cleanExtractedText(value = "") {
-  return value
-    .replace(/^\s*(should be|is|are|to be|an?|the)\s+/i, "")
-    .replace(/\s+/g, " ")
-    .replace(/[.;,]+$/g, "")
-    .trim();
-}
-
-function firstCapture(text: string, patterns: RegExp[]) {
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
-    if (match?.[1]) return cleanExtractedText(match[1]);
-  }
-  return "";
-}
-
-function valueField(value: string, source = "local_draft_builder", confidence: FieldValue["confidence"] = "partial") {
-  return { value, source, confidence };
-}
-
 function customerConversationText(requestRow: RequestRow, messages: MessageRow[]) {
   const customerMessages = messages
     .filter((message) => message.author_role === "customer")
@@ -3627,65 +3143,6 @@ function customerConversationText(requestRow: RequestRow, messages: MessageRow[]
     .trim();
 }
 
-function hasMeasurementReference(
-  text: string,
-  attachments: Array<AttachmentRow & { storage?: StorageRow }>,
-) {
-  const hasTextReference = matchesAny(text, [
-    /\b(old|existing|original|reference|sample)\s+(harness|cable|loom|assembly)\b/i,
-    /\b(harness|cable|loom|assembly)\s+(sample|reference)\b/i,
-    /\b(can be measured|available to measure|same length|copy the length)\b/i,
-  ]);
-  const hasFileReference = attachments.some((attachment) =>
-    /\b(old|existing|sample|reference|harness|cable|loom|photo|image|picture)\b/i.test(
-      attachment.name || "",
-    ),
-  );
-  return hasTextReference || hasFileReference;
-}
-
-function hasActionableConnectionGoal(
-  text: string,
-  endA: string,
-  endB: string,
-  attachments: Array<AttachmentRow & { storage?: StorageRow }>,
-) {
-  if (endA && endB) return true;
-  const directConnection = matchesAny(text, [
-    /\b(connect|wire|link|join|adapt|convert)\b[\s\S]{0,120}\b(to|with|between)\b/i,
-    /\bfrom\b[\s\S]{1,120}\bto\b/i,
-    /\bbetween\b[\s\S]{1,120}\band\b/i,
-  ]);
-  const copyOrReplaceReference =
-    matchesAny(text, [
-      /\b(copy|replicate|remake|replace|duplicate|recreate)\b[\s\S]{0,80}\b(harness|cable|loom|assembly|sample)\b/i,
-      /\b(harness|cable|loom|assembly|sample)\b[\s\S]{0,80}\b(copy|replicate|remake|replace|duplicate|recreate)\b/i,
-    ]) && (attachments.length > 0 || hasMeasurementReference(text, attachments));
-  const adapterReference = matchesAny(text, [
-    /\b(adapter|pigtail|extension|conversion cable|adapter cable)\b[\s\S]{0,120}\b(to|for|between|from)\b/i,
-  ]);
-  return directConnection || copyOrReplaceReference || adapterReference;
-}
-
-function hasBasicUseContext(text: string) {
-  return matchesAny(text, [
-    /\b(for|used in|use in|application|equipment|machine|vehicle|robot|field equipment|agricultural|industrial|outdoor|indoor)\b/i,
-    /\b(power|supply|signal|data|can\b|rs485|sensor|controller|motor|battery|actuator|pump)\b/i,
-    /\b(waterproof|moisture|vibration|high temperature|low temperature|IP\s*6[56789])\b/i,
-  ]);
-}
-
-function extractPinoutDetails(text: string) {
-  const assignments: Array<Record<string, unknown>> = [];
-  const pattern = /\bpin\s*(\d{1,3})\s*(?:[:=\-]|\s+)\s*([A-Za-z0-9+/_\- ]{1,40})(?=\s*(?:,|;|\||$|\.))/gi;
-  let match: RegExpExecArray | null;
-  while ((match = pattern.exec(text)) && assignments.length < 30) {
-    const signal = cleanExtractedText(match[2]);
-    if (signal) assignments.push({ pin: match[1], signal, source: "local_draft_builder" });
-  }
-  return assignments;
-}
-
 function buildLocalDraftFromRequest(
   requestRow: RequestRow,
   messages: MessageRow[],
@@ -3694,140 +3151,18 @@ function buildLocalDraftFromRequest(
   primaryAgentIssue = "",
 ) {
   const text = customerConversationText(requestRow, messages);
-  const lower = text.toLowerCase();
-  const quantity = firstCapture(text, [
-    /\b(?:quantity|qty|need|needs|make|order|for)\s*[:=]?\s*(\d{1,6}\s*(?:pcs?|pieces?|units?|sets?|pairs?|samples?))\b/i,
-    /\b(\d{1,6}\s*(?:pcs?|pieces?|units?|sets?|pairs?|samples?))\b/i,
-  ]);
-  const length = firstCapture(text, [
-    /\b(?:length|full length|total length|about|approx\.?|approximately|around)?\s*[:=]?\s*(\d+(?:\.\d+)?\s*(?:mm|cm|m|meter|meters|in|inch|inches|ft|feet))\b/i,
-  ]);
-  const endA = firstCapture(text, [
-    /\bend\s*a\b[^\n.]*?(?:should be|is|:|=)\s*(?:an?\s+)?([^\n.]+)/i,
-    /\bfrom\s+(?:side|end)?\s*[:=]?\s*([^\n.]+?)\s+to\s+/i,
-  ]);
-  const endB = firstCapture(text, [
-    /\bend\s*b\b[^\n.]*?(?:should be|is|:|=)\s*(?:an?\s+)?([^\n.]+)/i,
-    /\bto\s+(?:side|end)?\s*[:=]?\s*([^\n.]+)/i,
-  ]);
-  const signalOnly = /\b(signal[-\s]?only|no\s+power|does\s+not\s+carry\s+power|not\s+carry\s+power|without\s+power|data[-\s]?only)\b/i.test(text);
-  const isCan = /\b(can[-\s]?h|can[-\s]?l|can\s*bus|can\s+signal)\b/i.test(text);
-  const oldHarnessCopy = /\b(copy|replicate|remake|replace)\b.+\b(old\s+)?(harness|cable|loom|sample)\b/i.test(text);
-  const hasConnectionContext = hasActionableConnectionGoal(text, endA, endB, attachments);
-
-  const envParts: string[] = [];
-  if (/\boutdoor\b/i.test(text)) envParts.push("outdoor");
-  if (/\bindoor\b/i.test(text)) envParts.push("indoor");
-  if (/\bfield\s+equipment\b/i.test(text)) envParts.push("field equipment");
-  if (/\bvehicle|automotive|agricultural|machine|equipment|robot|prototype\b/i.test(text)) {
-    const use = firstCapture(text, [/\b(for|used in|use in)\s+([^\n.]{3,60})/i]);
-    if (use) envParts.push(use);
-  }
-  const ipRating = firstCapture(text, [/\b(IP\s*6[56789])\b/i]);
-  if (ipRating) envParts.push(ipRating.replace(/\s+/g, ""));
-  const environment = [...new Set(envParts)].join(", ");
-
-  const voltage = firstCapture(text, [/\b(\d+(?:\.\d+)?\s*(?:v|volt|volts))\b/i]);
-  const current = firstCapture(text, [/\b(\d+(?:\.\d+)?\s*(?:a|amp|amps))\b/i]);
-  const power = firstCapture(text, [/\b(\d+(?:\.\d+)?\s*(?:w|watt|watts|kw))\b/i]);
-  const hasPowerLoad = /\b(battery|motor|heater|actuator|pump|inverter|driver|motor controller|power line|power load|high current)\b/i.test(text);
-  const pinout = extractPinoutDetails(text);
-  const measurementBasis = length || (hasMeasurementReference(text, attachments) ? "reference sample or file available" : "");
-  const hasUseContext = Boolean(environment || signalOnly || isCan || hasBasicUseContext(text));
-
-  const questions: string[] = [];
-  if (!hasConnectionContext) {
-    questions.push("What should this harness or cable connect, copy, or replace?");
-  } else if (hasPowerLoad && !signalOnly && !current && !power) {
-    questions.push(
-      voltage
-        ? "What maximum current or power is expected on the power line? Approximate is fine."
-        : "What voltage and maximum current or power will this harness carry? Approximate is fine.",
-    );
-  } else {
-    if (!quantity) questions.push("How many harnesses do you need?");
-    if (!measurementBasis) questions.push("What is the approximate full length, or is there a full sample that can be measured?");
-    if (!hasUseContext && questions.length < 3) questions.push("Where will this harness be used, or what equipment is it for?");
-  }
-
-  const canClose = hasConnectionContext && questions.length === 0;
-  const closureStatus: DraftStatus = canClose
-    ? "ready_for_easy_harness_review"
-    : !hasConnectionContext
-      ? "needs_harness_context"
-      : "needs_key_clarification";
-
-  const knownRequirements: Record<string, FieldValue> = {};
-  if (quantity) knownRequirements.quantity = valueField(quantity, "local_draft_builder", "confirmed");
-  if (length) knownRequirements.harness_length = valueField(length, "local_draft_builder", "confirmed");
-  if (endA) knownRequirements.connector_end_a = valueField(endA, "local_draft_builder", "partial");
-  if (endB) knownRequirements.connector_end_b = valueField(endB, "local_draft_builder", "partial");
-  if (environment) knownRequirements.environment = valueField(environment, "local_draft_builder", "partial");
-  if (voltage) knownRequirements.voltage = valueField(voltage, "local_draft_builder", "partial");
-  if (current) knownRequirements.current = valueField(current, "local_draft_builder", "partial");
-  if (power) knownRequirements.power = valueField(power, "local_draft_builder", "partial");
-  if (signalOnly) knownRequirements.power = valueField("none (signal only)", "local_draft_builder", "confirmed");
-  if (isCan) knownRequirements.signal_type = valueField("CAN bus", "local_draft_builder", "partial");
-  if (ipRating) knownRequirements.ip_rating = valueField(ipRating.replace(/\s+/g, ""), "local_draft_builder", "partial");
-
-  const compactDetails = [
-    measurementBasis,
-    quantity,
-    signalOnly ? "signal only, no power" : "",
-    isCan ? "CAN signal" : "",
-    environment,
-    ipRating ? `${ipRating.replace(/\s+/g, "")} preferred` : "",
-  ].filter(Boolean).slice(0, 6);
-  const whatWeHave = [
-    endA ? `End A: ${endA}` : "",
-    endB ? `End B: ${endB}` : "",
-    measurementBasis ? `Length/reference: ${measurementBasis}` : "",
-    quantity ? `Quantity: ${quantity}` : "",
-    signalOnly ? "Signal only / no power" : "",
-    pinout.length ? "Pinout details provided" : "",
-  ].filter(Boolean).slice(0, 6);
-  const connectionGoal = endA && endB
-    ? `Connect ${endA} to ${endB}.`
-    : oldHarnessCopy
-      ? "Copy or replace an existing harness based on the provided sample/photos."
-      : hasConnectionContext
-        ? cleanExtractedText(text.split("\n").find((line) => /\b(harness|cable|connect|adapter|copy|replace)\b/i.test(line)) || requestRow.customer_summary || requestRow.title)
-        : "";
-  const requestLine = [length, isCan ? "CAN signal harness" : "harness request", quantity].filter(Boolean).join(", ") || requestRow.title || "Harness request";
-
-  const easyHarnessReview: UnknownItem[] = [];
-  if (canClose) {
-    if (/\bconnector|m\d+\b/i.test(text) || endA || endB) {
-      easyHarnessReview.push({
-        field: "connector_selection_or_verification",
-        reason: "Verify connector type, orientation, and suitable part selection from the request details and files.",
-      });
-    }
-    if (isCan || /\bshield|drain\b/i.test(text)) {
-      easyHarnessReview.push({
-        field: "signal_and_shielding_review",
-        reason: "Review CAN signal cable, shielding, drain connection, and continuity expectations.",
-      });
-    }
-    if (environment || /\bwaterproof|IP\s*6[56789]\b/i.test(text)) {
-      easyHarnessReview.push({
-        field: "environmental_sealing_review",
-        reason: "Review waterproofing and sealing approach against the stated environment/IP preference.",
-      });
-    }
-    if (attachments.length) {
-      easyHarnessReview.push({
-        field: "attachment_review",
-        reason: "Review uploaded files for connector orientation, layout, pinout, and sample details.",
-      });
-    }
-  }
-
-  const notApplicable: UnknownItem[] = signalOnly
+  const requestLine =
+    normalizeString(requestRow.title, "") ||
+    normalizeString(requestRow.customer_summary, "") ||
+    normalizeString(text.split(/\r?\n/).find(Boolean), "") ||
+    "Request received";
+  const question = "What should this harness or cable connect, copy, or replace?";
+  const easyHarnessReview: UnknownItem[] = attachments.length
     ? [
         {
-          field: "voltage_current_for_load",
-          reason: "Not needed at intake because the customer specified signal only / no power.",
+          field: "attachment_evidence_review",
+          reason:
+            "Review the supplied files and supported observations before relying on file details.",
         },
       ]
     : [];
@@ -3835,93 +3170,104 @@ function buildLocalDraftFromRequest(
   const rawDraft = {
     schema_version: schemaVersion,
     draft_meta: {
-      draft_status: closureStatus,
-      draft_maturity_level: canClose ? 0.75 : hasConnectionContext ? 0.45 : 0.2,
+      draft_status: "needs_harness_context",
+      draft_maturity_level: 0.1,
       last_updated_reason: primaryAgentIssue
-        ? "Primary agent run did not complete; Easy Harness generated a safe draft path from the submitted text and attachment metadata."
+        ? "Easy Harness intake result was limited to verified receipt evidence."
         : trigger,
     },
     user_intent: {
-      intent_type: oldHarnessCopy ? "copy_old_harness" : hasConnectionContext ? "new_custom_harness" : "unknown",
-      connection_goal: connectionGoal,
-      from_side: endA || "unknown",
-      to_side: endB ? [endB] : [],
+      intent_type: "unknown",
+      connection_goal: "",
+      from_side: "unknown",
+      to_side: [],
       desired_outcome: requestLine,
-      intent_confidence: hasConnectionContext ? "partial" : "vague",
+      intent_confidence: "vague",
     },
     provided_evidence: attachments.map((attachment) => ({
       type: attachment.mime_type || "attachment",
       filename: attachment.name,
       content_summary: `${attachment.name} uploaded by the customer`,
-      relevance: hasConnectionContext ? "likely_relevant" : "unclear",
+      relevance: "unclear",
       what_it_may_show: "Reference material for Easy Harness review",
       used_in_draft: false,
       needs_review: true,
     })),
-    known_requirements: knownRequirements,
+    known_requirements: {},
     captured_professional_details: {
-      connectors: [
-        endA ? { end: "A", value: endA, source: "local_draft_builder" } : null,
-        endB ? { end: "B", value: endB, source: "local_draft_builder" } : null,
-      ].filter(Boolean),
+      connectors: [],
       terminals: [],
       wire_gauge: null,
-      pinout,
+      pinout: [],
       materials: [],
-      shielding: /\bshield|drain\b/i.test(text)
-        ? valueField("shield/drain mentioned", "local_draft_builder", "partial")
-        : null,
+      shielding: null,
       testing_requirements: [],
     },
     ai_interpretation: {
-      short_understanding: requestLine,
-      likely_harness_type: isCan ? "CAN signal harness" : oldHarnessCopy ? "old harness copy" : "custom harness",
-      likely_use: signalOnly || isCan ? "signal" : hasPowerLoad ? "power" : "unknown",
-      complexity_estimate: "simple_to_moderate",
+      short_understanding: "Easy Harness received the written request and supplied files.",
+      likely_harness_type: "unknown",
+      likely_use: "unknown",
+      complexity_estimate: "unknown",
       do_not_assume: [
         "Attachment metadata is not visual or document evidence.",
-        "A keyword is only a clue, not a workflow trigger.",
+        "No connection topology was confirmed in this limited intake result.",
       ],
     },
     unknowns: {
-      ask_user_now: questions.map((question) => ({ field: "draft_blocking_detail", reason: question, question })),
+      ask_user_now: [
+        {
+          field: "connection_goal",
+          reason: "A supported connection goal is needed before a Draft can be prepared.",
+          question,
+        },
+      ],
       ask_user_if_likely_known: [],
       easy_harness_review: easyHarnessReview,
-      later_supplier_or_engineering_confirmation: canClose
-        ? [
-            {
-              field: "production_details",
-              reason: "Production-level material, crimp, and test details can be confirmed after Easy Harness review.",
-            },
-          ]
-        : [],
-      not_applicable: notApplicable,
+      later_supplier_or_engineering_confirmation: [],
+      not_applicable: [],
     },
     risk_flags: [],
     user_facing_summary: {
       request_line: requestLine,
-      compact_details: compactDetails,
-      what_we_have: whatWeHave,
-      needed_next: questions.slice(0, 3),
-      next_step: canClose
-        ? "Easy Harness will review connector selection, files, and remaining technical details."
-        : "Reply with the missing detail so Easy Harness can prepare the Draft.",
+      compact_details: [],
+      what_we_have: [
+        text ? "Written instructions received" : "",
+        attachments.length ? `${attachments.length} file(s) received` : "",
+      ].filter(Boolean),
+      needed_next: [question],
+      next_step: "Add the connection goal so Easy Harness can prepare the Draft.",
+    },
+    requirement_map: {
+      schema_version: "easy_harness_requirement_map_v0_1",
+      connection_goal: "",
+      endpoints: [],
+      harness_sections: [],
+      connection_groups: [],
+      known_facts: [],
+      open_items: [
+        {
+          item: question,
+          owner: "customer",
+          why_it_matters:
+            "The current evidence does not support a connection topology yet.",
+          blocks_review: true,
+        },
+      ],
+      easy_harness_review_items: easyHarnessReview.map((item) => item.reason),
+      evidence_refs: attachments.map((attachment) => ({
+        source: attachment.name,
+        supports: "File received",
+        boundary: "Internal content was not relied on in this limited intake result.",
+      })),
     },
     draft_closure: {
-      can_close_user_draft: canClose,
-      closure_status: closureStatus,
-      closure_reason: canClose
-        ? "The submitted request has enough user-side information to prepare an Easy Harness Draft."
-        : hasConnectionContext
-          ? "The request is real but one or two draft-blocking basics are still needed."
-          : "A harness/cable connection goal is needed before a Draft can be prepared.",
-      next_action: canClose ? "easy_harness_review" : "ask_user",
-      questions_to_ask: questions.slice(0, 3),
-      customer_message_type: canClose
-        ? "ready_for_review"
-        : hasConnectionContext
-          ? "ask_key_details"
-          : "needs_harness_context",
+      can_close_user_draft: false,
+      closure_status: "needs_harness_context",
+      closure_reason:
+        "The verified intake result confirms receipt, but not a supported connection goal.",
+      next_action: "ask_user",
+      questions_to_ask: [question],
+      customer_message_type: "needs_harness_context",
     },
   };
 
@@ -4390,32 +3736,34 @@ function draftModelConfig() {
   };
 }
 
-async function callDraftModel(
+type DraftModelProviderConfig = ReturnType<typeof draftModelConfig>;
+
+function draftModelUserContent(
+  provider: string,
   inputText: string,
-  trigger = "manual",
   visualImages: DraftVisionImage[] = [],
 ) {
+  return provider === "qwen" && visualImages.length
+    ? [
+        {
+          type: "text",
+          text: inputText,
+        },
+        ...visualImages.map((image) => ({
+          type: "image_url",
+          image_url: { url: image.signed_url },
+        })),
+      ]
+    : inputText;
+}
+
+async function callDraftJsonCompletion(
+  config: DraftModelProviderConfig,
+  system: string,
+  userContent: string | Array<Record<string, unknown>>,
+) {
   const { provider, apiKey, baseUrl, model, reasoningEffort, maxTokens } =
-    draftModelConfig();
-
-  const jsonShape = JSON.stringify(draftSchema, null, 2);
-  const visualEvidenceInstruction = visualImages.length
-    ? "Evidence boundary: this intake run includes conversation text, attachment metadata, selected image files as model-visible image_url inputs, and attachment_observations. You may use image observations and parsed attachment observations, but mark them as partial/model/parsed evidence unless corroborated by customer text. Do not claim PDF, Excel, CAD, hidden label, pinout, or document contents unless those details are explicitly present in text or attachment_observations."
-    : "Evidence boundary: this intake run receives conversation text, attachment metadata, and any parser-produced attachment_observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, CAD geometry, or document contents from attachments unless those details are explicitly present in text or attachment_observations.";
-  const userContent =
-    provider === "qwen" && visualImages.length
-      ? [
-          {
-            type: "text",
-            text: `Analyze this Easy Harness request and return Easy Harness Draft v0.1 as JSON only.\n\n${inputText}`,
-          },
-          ...visualImages.map((image) => ({
-            type: "image_url",
-            image_url: { url: image.signed_url },
-          })),
-        ]
-      : `Analyze this Easy Harness request and return Easy Harness Draft v0.1 as JSON only.\n\n${inputText}`;
-
+    config;
   const response = await fetch(`${baseUrl}/chat/completions`, {
     method: "POST",
     headers: {
@@ -4438,49 +3786,7 @@ async function callDraftModel(
       messages: [
         {
           role: "system",
-          content: [
-            "You are Easy Harness Intake Agent.",
-            "Your job is to translate a user's own words, files, photos, sketches, old samples, pinouts, or partial notes into Easy Harness Draft v0.1.",
-            "You are not a general chatbot, not a sales assistant, and not a traditional factory questionnaire.",
-            "The draft closes at Ready for Easy Harness Review. This means a user-side and platform-side requirement object is clear enough for Easy Harness review, quote-path evaluation, and supplier/manufacturing follow-up. It does NOT mean final BOM, supplier RFQ, automatic quote, material confirmation, or production readiness.",
-            "Core promise: Upload what you have. We'll build the harness you need. This means accept user-native expression and structure it. It does not mean fake certainty.",
-            "The user should feel that Easy Harness organized their real need, not that they were forced to fill a factory questionnaire.",
-            "First decide what the user already provided, what the user likely knows and must answer now, what Easy Harness can evaluate from files/photos/samples later, what supplier/manufacturing should confirm later, and what is not applicable.",
-            "Do not rename the request based on a single keyword. The request line should come from the customer's actual connection goal and confirmed constraints. If a word like battery appears only in a negative constraint such as 'no battery power', do not turn the draft into a battery harness.",
-            "Do not use keyword workflows or case-specific scripts. Words like old harness, battery, sensor, pinout, photo, sample, CAN, or connector are evidence only. They are not instructions to enter a fixed questionnaire or fixed reply path.",
-            "Use the whole conversation to judge intent, evidence, missing blockers, and next action. A keyword may support the judgment, but it must not determine the workflow by itself.",
-            "Capture all explicit details. If the user provides connector model, connector type, terminal, wire gauge, length, quantity, voltage, current, pinout, material, shielding, environment, IP rating, test requirement, BOM, drawing, or compliance detail, preserve it in known_requirements and/or captured_professional_details.",
-            "Before writing the customer summary, organize your understanding into requirement_map. This is the semantic connection plan that will drive the customer-facing visual Draft; it is not a manufacturing drawing and not a free-form image prompt.",
-            "In requirement_map.endpoints, represent distinct devices, boards, connectors, bare-wire ends, samples, or unknown ends separately when the current evidence supports that distinction. Do not collapse several supported target devices into one generic target.",
-            "In requirement_map.connection_groups, describe the meaningful harness branches or functional wire groups between those endpoints. Associate signals only when customer text or attachment_observations supports the association; otherwise keep the group partial or incomplete.",
-            "In requirement_map.harness_sections, include route or length sections only when supplied or reasonably organized from evidence. Mark uncertain endpoints, groups, routes, and options as unknown or partial instead of inventing precision.",
-            "Do not ask for terminal part numbers, exact wire gauge, strip length, crimp details, connector brand, IPC class, FAI, packaging, test fixture, controlled drawing revision, or factory production details unless they truly block the Draft stage.",
-            "Ask at most three customer-facing questions, and prefer one or two. Only ask questions that block Draft closure and that the user is likely to know.",
-            "It is acceptable not to close a Draft. If the connection goal is not clear, do not invent a Draft; ask the smallest connection-goal question.",
-            "Run a strict relevance gate first. Do not prepare or close a draft if there is no harness/cable connection goal. A real connection goal can be device A to device B, copy/replace an old harness, make an adapter between ports, named connector ends, a pinout, cable routing, or another clear harness context.",
-            "Messages like 'Is this file ok?', 'I need a cable', or an unrelated/reference image are not enough to close a draft unless they also state what needs to connect, copy, or replace.",
-            visualEvidenceInstruction,
-            visualImages.length
-              ? "If photos are sent as image inputs, you may reference clear visible observations cautiously. Never turn visual observations into production facts; connector selection, pinout, wire colors, dimensions, and layout still require Easy Harness review unless the customer text confirms them."
-              : "If files are attached but attachment_observations says parser_needed or storage_unavailable, treat them as received evidence for Easy Harness review. Do not phrase review items as if this run already inspected those contents.",
-            "Use attachment_observations as the structured file-understanding layer. Observations with status text_extracted, file_extracted, metadata_extracted, or vision_sent_to_model may inform known_requirements, provided_evidence, captured_professional_details, and unknowns. Qwen file-extract observations, CSV rows, spreadsheet tables, PDF text probes, CAD metadata, text excerpts, and structured_facts may be used as parsed/model evidence. Observations with parser_needed or storage_unavailable may only support 'files received' and Easy Harness review items, not file-content claims.",
-            "General Draft gate: close the draft when connection goal, endpoints or samples/photos, use/function, quantity or approximate quantity, length or measurement basis, environment/use context, and critical safety info are sufficient. Remaining professional unknowns should move to Easy Harness review or supplier/manufacturing confirmation.",
-            "Do not close the draft when there is no harness/cable connection goal, the user only asks whether an unrelated file is ok, Easy Harness cannot tell what should be built, or a power-carrying harness lacks basic voltage/current/power and no safe approximation is possible.",
-            "For power-carrying requests, voltage and expected current or power are functional/safety basics. Ask one concise question only when the whole request indicates a real power-carrying load and the customer is likely to know an approximate answer. Do not ask because a single word appeared.",
-            "If the user clearly says signal only, no power, data only, or no load current, voltage/current is not applicable and must not be asked as a blocking question. Put this in unknowns.not_applicable if useful.",
-            "If the user wants to copy an old harness and provides photos/sample plus quantity and approximate or measurable length, connector part numbers, terminal choices, wire construction, and visual pinout verification usually belong to Easy Harness review, not ask_user_now.",
-            "CAD-only rule: if the customer only supplies CAD/reference/dimensional-context files and does not state what the harness connects, copies, or replaces, do not close the Draft. Acknowledge the CAD references as received and ask one question: what should this harness or cable connect, copy, or replace?",
-            "Connector-A/pinout-only rule: if the customer gives Connector A, a pinout, spreadsheet, CSV, or one connector basis but does not state the other end, keep the Draft in needs_key_clarification. Ask for the other end, plus quantity and approximate length only if those are also missing.",
-            "Mixed-files rule: when photos, PDFs, spreadsheets, and CAD references are supplied together, include every supplied file as received evidence, but only claim internal content that is present in customer text or attachment_observations.",
-            "If a draft is ready, user_facing_summary.needed_next must be empty. Put Easy Harness-owned work in easy_harness_review, later production details in later_supplier_or_engineering_confirmation, and irrelevant/not-needed items in not_applicable.",
-            "Unknowns must be separated into: ask_user_now, ask_user_if_likely_known, easy_harness_review, later_supplier_or_engineering_confirmation, and not_applicable. Never output vague placeholders like unknown_item or Needs later confirmation.",
-            "For ready_for_review, customer-facing content should be a compact Easy Harness Draft summary: request line, key details, files received, remaining Easy Harness review items, and clear next step. Do not claim price, material, supplier, or production readiness.",
-            "Do not mention manual review, human review, or manual processing. Say Easy Harness review or Easy Harness will continue from here.",
-            "Show understanding through structure, not repeated claims that you understand. Keep customer-facing output concise and in English.",
-            "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
-            "The JSON object must follow this schema shape:",
-            jsonShape,
-          ].join("\n"),
+          content: system,
         },
         {
           role: "user",
@@ -4500,13 +3806,144 @@ async function callDraftModel(
   const data = JSON.parse(raw);
   const content = data?.choices?.[0]?.message?.content;
   if (!content) throw new Error(`${provider} returned an empty draft result.`);
-  const parsed = JSON.parse(extractJsonObject(content));
+  return {
+    parsed: JSON.parse(extractJsonObject(content)) as Record<string, unknown>,
+    usage: data?.usage || null,
+  };
+}
+
+function draftEvidenceAuditEnabled() {
+  return envFlagDefault("AI_DRAFT_ENABLE_EVIDENCE_AUDIT", true);
+}
+
+function buildEvidenceAuditPrompt(
+  inputText: string,
+  candidate: EasyHarnessDraft,
+  visualImages: DraftVisionImage[] = [],
+) {
+  return [
+    "Audit and revise the candidate Easy Harness Draft v0.1 against the supplied evidence.",
+    "Return one corrected JSON object with the same Easy Harness Draft v0.1 schema shape. Do not return commentary.",
+    "This pass protects evidence honesty, Draft closure, and customer trust. Do not make the draft more complete by inventing missing details.",
+    "The Draft is meant to be useful for Easy Harness review and supplier/manufacturing follow-up, but it is not a final BOM, quote, cut list, crimp spec, or production package.",
+    "Keep an endpoint only when customer text, a model-visible image, or a parsed attachment_observation explicitly supports that distinct object as part of the connection, copy, replacement, or adaptation goal.",
+    "A connector name, filename, file type, pin table, application, use case, environment, industry, voltage context, or generic request label is not by itself a second endpoint.",
+    "Keep a requirement_map.connection_group only when both endpoints and their relationship are evidence-supported.",
+    "Keep route, length, quantity, environment, power/current, connector, pinout, and shield details when supplied. If they are useful but not customer-blocking, keep them in known_requirements, captured_professional_details, or Easy Harness review instead of asking again.",
+    "Filename-only and received-only materials may be acknowledged as received evidence, but cannot support claims about their internal contents.",
+    "customer-facing questions must contain only true Draft blockers: answers required to represent honestly what connects, copies, replaces, or adapts, or to avoid a materially wrong supplier-review package.",
+    "Do not ask the customer again for information already present in the latest customer instruction, known_requirements, provided_evidence, captured_professional_details, or supported requirement_map.",
+    "Move quote refinements, connector identification from photos/samples, electrical validation, crimp details, shielding method, wire gauge validation, test method, and final manufacturing decisions to Easy Harness review unless the customer explicitly made them part of the request scope and their absence prevents an honest Draft.",
+    "If no evidence-supported topology remains, keep any explicitly supplied standalone facts, empty unsupported topology, set the draft to needs_harness_context, and ask exactly one connection-goal question.",
+    "If evidence-supported topology remains and there are no true Draft blockers, set the draft to ready_for_easy_harness_review, clear ask_user_now and questions_to_ask, and keep supplier/manufacturing work under Easy Harness review or later confirmation.",
+    "If a short customer reply is needed, ask no more than three questions. Prefer one or two. The questions should be stable across turns and should not repeat already supplied information.",
+    "Preserve every supplied file as received evidence. Preserve the latest explicit customer instruction over older or conflicting evidence.",
+    visualImages.length
+      ? "The same image inputs are visible in this audit pass. Treat visual observations as model observations with partial confidence unless customer text or parsed observations corroborate them."
+      : "No image pixels are visible in this audit pass. Do not preserve visual claims unless they are present in text or attachment_observations.",
+    "",
+    "Original request model input:",
+    inputText,
+    "",
+    "Candidate Draft JSON:",
+    JSON.stringify(candidate),
+  ].join("\n");
+}
+
+async function callDraftModel(
+  inputText: string,
+  trigger = "manual",
+  visualImages: DraftVisionImage[] = [],
+) {
+  const { provider, apiKey, baseUrl, model, reasoningEffort, maxTokens } =
+    draftModelConfig();
+  const config = { provider, apiKey, baseUrl, model, reasoningEffort, maxTokens };
+
+  const jsonShape = JSON.stringify(draftSchema, null, 2);
+  const visualEvidenceInstruction = visualImages.length
+    ? "Evidence boundary: this intake run includes conversation text, attachment metadata, selected image files as model-visible image_url inputs, and attachment_observations. You may use image observations and parsed attachment observations, but mark them as partial/model/parsed evidence unless corroborated by customer text. Do not claim PDF, Excel, CAD, hidden label, pinout, or document contents unless those details are explicitly present in text or attachment_observations."
+    : "Evidence boundary: this intake run receives conversation text, attachment metadata, and any parser-produced attachment_observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, CAD geometry, or document contents from attachments unless those details are explicitly present in text or attachment_observations.";
+
+  const system = [
+    "You are Easy Harness Intake Agent.",
+    "Your job is to translate a user's own words, files, photos, sketches, old samples, pinouts, or partial notes into Easy Harness Draft v0.1.",
+    "You are not a general chatbot, not a sales assistant, and not a traditional factory questionnaire.",
+    "The draft closes at Ready for Easy Harness Review. This means a user-side and platform-side requirement object is clear enough for Easy Harness review, quote-path evaluation, and supplier/manufacturing follow-up. It does NOT mean final BOM, supplier RFQ, automatic quote, material confirmation, or production readiness.",
+    "Core promise: Upload what you have. We'll build the harness you need. This means accept user-native expression and structure it. It does not mean fake certainty.",
+    "The user should feel that Easy Harness organized their real need, not that they were forced to fill a factory questionnaire.",
+    "First decide what the user already provided, what the user likely knows and must answer now, what Easy Harness can evaluate from files/photos/samples later, what supplier/manufacturing should confirm later, and what is not applicable.",
+    "Do not rename the request based on a single keyword. The request line should come from the customer's actual connection goal and confirmed constraints. If a word like battery appears only in a negative constraint such as 'no battery power', do not turn the draft into a battery harness.",
+    "Do not use keyword workflows or case-specific scripts. Words like old harness, battery, sensor, pinout, photo, sample, CAN, or connector are evidence only. They are not instructions to enter a fixed questionnaire or fixed reply path.",
+    "Use the whole conversation to judge intent, evidence, missing blockers, and next action. A keyword may support the judgment, but it must not determine the workflow by itself.",
+    "Capture all explicit details. If the user provides connector model, connector type, terminal, wire gauge, length, quantity, voltage, current, pinout, material, shielding, environment, IP rating, test requirement, BOM, drawing, or compliance detail, preserve it in known_requirements and/or captured_professional_details.",
+    "Before writing the customer summary, organize your understanding into requirement_map. This is the semantic connection plan that will drive the customer-facing visual Draft; it is not a manufacturing drawing and not a free-form image prompt.",
+    "In requirement_map.endpoints, represent distinct devices, boards, connectors, bare-wire ends, samples, or other explicitly supported endpoints separately. Do not create placeholder unknown endpoints, and do not collapse several supported target devices into one generic target.",
+    "In requirement_map.connection_groups, describe the meaningful harness branches or functional wire groups between those endpoints. Associate signals only when customer text or attachment_observations supports the association; otherwise keep the group partial or incomplete.",
+    "In requirement_map.harness_sections, include route or length sections only when supplied or reasonably organized from evidence. Mark uncertain endpoints, groups, routes, and options as unknown or partial instead of inventing precision.",
+    "Do not ask for terminal part numbers, exact wire gauge, strip length, crimp details, connector brand, IPC class, FAI, packaging, test fixture, controlled drawing revision, or factory production details unless they truly block the Draft stage.",
+    "Ask at most three customer-facing questions, and prefer one or two. Only ask questions that block Draft closure and that the user is likely to know.",
+    "It is acceptable not to close a Draft. If the connection goal is not clear, do not invent a Draft; ask the smallest connection-goal question.",
+    "Run a strict evidence-sufficiency gate first. Do not prepare or close a draft unless the available evidence supports what should be connected, copied, replaced, or adapted. A connector name, file type, pin table, image, route note, or generic request by itself is evidence, not a connection goal.",
+    "Do not turn an application, use case, environment, or industry context into a device endpoint unless customer text or attachment_observations explicitly states that the harness connects to that object.",
+    "Do not create source/target endpoints or connection groups from filenames, file extensions, generic labels, or unsupported inference. If the connection goal is not supported, keep the topology empty or explicitly unknown and ask one connection-goal question.",
+    visualEvidenceInstruction,
+    visualImages.length
+      ? "If photos are sent as image inputs, you may reference clear visible observations cautiously. Never turn visual observations into production facts; connector selection, pinout, wire colors, dimensions, and layout still require Easy Harness review unless the customer text confirms them."
+      : "If files are attached but attachment_observations says parser_needed or storage_unavailable, treat them as received evidence for Easy Harness review. Do not phrase review items as if this run already inspected those contents.",
+    "Use attachment_observations as the structured file-understanding layer. Observations with status text_extracted, file_extracted, metadata_extracted, or vision_sent_to_model may inform known_requirements, provided_evidence, captured_professional_details, and unknowns. Qwen file-extract observations, CSV rows, spreadsheet tables, PDF text probes, CAD metadata, text excerpts, and structured_facts may be used as parsed/model evidence. Observations with parser_needed or storage_unavailable may only support 'files received' and Easy Harness review items, not file-content claims.",
+    "General Draft gate: close the Draft when the evidence-supported connection intent and topology are clear enough for Easy Harness to continue review and supplier/manufacturing follow-up. There is no fixed checklist that every request must satisfy.",
+    "A missing detail blocks Draft closure when its absence prevents an honest representation of what connects, copies, replaces, or adapts, or would likely produce a materially wrong supplier-review package. Quote refinements, engineering choices, and manufacturing confirmations normally belong in Easy Harness review, not ask_user_now.",
+    "ask_user_now must contain only true Draft blockers. Prefer zero or one blocker question; use two or three only when separate answers are genuinely required to establish request scope. Put useful but nonblocking questions in ask_user_if_likely_known or Easy Harness review.",
+    "Quantity, length, environment, connector selection, electrical ratings, and other details are not automatically blocking. Ask only when the specific request cannot be represented honestly or safely without that answer and the customer is likely to know it. Otherwise keep the item visible for Easy Harness review.",
+    "Each ask_user_now item must use a stable field name, explain why it blocks this Draft, and have one concise customer question. Never ask for a field that is already present in known_requirements, the supported requirement_map, or the latest customer instruction.",
+    "When sources conflict, treat the latest explicit customer instruction as the current basis, preserve older material as superseded/reference evidence, and put unresolved contradictions in Easy Harness review.",
+    "Include every supplied file as received evidence, but only claim internal content that is present in customer text, model-visible images, or attachment_observations.",
+    "If a draft is ready, user_facing_summary.needed_next must be empty. Put Easy Harness-owned work in easy_harness_review, later production details in later_supplier_or_engineering_confirmation, and irrelevant/not-needed items in not_applicable.",
+    "Unknowns must be separated into: ask_user_now, ask_user_if_likely_known, easy_harness_review, later_supplier_or_engineering_confirmation, and not_applicable. Never output vague placeholders like unknown_item or Needs later confirmation.",
+    "For ready_for_review, customer-facing content should be a compact Easy Harness Draft summary: request line, key details, files received, remaining Easy Harness review items, and clear next step. Do not claim price, material, supplier, or production readiness.",
+    "Do not mention manual review, human review, or manual processing. Say Easy Harness review or Easy Harness will continue from here.",
+    "Show understanding through structure, not repeated claims that you understand. Keep customer-facing output concise and in English.",
+    "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
+    "The JSON object must follow this schema shape:",
+    jsonShape,
+  ].join("\n");
+
+  const generated = await callDraftJsonCompletion(
+    config,
+    system,
+    draftModelUserContent(
+      provider,
+      `Analyze this Easy Harness request and return Easy Harness Draft v0.1 as JSON only.\n\n${inputText}`,
+      visualImages,
+    ),
+  );
+  const firstDraft = normalizeDraft(generated.parsed, provider, model, trigger);
+  const auditEnabled = draftEvidenceAuditEnabled();
+  const audited = auditEnabled
+    ? await callDraftJsonCompletion(
+        config,
+        "You are Easy Harness Evidence Audit Agent. Remove unsupported claims and nonblocking customer questions, preserve supplied facts, then output only corrected valid JSON.",
+        draftModelUserContent(
+          provider,
+          buildEvidenceAuditPrompt(inputText, firstDraft, visualImages),
+          visualImages,
+        ),
+      )
+    : generated;
+  const finalDraft = auditEnabled
+    ? normalizeDraft(audited.parsed, provider, model, trigger)
+    : firstDraft;
+
   return {
     model,
     provider,
     reasoningEffort,
-    usage: data?.usage || null,
-    draft: normalizeDraft(parsed, provider, model, trigger),
+    usage: auditEnabled
+      ? { generation: generated.usage, evidence_audit: audited.usage }
+      : generated.usage,
+    passes: auditEnabled ? 2 : 1,
+    evidenceAuditEnabled: auditEnabled,
+    draft: finalDraft,
   };
 }
 
@@ -4771,7 +4208,15 @@ Deno.serve(async (request) => {
       modelInputMeta.visualImages,
       modelInputMeta.attachmentObservations,
     );
-    const { model, provider, reasoningEffort, usage, draft } =
+    const {
+      model,
+      provider,
+      reasoningEffort,
+      usage,
+      passes,
+      evidenceAuditEnabled,
+      draft,
+    } =
       await callDraftModel(
         modelInput,
         payload.trigger || "manual",
@@ -4788,12 +4233,14 @@ Deno.serve(async (request) => {
       usage,
       reason: checkReasonFor(draft),
       checkedAt,
-      trigger: payload.trigger || "manual",
-      version: 1,
-      source: {
-        request_id: requestRow.id,
-        request_number: requestRow.request_number,
-        message_count: messages?.length || 0,
+        trigger: payload.trigger || "manual",
+        version: 1,
+        source: {
+          request_id: requestRow.id,
+          request_number: requestRow.request_number,
+          draft_model_passes: passes,
+          evidence_audit_enabled: evidenceAuditEnabled,
+          message_count: messages?.length || 0,
         attachment_count: attachments?.length || 0,
         ...modelInputMeta.visionDiagnostics,
         qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,

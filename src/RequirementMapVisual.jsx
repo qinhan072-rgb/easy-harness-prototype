@@ -27,7 +27,7 @@ function normalizeEndpoint(endpoint, index) {
   return {
     id: endpoint?.id || `endpoint_${index + 1}`,
     label: endpoint?.label || `Endpoint ${index + 1}`,
-    role: endpoint?.role || (index === 0 ? "source" : "target"),
+    role: endpoint?.role || "endpoint",
     status: endpoint?.status || "identified",
     knownFrom:
       mapField(endpoint, "known_from", "knownFrom") ||
@@ -37,53 +37,22 @@ function normalizeEndpoint(endpoint, index) {
 
 function normalizeRequirementMap(map = {}, fallback = {}) {
   const endpoints = list(map.endpoints).map(normalizeEndpoint);
-  if (!endpoints.length) {
-    const from = fallback.fromSide && fallback.fromSide !== "unknown"
-      ? fallback.fromSide
-      : "Request basis";
-    endpoints.push(normalizeEndpoint({ label: from, role: "source_or_reference" }, 0));
-    const targets = list(fallback.toSides);
-    if (targets.length) {
-      targets.forEach((target, index) =>
-        endpoints.push(normalizeEndpoint({ label: target, role: "target" }, index + 1)),
-      );
-    } else {
-      endpoints.push(
-        normalizeEndpoint(
-          {
-            label: "Other end to confirm",
-            role: "unknown_target",
-            status: "unknown",
-            known_from: "Not clear from current input",
-          },
-          1,
-        ),
-      );
-    }
-  }
-
-  const groups = list(mapField(map, "connection_groups", "connectionGroups")).map(
-    (group, index) => ({
+  const endpointIds = new Set(endpoints.map((endpoint) => endpoint.id));
+  const groups = list(mapField(map, "connection_groups", "connectionGroups"))
+    .map((group, index) => ({
       id: group?.id || `group_${index + 1}`,
       label: group?.label || "Harness connection",
-      from: group?.from || endpoints[0]?.id,
-      to: group?.to || endpoints[Math.min(index + 1, endpoints.length - 1)]?.id,
+      from: group?.from || "",
+      to: group?.to || "",
       signals: list(mapField(group, "known_signals", "knownSignals")),
       status: group?.status || "draft",
-    }),
-  );
-  if (!groups.length) {
-    endpoints.slice(1).forEach((endpoint, index) => {
-      groups.push({
-        id: `derived_group_${index + 1}`,
-        label: "Draft connection",
-        from: endpoints[0].id,
-        to: endpoint.id,
-        signals: [],
-        status: endpoint.status === "unknown" ? "incomplete" : "draft",
-      });
-    });
-  }
+    }))
+    .filter((group) =>
+      group.from &&
+      group.to &&
+      endpointIds.has(group.from) &&
+      endpointIds.has(group.to)
+    );
 
   return {
     goal:
@@ -220,6 +189,7 @@ export default function RequirementMapVisual({ map, fallback = {} }) {
   const visual = normalizeRequirementMap(map, fallback);
   const height = Math.max(430, visual.endpoints.length * 120 + 170);
   const layouts = endpointLayout(visual.endpoints, height);
+  const hasSupportedTopology = visual.endpoints.length >= 2 && visual.groups.length > 0;
   const sectionLabels = visual.sections
     .map((section) => section?.label || section?.type)
     .filter(Boolean)
@@ -246,26 +216,40 @@ export default function RequirementMapVisual({ map, fallback = {} }) {
         </div>
       </div>
 
-      <div className="requirement-map-canvas">
-        <svg
-          viewBox={`0 0 960 ${height}`}
-          role="img"
-          aria-label={`Visual draft for ${visual.goal}`}
-        >
-          <rect className="canvas-bg" x="1" y="1" width="958" height={height - 2} rx="8" />
-          {visual.groups.map((group, index) => (
-            <ConnectionGroup
-              key={group.id}
-              group={group}
-              layouts={layouts}
-              index={index}
-            />
-          ))}
-          {layouts.map((endpoint) => (
-            <EndpointNode key={endpoint.id} endpoint={endpoint} />
-          ))}
-        </svg>
-      </div>
+      {hasSupportedTopology ? (
+        <div className="requirement-map-canvas">
+          <svg
+            viewBox={`0 0 960 ${height}`}
+            role="img"
+            aria-label={`Visual draft for ${visual.goal}`}
+          >
+            <rect className="canvas-bg" x="1" y="1" width="958" height={height - 2} rx="8" />
+            {visual.groups.map((group, index) => (
+              <ConnectionGroup
+                key={group.id}
+                group={group}
+                layouts={layouts}
+                index={index}
+              />
+            ))}
+            {layouts.map((endpoint) => (
+              <EndpointNode key={endpoint.id} endpoint={endpoint} />
+            ))}
+          </svg>
+        </div>
+      ) : (
+        <div className="requirement-map-empty">
+          <strong>Connection layout not confirmed yet</strong>
+          <span>The current information has been received, but it does not yet support an honest connection diagram.</span>
+          {!!visual.endpoints.length && (
+            <div>
+              {visual.endpoints.map((endpoint) => (
+                <span key={endpoint.id}>{endpoint.label}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {!!sectionLabels.length && (
         <div className="requirement-map-context">

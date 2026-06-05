@@ -177,10 +177,11 @@ Renderer responsibility:
 - Use `poster.*` only as presentation hints or fallback when a current map is
   unavailable.
 
-If the model output is incomplete, deterministic post-processing may create a
-minimal honest map such as "customer request basis -> other end to confirm." It
-must preserve uncertainty instead of inventing a confident endpoint, route, or
-pinout.
+If the model output does not contain an evidence-supported topology,
+deterministic post-processing must leave endpoints and connection groups empty.
+The customer view should acknowledge receipt and show that the connection
+layout is not confirmed yet. It must not draw a placeholder connection merely
+to make the Draft look complete.
 
 ## Current Iteration Route
 
@@ -189,10 +190,17 @@ The current experimental route is:
 ```text
 customer input + attachment observations
   -> model-interpreted requirement_map_v0_1
+  -> formal run-checking AI evidence audit
   -> deterministic evidence/closure reconciliation
   -> easy_harness_visual_draft_spec_v0_1
   -> deterministic visual renderer
 ```
+
+The formal evidence audit is a second semantic pass. It removes unsupported
+topology, repeated questions, and nonblocking customer questions without
+selecting a workflow from product names, file types, or test phrases. It
+increases latency and model cost, but it protects the customer-facing Draft from
+looking complete before the connection basis is actually supported.
 
 This route is intentionally narrower than a full manufacturing engineering
 pipeline. It is meant to reduce repeated work and improve Draft clarity, not to
@@ -206,11 +214,9 @@ The hidden Agent Lab has a local model eval command:
 npm.cmd run agent:eval
 ```
 
-By default this runs the core visual-Draft cases:
-
-- DT06 mixed attachment pack.
-- Spreadsheet pinout with missing other end.
-- CAD-only reference with missing connection goal.
+By default this runs the full checked-in regression set. Individual cases can
+still be selected for debugging, but no small group of familiar cases is
+treated as proof of general Agent capability.
 
 The eval calls the local Agent Lab API and may depend on Qwen latency. It is not
 part of ordinary `npm.cmd run test`; smoke tests only verify that the eval
@@ -221,16 +227,20 @@ harness and cases exist.
 The formal `run-checking` Edge Function uses the same closure principles for
 the customer-facing Easy Harness Draft:
 
-- CAD-only reference files acknowledge receipt, keep the connection goal open,
-  and ask what the harness should connect, copy, or replace.
-- Connector-A / pinout / spreadsheet-only cases keep the other end open instead
-  of treating the request as review-ready.
-- Quantity and approximate length are asked only when they are missing and
-  materially affect Draft closure.
+- A Draft requires an evidence-supported connection, copy, replacement, or
+  adaptation goal. A filename, file type, connector name, or pin table is not
+  automatically a connection goal.
+- There is no universal list of customer blockers. Quantity, length,
+  environment, electrical ratings, and other details are asked only when the
+  specific Draft cannot be represented honestly without them.
 - The Draft model must output `requirement_map` as its semantic connection
   interpretation. Deterministic post-processing validates its topology, owns
   current customer questions and evidence boundaries, and supplies an honest
   minimal fallback when the model map is incomplete.
+- The second evidence-audit pass checks the first Draft against the same request
+  evidence before the Draft is persisted. It should preserve supplied facts,
+  remove unsupported topology, and move supplier/manufacturing details to Easy
+  Harness review when they do not require another customer reply.
 - `check_result.requirement_map` is the reconciled map used for formal visual
   Draft rendering.
 - The customer thread renders the visual Draft from `requirement_map` for both
@@ -259,7 +269,7 @@ parsing, or CAD metadata probes.
 The immediate goal is durable product behavior:
 
 ```text
-rules + schema + examples + evals + deterministic post-processing
+reasoning instructions + schema + diverse evals + evidence-bound validation
 ```
 
 Fine-tuning can be considered later if there are enough high-quality labeled
