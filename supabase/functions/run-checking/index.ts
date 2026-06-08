@@ -336,20 +336,48 @@ function envNumber(name: string, fallback: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
 }
 
+function platformWallClockMs() {
+  return envNumber("AI_DRAFT_PLATFORM_WALL_CLOCK_MS", 140000, 60000, 390000);
+}
+
 function providerRequestTimeoutMs() {
-  return envNumber("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS", 240000, 15000, 390000);
+  const maxSafeMs = Math.max(15000, platformWallClockMs() - 30000);
+  return envNumber(
+    "AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS",
+    Math.min(110000, maxSafeMs),
+    15000,
+    maxSafeMs,
+  );
 }
 
 function draftJobBudgetMs() {
-  return envNumber("AI_DRAFT_JOB_BUDGET_MS", 360000, 60000, 390000);
+  const maxSafeMs = Math.max(60000, platformWallClockMs() - 20000);
+  return envNumber(
+    "AI_DRAFT_JOB_BUDGET_MS",
+    Math.min(125000, maxSafeMs),
+    60000,
+    maxSafeMs,
+  );
 }
 
 function draftFirstPassTimeoutMs() {
-  return envNumber("AI_DRAFT_FIRST_PASS_TIMEOUT_MS", 240000, 30000, 360000);
+  const maxSafeMs = Math.max(30000, draftJobBudgetMs() - 25000);
+  return envNumber(
+    "AI_DRAFT_FIRST_PASS_TIMEOUT_MS",
+    Math.min(100000, maxSafeMs),
+    30000,
+    maxSafeMs,
+  );
 }
 
 function draftAuditPassTimeoutMs() {
-  return envNumber("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS", 90000, 15000, 180000);
+  const maxSafeMs = Math.max(15000, draftJobBudgetMs() - 10000);
+  return envNumber(
+    "AI_DRAFT_AUDIT_PASS_TIMEOUT_MS",
+    Math.min(20000, maxSafeMs),
+    15000,
+    Math.min(180000, maxSafeMs),
+  );
 }
 
 async function fetchWithTimeout(
@@ -4524,6 +4552,18 @@ Deno.serve(async (request) => {
       modelInputMeta.visualImages,
       modelInputMeta.attachmentObservations,
     );
+    const modelConfigForLog = draftModelConfig();
+    logCheckingEvent("draft_model_started", {
+      request_number: requestRow.request_number,
+      trigger: payload.trigger || "manual",
+      provider: modelConfigForLog.provider,
+      model: modelConfigForLog.model,
+      platform_wall_clock_ms: platformWallClockMs(),
+      provider_timeout_ms: providerRequestTimeoutMs(),
+      draft_job_budget_ms: draftJobBudgetMs(),
+      first_pass_timeout_ms: draftFirstPassTimeoutMs(),
+      audit_pass_timeout_ms: draftAuditPassTimeoutMs(),
+    });
     const {
       model,
       provider,

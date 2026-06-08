@@ -466,6 +466,8 @@ const checks = [
       checkingFunction.includes("queuedCustomerMessageId") &&
       checkingFunction.includes("superseded") &&
       checkingFunction.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS") &&
+      checkingFunction.includes("AI_DRAFT_PLATFORM_WALL_CLOCK_MS") &&
+      checkingFunction.includes("draft_model_started") &&
       checkingFunction.includes("AI_DRAFT_JOB_BUDGET_MS") &&
       checkingFunction.includes("AI_DRAFT_FIRST_PASS_TIMEOUT_MS") &&
       checkingFunction.includes("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS") &&
@@ -475,12 +477,13 @@ const checks = [
       checkingFunction.includes("queued: true") &&
       app.includes('status: "queued"') &&
       app.includes("This page will keep checking for the result") &&
-      envExample.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=240000") &&
-      envExample.includes("AI_DRAFT_JOB_BUDGET_MS=360000") &&
-      envExample.includes("AI_DRAFT_FIRST_PASS_TIMEOUT_MS=240000") &&
-      envExample.includes("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS=90000") &&
+      envExample.includes("AI_DRAFT_PLATFORM_WALL_CLOCK_MS=140000") &&
+      envExample.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=110000") &&
+      envExample.includes("AI_DRAFT_JOB_BUDGET_MS=125000") &&
+      envExample.includes("AI_DRAFT_FIRST_PASS_TIMEOUT_MS=100000") &&
+      envExample.includes("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS=20000") &&
       aiProviderDoc.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS") &&
-      aiProviderDoc.includes("overall Draft model budget is 360 seconds")
+      aiProviderDoc.includes("overall Draft model budget is 125 seconds")
   },
   {
     name: "conversation attachments can render inline visuals",
