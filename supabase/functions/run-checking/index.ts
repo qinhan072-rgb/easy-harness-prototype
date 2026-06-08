@@ -337,7 +337,19 @@ function envNumber(name: string, fallback: number, min: number, max: number) {
 }
 
 function providerRequestTimeoutMs() {
-  return envNumber("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS", 120000, 15000, 300000);
+  return envNumber("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS", 240000, 15000, 390000);
+}
+
+function draftJobBudgetMs() {
+  return envNumber("AI_DRAFT_JOB_BUDGET_MS", 360000, 60000, 390000);
+}
+
+function draftFirstPassTimeoutMs() {
+  return envNumber("AI_DRAFT_FIRST_PASS_TIMEOUT_MS", 240000, 30000, 360000);
+}
+
+function draftAuditPassTimeoutMs() {
+  return envNumber("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS", 90000, 15000, 180000);
 }
 
 async function fetchWithTimeout(
@@ -3804,6 +3816,7 @@ async function callDraftJsonCompletion(
   config: DraftModelProviderConfig,
   system: string,
   userContent: string | Array<Record<string, unknown>>,
+  timeoutMs = providerRequestTimeoutMs(),
 ) {
   const { provider, apiKey, baseUrl, model, reasoningEffort, maxTokens } =
     config;
@@ -3840,7 +3853,7 @@ async function callDraftJsonCompletion(
         ],
       }),
     },
-    providerRequestTimeoutMs(),
+    timeoutMs,
     `${provider} draft request`,
   );
 
@@ -3906,6 +3919,10 @@ async function callDraftModel(
   const { provider, apiKey, baseUrl, model, reasoningEffort, maxTokens } =
     draftModelConfig();
   const config = { provider, apiKey, baseUrl, model, reasoningEffort, maxTokens };
+  const startedAt = Date.now();
+  const jobBudgetMs = draftJobBudgetMs();
+  const remainingBudgetMs = () =>
+    Math.max(0, jobBudgetMs - (Date.now() - startedAt));
 
   const jsonShape = JSON.stringify(draftSchema, null, 2);
   const visualEvidenceInstruction = visualImages.length
@@ -3964,11 +3981,17 @@ async function callDraftModel(
       `Analyze this Easy Harness request and return Easy Harness Draft v0.1 as JSON only.\n\n${inputText}`,
       visualImages,
     ),
+    Math.min(draftFirstPassTimeoutMs(), remainingBudgetMs()),
   );
   const firstDraft = normalizeDraft(generated.parsed, provider, model, trigger);
   const auditEnabled = draftEvidenceAuditEnabled();
-  const audited = auditEnabled
-    ? await callDraftJsonCompletion(
+  let evidenceAuditCompleted = false;
+  let audited = generated;
+  if (auditEnabled) {
+    const auditTimeoutMs = Math.min(draftAuditPassTimeoutMs(), remainingBudgetMs());
+    if (auditTimeoutMs >= 5000) {
+      try {
+        audited = await callDraftJsonCompletion(
         config,
         "You are Easy Harness Evidence Audit Agent. Remove unsupported claims and nonblocking customer questions, preserve supplied facts, then output only corrected valid JSON.",
         draftModelUserContent(
@@ -3976,9 +3999,30 @@ async function callDraftModel(
           buildEvidenceAuditPrompt(inputText, firstDraft, visualImages),
           visualImages,
         ),
-      )
-    : generated;
-  const finalDraft = auditEnabled
+          auditTimeoutMs,
+        );
+        evidenceAuditCompleted = true;
+      } catch (error) {
+        logCheckingEvent("evidence_audit_skipped", {
+          provider,
+          model,
+          reason:
+            error instanceof Error
+              ? error.message.slice(0, 500)
+              : "Unknown evidence audit error",
+          remaining_budget_ms: remainingBudgetMs(),
+        });
+      }
+    } else {
+      logCheckingEvent("evidence_audit_skipped", {
+        provider,
+        model,
+        reason: "not enough remaining Draft budget",
+        remaining_budget_ms: remainingBudgetMs(),
+      });
+    }
+  }
+  const finalDraft = evidenceAuditCompleted
     ? normalizeDraft(audited.parsed, provider, model, trigger)
     : firstDraft;
 
@@ -3987,10 +4031,14 @@ async function callDraftModel(
     provider,
     reasoningEffort,
     usage: auditEnabled
-      ? { generation: generated.usage, evidence_audit: audited.usage }
+      ? {
+          generation: generated.usage,
+          evidence_audit: evidenceAuditCompleted ? audited.usage : null,
+        }
       : generated.usage,
-    passes: auditEnabled ? 2 : 1,
+    passes: evidenceAuditCompleted ? 2 : 1,
     evidenceAuditEnabled: auditEnabled,
+    evidenceAuditCompleted,
     draft: finalDraft,
   };
 }
@@ -4483,6 +4531,7 @@ Deno.serve(async (request) => {
       usage,
       passes,
       evidenceAuditEnabled,
+      evidenceAuditCompleted,
       draft,
     } =
       await callDraftModel(
@@ -4505,10 +4554,11 @@ Deno.serve(async (request) => {
         version: 1,
         source: {
           request_id: requestRow.id,
-          request_number: requestRow.request_number,
-          draft_model_passes: passes,
-          evidence_audit_enabled: evidenceAuditEnabled,
-          message_count: messages?.length || 0,
+        request_number: requestRow.request_number,
+        draft_model_passes: passes,
+        evidence_audit_enabled: evidenceAuditEnabled,
+        evidence_audit_completed: evidenceAuditCompleted,
+        message_count: messages?.length || 0,
         attachment_count: attachments?.length || 0,
         ...modelInputMeta.visionDiagnostics,
         qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
@@ -4580,6 +4630,8 @@ Deno.serve(async (request) => {
       draft_status: draft.draft_meta.draft_status,
       provider,
       model,
+      passes,
+      evidence_audit_completed: evidenceAuditCompleted,
       ...modelInputMeta.visionDiagnostics,
       qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
       image_count_sent_to_model: modelInputMeta.visualImages.length,

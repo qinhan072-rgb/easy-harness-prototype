@@ -19,7 +19,10 @@ QWEN_API_KEY=<your Qwen/DashScope API key>
 QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
-AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=120000
+AI_DRAFT_JOB_BUDGET_MS=360000
+AI_DRAFT_FIRST_PASS_TIMEOUT_MS=240000
+AI_DRAFT_AUDIT_PASS_TIMEOUT_MS=90000
+AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=240000
 AI_DRAFT_PROVIDER_STATUS_TIMEOUT_MS=15000
 AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=false
@@ -61,10 +64,19 @@ the Agent enough room to understand the uploaded evidence. The frontend keeps
 polling the request while it is organizing so the customer does not need to
 manually refresh to see the finished Draft.
 
-Provider HTTP calls have a hard timeout (`AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS`,
-default 120 seconds). If the provider route stalls, `run-checking` should fall
-back to a bounded local Draft response instead of leaving the request in
-`checking` indefinitely.
+Provider HTTP calls have hard timeouts, and each Draft model run has an overall
+time budget. By default the first Draft pass gets up to 240 seconds, Evidence
+Audit gets up to 90 seconds, and the overall Draft model budget is 360 seconds.
+If the audit pass cannot finish inside the budget, `run-checking` saves the
+normalized first Draft instead of leaving the request in `checking`
+indefinitely. If the first provider pass stalls, it falls back to the bounded
+local Draft response.
+
+Supabase hosted Edge Functions still have a wall-clock cap even when
+`EdgeRuntime.waitUntil` is used for background work. Keep the default budget
+below that platform cap. If Easy Harness needs reliable processing beyond a few
+minutes, move the Draft run into a durable job/worker design instead of one
+long Edge Function invocation.
 
 ## Attachment Observations
 

@@ -466,12 +466,21 @@ const checks = [
       checkingFunction.includes("queuedCustomerMessageId") &&
       checkingFunction.includes("superseded") &&
       checkingFunction.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS") &&
+      checkingFunction.includes("AI_DRAFT_JOB_BUDGET_MS") &&
+      checkingFunction.includes("AI_DRAFT_FIRST_PASS_TIMEOUT_MS") &&
+      checkingFunction.includes("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS") &&
+      checkingFunction.includes("evidence_audit_completed") &&
+      checkingFunction.includes("evidence_audit_skipped") &&
       checkingFunction.includes("fetchWithTimeout") &&
       checkingFunction.includes("queued: true") &&
       app.includes('status: "queued"') &&
       app.includes("This page will keep checking for the result") &&
-      envExample.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=120000") &&
-      aiProviderDoc.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS")
+      envExample.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=240000") &&
+      envExample.includes("AI_DRAFT_JOB_BUDGET_MS=360000") &&
+      envExample.includes("AI_DRAFT_FIRST_PASS_TIMEOUT_MS=240000") &&
+      envExample.includes("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS=90000") &&
+      aiProviderDoc.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS") &&
+      aiProviderDoc.includes("overall Draft model budget is 360 seconds")
   },
   {
     name: "conversation attachments can render inline visuals",
