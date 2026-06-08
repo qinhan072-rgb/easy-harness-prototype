@@ -19,6 +19,8 @@ QWEN_API_KEY=<your Qwen/DashScope API key>
 QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
+AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=120000
+AI_DRAFT_PROVIDER_STATUS_TIMEOUT_MS=15000
 AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=false
 AI_DRAFT_MAX_VISION_IMAGES=4
@@ -58,6 +60,11 @@ This is deliberate: cost and model thinking time are less important than giving
 the Agent enough room to understand the uploaded evidence. The frontend keeps
 polling the request while it is organizing so the customer does not need to
 manually refresh to see the finished Draft.
+
+Provider HTTP calls have a hard timeout (`AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS`,
+default 120 seconds). If the provider route stalls, `run-checking` should fall
+back to a bounded local Draft response instead of leaving the request in
+`checking` indefinitely.
 
 ## Attachment Observations
 

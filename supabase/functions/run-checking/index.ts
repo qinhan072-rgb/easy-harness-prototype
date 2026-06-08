@@ -13,6 +13,10 @@ type CheckingRequest = {
   force?: boolean;
 };
 
+declare const EdgeRuntime:
+  | { waitUntil?: (promise: Promise<unknown>) => void }
+  | undefined;
+
 type RequestRow = {
   id: string;
   request_number: string;
@@ -330,6 +334,30 @@ function envNumber(name: string, fallback: number, min: number, max: number) {
   const value = Number(raw);
   if (!Number.isFinite(value)) return fallback;
   return Math.min(max, Math.max(min, value));
+}
+
+function providerRequestTimeoutMs() {
+  return envNumber("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS", 120000, 15000, 300000);
+}
+
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit = {},
+  timeoutMs: number,
+  label: string,
+) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (error) {
+    if (error instanceof DOMException && error.name === "AbortError") {
+      throw new Error(`${label} timed out after ${Math.round(timeoutMs / 1000)} seconds.`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function attachmentVisionEnabled() {
@@ -1222,11 +1250,16 @@ async function uploadQwenFileForExtract(
     filename || "attachment",
   );
 
-  const response = await fetch(`${baseUrl}/files`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${apiKey}` },
-    body: form,
-  });
+  const response = await fetchWithTimeout(
+    `${baseUrl}/files`,
+    {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}` },
+      body: form,
+    },
+    providerRequestTimeoutMs(),
+    "Qwen file upload",
+  );
   const raw = await response.text();
   if (!response.ok) {
     throw new Error(`Qwen file upload failed (${response.status}): ${raw.slice(0, 400)}`);
@@ -1242,9 +1275,14 @@ async function waitForQwenFileReady(fileId: string) {
   const intervalMs = envNumber("AI_DRAFT_QWEN_FILE_EXTRACT_POLL_INTERVAL_MS", 750, 100, 5000);
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    const response = await fetch(`${baseUrl}/files/${fileId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    });
+    const response = await fetchWithTimeout(
+      `${baseUrl}/files/${fileId}`,
+      {
+        headers: { Authorization: `Bearer ${apiKey}` },
+      },
+      envNumber("AI_DRAFT_PROVIDER_STATUS_TIMEOUT_MS", 15000, 5000, 60000),
+      "Qwen file status check",
+    );
     if (!response.ok) return;
     const data = await response.json();
     const status = String(data?.status || "").toLowerCase();
@@ -1270,33 +1308,38 @@ async function callQwenFileExtractModel(fileId: string, filename: string, mimeTy
     `MIME type: ${mimeType}`,
   ].join("\n");
 
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const response = await fetchWithTimeout(
+    `${baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        max_tokens: maxTokens,
+        messages: [
+          {
+            role: "system",
+            content:
+              "You are Easy Harness File Understanding Agent. You inspect only the attached file and produce structured observations for the Draft Agent.",
+          },
+          {
+            role: "system",
+            content: `fileid://${fileId}`,
+          },
+          {
+            role: "user",
+            content: prompt,
+          },
+        ],
+      }),
     },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      max_tokens: maxTokens,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Easy Harness File Understanding Agent. You inspect only the attached file and produce structured observations for the Draft Agent.",
-        },
-        {
-          role: "system",
-          content: `fileid://${fileId}`,
-        },
-        {
-          role: "user",
-          content: prompt,
-        },
-      ],
-    }),
-  });
+    providerRequestTimeoutMs(),
+    "Qwen file extract",
+  );
   const raw = await response.text();
   if (!response.ok) {
     throw new Error(`Qwen file extract failed (${response.status}): ${raw.slice(0, 500)}`);
@@ -3764,37 +3807,42 @@ async function callDraftJsonCompletion(
 ) {
   const { provider, apiKey, baseUrl, model, reasoningEffort, maxTokens } =
     config;
-  const response = await fetch(`${baseUrl}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      "Content-Type": "application/json",
+  const response = await fetchWithTimeout(
+    `${baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        max_tokens: maxTokens,
+        ...(provider === "deepseek"
+          ? {
+              thinking: {
+                type: "enabled",
+                reasoning_effort: reasoningEffort === "high" ? "high" : "max",
+              },
+            }
+          : {}),
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: system,
+          },
+          {
+            role: "user",
+            content: userContent,
+          },
+        ],
+      }),
     },
-    body: JSON.stringify({
-      model,
-      stream: false,
-      max_tokens: maxTokens,
-      ...(provider === "deepseek"
-        ? {
-            thinking: {
-              type: "enabled",
-              reasoning_effort: reasoningEffort === "high" ? "high" : "max",
-            },
-          }
-        : {}),
-      response_format: { type: "json_object" },
-      messages: [
-        {
-          role: "system",
-          content: system,
-        },
-        {
-          role: "user",
-          content: userContent,
-        },
-      ],
-    }),
-  });
+    providerRequestTimeoutMs(),
+    `${provider} draft request`,
+  );
 
   const raw = await response.text();
   if (!response.ok) {
@@ -4055,7 +4103,7 @@ async function latestThreadMessage(
 function runCheckingJobInBackground(
   job: Promise<unknown>,
   payload: Record<string, unknown>,
-) {
+): boolean {
   const guardedJob = job.catch((error) => {
     const message =
       error instanceof Error ? error.message : "Unknown background checking error";
@@ -4064,16 +4112,72 @@ function runCheckingJobInBackground(
       error: message.slice(0, 500),
     });
   });
-  const edgeRuntime = (
-    globalThis as unknown as {
-      EdgeRuntime?: { waitUntil?: (promise: Promise<unknown>) => void };
+  try {
+    if (
+      typeof EdgeRuntime !== "undefined" &&
+      typeof EdgeRuntime?.waitUntil === "function"
+    ) {
+      EdgeRuntime.waitUntil(guardedJob);
+      logCheckingEvent("background_registered", payload);
+      return true;
     }
-  ).EdgeRuntime;
-  if (edgeRuntime?.waitUntil) {
-    edgeRuntime.waitUntil(guardedJob);
-    return;
+  } catch (error) {
+    const message =
+      error instanceof Error ? error.message : "Unknown waitUntil error";
+    logCheckingEvent("background_register_failed", {
+      ...payload,
+      error: message.slice(0, 500),
+    });
   }
+  logCheckingEvent("background_wait_until_unavailable", payload);
   void guardedJob;
+  return false;
+}
+
+async function markCheckingStillQueued(
+  supabase: ReturnType<typeof createClient>,
+  requestRow: RequestRow,
+  trigger: string,
+) {
+  await supabase
+    .from("requests")
+    .update({
+      status: "needs_info",
+      check_status: "needs_info",
+      check_result: {
+        status: "needs_info",
+        adapter: adapterId,
+        reason:
+          "Easy Harness received the request, but this organizing step did not finish. Please add any short reply to continue.",
+        missing: ["continue request"],
+        questions: ["Please send any short reply to continue this request."],
+        checkedAt: new Date().toISOString(),
+        source: {
+          request_id: requestRow.id,
+          request_number: requestRow.request_number,
+          trigger,
+          background_wait_until_available: false,
+        },
+      },
+      customer_summary: requestRow.customer_summary || requestRow.title || "",
+    })
+    .eq("id", requestRow.id);
+
+  await supabase.from("request_messages").insert({
+    request_id: requestRow.id,
+    author_id: null,
+    author_role: "easy_harness",
+    body:
+      "Easy Harness received the request, but this organizing step did not finish. Please send any short reply and Easy Harness will continue.",
+    blocks: [
+      {
+        type: "text",
+        text:
+          "Easy Harness received the request, but this organizing step did not finish. Please send any short reply and Easy Harness will continue.",
+      },
+    ],
+    visibility: "thread",
+  });
 }
 
 Deno.serve(async (request) => {
@@ -4719,10 +4823,26 @@ Deno.serve(async (request) => {
   }
   })();
 
-  runCheckingJobInBackground(checkingJob, {
+  const backgroundRegistered = runCheckingJobInBackground(checkingJob, {
     request_number: requestRow.request_number,
     trigger,
   });
+
+  if (!backgroundRegistered) {
+    await markCheckingStillQueued(supabase, requestRow, trigger);
+    return jsonResponse({
+      ok: true,
+      queued: false,
+      async: false,
+      requestId: requestRow.id,
+      requestNumber: requestRow.request_number,
+      status: "needs_info",
+      checkStatus: "needs_info",
+      readiness: "needs_user_reply",
+      message:
+        "Easy Harness received the request, but this organizing step did not finish. Please send any short reply and Easy Harness will continue.",
+    });
+  }
 
   return jsonResponse({
     ok: true,

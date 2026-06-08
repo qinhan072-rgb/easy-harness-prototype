@@ -21,6 +21,7 @@ const envExamplePath = resolve(root, ".env.example");
 const gitignorePath = resolve(root, ".gitignore");
 const stage2DocPath = resolve(root, "docs", "setup", "STAGE_2A_BACKEND_READINESS.md");
 const authSetupDocPath = resolve(root, "docs", "setup", "AUTH_EMAIL_AND_GOOGLE_SETUP.md");
+const aiProviderDocPath = resolve(root, "docs", "setup", "AI_PROVIDER_QWEN_SETUP.md");
 const aiAgentPrinciplesPath = resolve(root, "docs", "ai-agent", "AI_AGENT_PRINCIPLES.md");
 const visualDraftAgentSpecPath = resolve(root, "docs", "ai-agent", "VISUAL_DRAFT_AGENT_SPEC.md");
 const visualDraftAgentEvalPath = resolve(root, "docs", "ai-agent", "evals", "visual_draft_agent_v0_1.json");
@@ -59,6 +60,7 @@ const envExample = readIfExists(envExamplePath);
 const gitignore = readIfExists(gitignorePath);
 const stage2Doc = readIfExists(stage2DocPath);
 const authSetupDoc = readIfExists(authSetupDocPath);
+const aiProviderDoc = readIfExists(aiProviderDocPath);
 const aiAgentPrinciples = readIfExists(aiAgentPrinciplesPath);
 const visualDraftAgentSpec = readIfExists(visualDraftAgentSpecPath);
 const visualDraftAgentEval = readIfExists(visualDraftAgentEvalPath);
@@ -459,12 +461,17 @@ const checks = [
       checkingFunction.includes("runCheckingJobInBackground") &&
       checkingFunction.includes("EdgeRuntime") &&
       checkingFunction.includes("waitUntil") &&
+      checkingFunction.includes("background_registered") &&
       checkingFunction.includes("latestMessageCanReceiveAgentReply") &&
       checkingFunction.includes("queuedCustomerMessageId") &&
       checkingFunction.includes("superseded") &&
+      checkingFunction.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS") &&
+      checkingFunction.includes("fetchWithTimeout") &&
       checkingFunction.includes("queued: true") &&
       app.includes('status: "queued"') &&
-      app.includes("This page will keep checking for the result")
+      app.includes("This page will keep checking for the result") &&
+      envExample.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=120000") &&
+      aiProviderDoc.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS")
   },
   {
     name: "conversation attachments can render inline visuals",
