@@ -26,6 +26,21 @@ import {
 const defaultNodes = [];
 const defaultWires = [];
 
+const CONNECTOR_TOP = 50;
+const CONNECTOR_LEFT_X = 26;
+const CONNECTOR_RIGHT_X = "calc(100% - 280px)";
+const CONNECTOR_SLOT_STEP = 300;
+
+const MID_COLUMNS = [
+  { id: "mid-a", x: 520 },
+  { id: "mid-b", x: 840 },
+  { id: "mid-c", x: 1160 },
+];
+const MID_SLOT_TOP = 58;
+const MID_SLOT_STEP = 164;
+const MID_EMPTY_ADD_Y = 312;
+const MID_NODE_WIDTH = 152;
+
 function endpointKey(endpoint) {
   return `${endpoint.nodeId}:${endpoint.side}:${endpoint.pinId}`;
 }
@@ -58,6 +73,73 @@ function createWireId(wires) {
   let index = 0;
   while (used.has(`W${index}`)) index += 1;
   return `W${index}`;
+}
+
+function connectorSlotIndex(nodes, side) {
+  return nodes.filter((node) => node.type === "connector" && node.side === side).length;
+}
+
+function connectorPosition(side, slotIndex = 0) {
+  return {
+    x: side === "right" ? CONNECTOR_RIGHT_X : CONNECTOR_LEFT_X,
+    y: CONNECTOR_TOP + slotIndex * CONNECTOR_SLOT_STEP,
+  };
+}
+
+function connectorPickerPosition(side, slotIndex = 0) {
+  return {
+    x: side === "right" ? "calc(100% - 310px)" : CONNECTOR_LEFT_X + 8,
+    y: CONNECTOR_TOP + slotIndex * CONNECTOR_SLOT_STEP + 12,
+  };
+}
+
+function midColumnById(columnId) {
+  return MID_COLUMNS.find((column) => column.id === columnId) || MID_COLUMNS[0];
+}
+
+function firstOpenMidSlot(nodes, columnId) {
+  const usedSlots = new Set(
+    nodes
+      .filter((node) => node.type === "mid" && node.columnId === columnId)
+      .map((node) => Number(node.slotIndex) || 0),
+  );
+  let slotIndex = 0;
+  while (usedSlots.has(slotIndex)) slotIndex += 1;
+  return slotIndex;
+}
+
+function midPosition(columnId, slotIndex = 0) {
+  const column = midColumnById(columnId);
+  return {
+    x: column.x,
+    y: MID_SLOT_TOP + slotIndex * MID_SLOT_STEP,
+  };
+}
+
+function midAddPointY(nodes, columnId) {
+  const nextSlot = firstOpenMidSlot(nodes, columnId);
+  if (nextSlot === 0) return MID_EMPTY_ADD_Y;
+  return MID_SLOT_TOP + nextSlot * MID_SLOT_STEP + 82;
+}
+
+function layoutCanvasNodes(nodes) {
+  let fallbackMidIndex = 0;
+  return nodes.map((node) => {
+    if (node.type === "connector") {
+      const position = connectorPosition(node.side || "left", node.slotIndex || 0);
+      return { ...node, ...position };
+    }
+    if (node.type !== "mid") return node;
+    const columnId = node.columnId || MID_COLUMNS[Math.min(fallbackMidIndex, MID_COLUMNS.length - 1)].id;
+    const slotIndex = Number.isInteger(node.slotIndex) ? node.slotIndex : fallbackMidIndex;
+    fallbackMidIndex += 1;
+    return {
+      ...node,
+      columnId,
+      slotIndex,
+      ...midPosition(columnId, slotIndex),
+    };
+  });
 }
 
 function endpointLabel(endpoint) {
@@ -136,8 +218,20 @@ export default function CanvasConfigurator({
   const canvasRef = useRef(null);
   const pinRefs = useRef(new Map());
 
+  const layoutNodes = useMemo(() => layoutCanvasNodes(nodes), [nodes]);
+
   const nodeById = useMemo(
-    () => new Map(nodes.map((node) => [node.id, node])),
+    () => new Map(layoutNodes.map((node) => [node.id, node])),
+    [layoutNodes],
+  );
+
+  const midColumnStates = useMemo(
+    () =>
+      MID_COLUMNS.map((column) => ({
+        ...column,
+        nextSlot: firstOpenMidSlot(nodes, column.id),
+        addY: midAddPointY(nodes, column.id),
+      })),
     [nodes],
   );
 
@@ -167,10 +261,10 @@ export default function CanvasConfigurator({
       const canvasRect = canvas.getBoundingClientRect();
       const nextGeometry = {};
 
-      wires.forEach((wire) => {
+      wires.forEach((wire, wireIndex) => {
         const startEl = pinRefs.current.get(endpointKey(wire.from));
         const endEl = pinRefs.current.get(endpointKey(wire.to));
-        if (!startEl || !endEl) return;
+        if (!startEl || !endEl || !nodeById.has(wire.from.nodeId) || !nodeById.has(wire.to.nodeId)) return;
         const startRect = startEl.getBoundingClientRect();
         const endRect = endEl.getBoundingClientRect();
         const start = {
@@ -182,15 +276,28 @@ export default function CanvasConfigurator({
           y: endRect.top - canvasRect.top + endRect.height / 2,
         };
         const dx = Math.abs(end.x - start.x);
-        const bend = clamp(dx * 0.42, 80, 210);
+        const sign = end.x >= start.x ? 1 : -1;
+        const laneOffsets = [0, -18, 18, -34, 34, -50, 50];
+        const laneY = clamp(
+          (start.y + end.y) / 2 + laneOffsets[wireIndex % laneOffsets.length],
+          34,
+          Math.max(120, canvasRect.height - 96),
+        );
+        const middleX = (start.x + end.x) / 2;
+        const startLead = clamp(dx * 0.22, 42, 96);
+        const endLead = clamp(dx * 0.22, 42, 96);
+        const labelOffset = wireIndex % 2 === 0 ? -14 : 16;
         nextGeometry[wire.id] = {
           start,
           end,
           label: {
-            x: (start.x + end.x) / 2,
-            y: (start.y + end.y) / 2 - 20,
+            x: middleX,
+            y: laneY + labelOffset,
           },
-          path: `M ${start.x} ${start.y} C ${start.x + bend} ${start.y}, ${end.x - bend} ${end.y}, ${end.x} ${end.y}`,
+          path:
+            `M ${start.x} ${start.y} ` +
+            `C ${start.x + sign * startLead} ${start.y}, ${middleX - sign * 42} ${laneY}, ${middleX} ${laneY} ` +
+            `C ${middleX + sign * 42} ${laneY}, ${end.x - sign * endLead} ${end.y}, ${end.x} ${end.y}`,
         };
       });
       setWireGeometry(nextGeometry);
@@ -202,7 +309,7 @@ export default function CanvasConfigurator({
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", updateGeometry);
     };
-  }, [nodes, wires, connectorPicker, midSlotStack]);
+  }, [layoutNodes, wires, connectorPicker, midSlotStack, nodeById]);
 
   const registerPin = (endpoint) => (element) => {
     const key = endpointKey(endpoint);
@@ -231,12 +338,18 @@ export default function CanvasConfigurator({
 
   const selectConnectorPart = (part, target) => {
     if (!part) return;
+    const side = target?.side || "left";
+    const slotIndex = Number.isInteger(target?.slotIndex)
+      ? target.slotIndex
+      : connectorSlotIndex(nodes, side);
+    const position = connectorPosition(side, slotIndex);
     const nextNode = {
-      id: createConnectorId(nodes, target?.side || "left"),
+      id: createConnectorId(nodes, side),
       type: "connector",
-      side: target?.side || "left",
-      x: target?.x ?? 48,
-      y: target?.y ?? 48,
+      side,
+      slotIndex,
+      x: position.x,
+      y: position.y,
       partId: part.id,
       pinCount: part.defaultPinCount,
       option: part.options[0],
@@ -247,11 +360,18 @@ export default function CanvasConfigurator({
 
   const addMidElement = (slot) => {
     const type = midElementTypes[0];
+    const columnId = slot?.columnId || MID_COLUMNS[0].id;
+    const slotIndex = Number.isInteger(slot?.slotIndex)
+      ? slot.slotIndex
+      : firstOpenMidSlot(nodes, columnId);
+    const position = midPosition(columnId, slotIndex);
     const nextNode = {
       id: createMidId(nodes),
       type: "mid",
-      x: slot?.x ?? 520,
-      y: slot?.y ?? 70,
+      columnId,
+      slotIndex,
+      x: position.x,
+      y: position.y,
       elementType: type.id,
       option: type.options[0],
       leftPins: type.defaultLeftPins,
@@ -359,7 +479,7 @@ export default function CanvasConfigurator({
       },
       reviewItems,
       visualDraftData: {
-        nodes,
+        nodes: layoutNodes,
         wires,
       },
     };
@@ -451,7 +571,7 @@ export default function CanvasConfigurator({
             );
           })}
 
-          {nodes.map((node) =>
+          {layoutNodes.map((node) =>
             node.type === "connector" ? (
               <ConnectorNode
                 key={node.id}
@@ -464,15 +584,16 @@ export default function CanvasConfigurator({
                 onFamilyChange={(familyId) => changeConnectorFamily(node.id, familyId)}
                 onPinCountChange={(pinCount) => updateConnector(node.id, { pinCount })}
                 onOptionChange={(option) => updateConnector(node.id, { option })}
-                onAddConnector={() =>
+                onAddConnector={() => {
+                  const slotIndex = connectorSlotIndex(nodes, node.side);
                   setConnectorPicker({
-                    x: node.x,
-                    y: node.y + 330,
+                    ...connectorPickerPosition(node.side, slotIndex),
                     side: node.side,
+                    slotIndex,
                     view: "choices",
                     query: "",
-                  })
-                }
+                  });
+                }}
               />
             ) : (
               <MidElementNode
@@ -484,12 +605,6 @@ export default function CanvasConfigurator({
                 registerPin={registerPin}
                 onDelete={() => deleteNode(node.id)}
                 onOpenSettings={() => setMidModalId(node.id)}
-                onAddMid={() =>
-                  setMidSlotStack({
-                    x: node.x + 320,
-                    y: Math.max(34, node.y - 12),
-                  })
-                }
               />
             ),
           )}
@@ -501,9 +616,9 @@ export default function CanvasConfigurator({
               label="Add connector"
               onClick={() =>
                 setConnectorPicker({
-                  x: "calc(100% - 380px)",
-                  y: 88,
+                  ...connectorPickerPosition("right", 0),
                   side: "right",
+                  slotIndex: 0,
                   view: "choices",
                   query: "",
                 })
@@ -517,33 +632,24 @@ export default function CanvasConfigurator({
               label="Add connector"
               onClick={() =>
                 setConnectorPicker({
-                  x: 26,
-                  y: 88,
+                  ...connectorPickerPosition("left", 0),
                   side: "left",
+                  slotIndex: 0,
                   view: "choices",
                   query: "",
                 })
               }
             />
           )}
-          <AddCanvasPoint
-            x={560}
-            y={312}
-            label="Add mid element"
-            onClick={() => setMidSlotStack({ x: 490, y: 170 })}
-          />
-          <AddCanvasPoint
-            x={880}
-            y={312}
-            label="Add mid element"
-            onClick={() => setMidSlotStack({ x: 810, y: 170 })}
-          />
-          <AddCanvasPoint
-            x={1200}
-            y={312}
-            label="Add mid element"
-            onClick={() => setMidSlotStack({ x: 1130, y: 170 })}
-          />
+          {midColumnStates.map((column) => (
+            <AddCanvasPoint
+              key={column.id}
+              x={column.x + MID_NODE_WIDTH / 2}
+              y={column.addY}
+              label="Add mid element"
+              onClick={() => setMidSlotStack({ columnId: column.id })}
+            />
+          ))}
 
           {connectorPicker && (
             <ConnectorPicker
@@ -556,7 +662,7 @@ export default function CanvasConfigurator({
           {midSlotStack && (
             <MidSlotStack
               stack={midSlotStack}
-              existingCount={nodes.filter((node) => node.type === "mid").length}
+              nodes={nodes}
               onAdd={addMidElement}
               onClose={() => setMidSlotStack(null)}
             />
@@ -704,7 +810,6 @@ function MidElementNode({
   registerPin,
   onDelete,
   onOpenSettings,
-  onAddMid,
 }) {
   const elementType = midElementTypeById(node.elementType);
 
@@ -746,10 +851,6 @@ function MidElementNode({
         onPinClick={onPinClick}
         registerPin={registerPin}
       />
-      <button className="mid-add-nearby" onClick={onAddMid}>
-        <span><Plus size={20} /></span>
-        Add mid element
-      </button>
     </div>
   );
 }
@@ -860,22 +961,25 @@ function ConnectorPicker({ picker, onChange, onSelect, onClose }) {
   );
 }
 
-function MidSlotStack({ stack, existingCount, onAdd, onClose }) {
+function MidSlotStack({ stack, nodes, onAdd, onClose }) {
+  const columnId = stack.columnId || MID_COLUMNS[0].id;
+  const column = midColumnById(columnId);
+  const startSlot = firstOpenMidSlot(nodes, columnId);
+  const stackTop = Math.max(30, MID_SLOT_TOP + startSlot * MID_SLOT_STEP - 8);
   const slots = Array.from({ length: 5 }, (_, index) => ({
-    x: stack.x,
-    y: stack.y + index * 56,
-    label: index < existingCount ? "Add near existing element" : "Add an element",
+    columnId,
+    slotIndex: startSlot + index,
   }));
 
   return (
-    <div className="mid-slot-stack" style={{ left: stack.x, top: stack.y }}>
+    <div className="mid-slot-stack" style={{ left: column.x, top: stackTop }}>
       {slots.map((slot, index) => (
         <button
-          key={`${slot.x}-${slot.y}-${index}`}
-          onClick={() => onAdd({ x: slot.x, y: slot.y })}
+          key={`${slot.columnId}-${slot.slotIndex}-${index}`}
+          onClick={() => onAdd(slot)}
         >
           <span><Plus size={18} /></span>
-          {slot.label}
+          Add an element
         </button>
       ))}
       <button className="mid-stack-close" onClick={onClose} aria-label="Close element list">

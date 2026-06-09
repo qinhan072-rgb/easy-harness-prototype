@@ -6454,11 +6454,11 @@ button:disabled {
 
 .canvas-stage {
   position: relative;
-  width: max(1600px, 100%);
+  width: max(1700px, 100%);
   height: 100%;
   min-height: 560px;
   color: #050808;
-  font-size: 13px;
+  font-size: 12px;
 }
 
 .canvas-wire-layer {
@@ -6479,7 +6479,7 @@ button:disabled {
 
 .canvas-wire-shadow {
   stroke: rgba(0, 0, 0, 0.13);
-  stroke-width: 8;
+  stroke-width: 7;
   pointer-events: none;
 }
 
@@ -6497,7 +6497,7 @@ button:disabled {
 
 .canvas-wire-label {
   position: absolute;
-  z-index: 7;
+  z-index: 6;
   display: inline-flex;
   align-items: center;
   height: 22px;
@@ -6508,7 +6508,7 @@ button:disabled {
   border-radius: 4px;
   background: #fff;
   color: #050808;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
   line-height: 1;
   white-space: nowrap;
@@ -6578,7 +6578,7 @@ button:disabled {
 .node-card-top strong,
 .mid-card-head strong {
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 680;
 }
 
 .node-card-top button,
@@ -6678,7 +6678,7 @@ button:disabled {
 
 .connector-card label span {
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 620;
 }
 
 .connector-card select,
@@ -6697,12 +6697,12 @@ button:disabled {
 
 .pin-rail {
   display: grid;
-  width: 40px;
+  width: 42px;
   min-height: 100%;
   align-content: center;
   gap: 4px;
-  padding: 8px 5px;
-  border: 1px solid #aab5bf;
+  padding: 8px 4px;
+  border: 0;
   background: #f8fbfc;
 }
 
@@ -6715,11 +6715,13 @@ button:disabled {
 .connector-node .pin-rail.right {
   border-right: 0;
   border-left: 1px solid #aab5bf;
+  border-radius: 0 7px 0 0;
 }
 
 .connector-node .pin-rail.left {
   border-right: 1px solid #aab5bf;
   border-left: 0;
+  border-radius: 7px 0 0 0;
 }
 
 .pin-rail.right {
@@ -6733,14 +6735,29 @@ button:disabled {
 .pin-rail.compact {
   width: 24px;
   padding: 6px 3px;
+  border: 1px solid #aab5bf;
 }
 
 .pin-row {
-  display: flex;
+  display: grid;
   align-items: center;
-  justify-content: center;
-  gap: 4px;
+  justify-items: center;
   min-height: 20px;
+}
+
+.pin-rail.right .pin-row {
+  grid-template-columns: 18px 14px;
+  column-gap: 3px;
+}
+
+.pin-rail.left .pin-row {
+  grid-template-columns: 14px 18px;
+  column-gap: 3px;
+}
+
+.pin-rail.compact .pin-row {
+  grid-template-columns: 14px;
+  column-gap: 0;
 }
 
 .pin-row span {
@@ -6755,6 +6772,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  flex: 0 0 14px;
   width: 14px;
   height: 14px;
   padding: 0;
@@ -6775,7 +6793,6 @@ button:disabled {
 }
 
 .node-add-below,
-.mid-add-nearby,
 .canvas-add-point {
   position: absolute;
   display: inline-grid;
@@ -6786,7 +6803,7 @@ button:disabled {
   background: transparent;
   color: #050808;
   font-size: 13px;
-  font-weight: 660;
+  font-weight: 620;
   text-align: center;
   white-space: nowrap;
 }
@@ -6796,18 +6813,12 @@ button:disabled {
   top: calc(100% + 15px);
 }
 
-.mid-add-nearby {
-  left: 12px;
-  top: calc(100% + 22px);
-}
-
 .canvas-add-point {
   z-index: 3;
   transform: translate(-50%, -50%);
 }
 
 .node-add-below span,
-.mid-add-nearby span,
 .canvas-add-point span,
 .mid-slot-stack button span {
   display: inline-flex;
@@ -6818,6 +6829,13 @@ button:disabled {
   border: 3px solid #0f1715;
   border-radius: 999px;
   background: #fff;
+}
+
+.node-add-below svg,
+.canvas-add-point svg,
+.mid-slot-stack button svg {
+  display: block;
+  flex: 0 0 auto;
 }
 
 .mid-node {
@@ -6836,7 +6854,7 @@ button:disabled {
   padding: 8px 7px;
   border-bottom: 1px solid #c7d0d8;
   font-size: 12px;
-  font-weight: 650;
+  font-weight: 620;
   line-height: 1.22;
   text-align: center;
 }
@@ -6993,22 +7011,29 @@ button:disabled {
 .mid-slot-stack button {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   width: 100%;
   min-height: 47px;
   margin-bottom: 8px;
-  padding: 0 8px;
+  padding: 0 7px;
   border: 0;
   background: #fff;
   box-shadow: 0 14px 28px rgba(18, 32, 29, 0.12);
   color: #64716e;
   font-size: 12px;
+  font-weight: 500;
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .mid-slot-stack button span {
+  flex: 0 0 28px;
   width: 28px;
   height: 28px;
+  min-width: 28px;
+  min-height: 28px;
+  aspect-ratio: 1;
   border-width: 3px;
 }
 
