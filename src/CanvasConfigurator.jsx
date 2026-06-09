@@ -14,7 +14,6 @@ import {
   connectorFamilyById,
   connectorPartById,
   connectorParts,
-  defaultConnectorPartId,
   defaultWireTypeId,
   harnessCatalogVersion,
   midElementTypeById,
@@ -24,40 +23,8 @@ import {
   wireTypes,
 } from "./harnessCatalog.js";
 
-const defaultNodes = [
-  {
-    id: "L0",
-    type: "connector",
-    side: "left",
-    x: 48,
-    y: 48,
-    partId: defaultConnectorPartId,
-    pinCount: 5,
-    option: "USB Type-C breakout",
-  },
-  {
-    id: "CL0",
-    type: "mid",
-    x: 540,
-    y: 58,
-    elementType: "splice",
-    option: "Black heatshrink",
-    leftPins: 1,
-    rightPins: 4,
-  },
-];
-
-const defaultWires = [
-  {
-    id: "W0",
-    from: { nodeId: "L0", side: "right", pinId: "P1" },
-    to: { nodeId: "CL0", side: "left", pinId: "P1" },
-    lengthMm: 100,
-    wireType: defaultWireTypeId,
-    gauge: 28,
-    color: "Black",
-  },
-];
+const defaultNodes = [];
+const defaultWires = [];
 
 function endpointKey(endpoint) {
   return `${endpoint.nodeId}:${endpoint.side}:${endpoint.pinId}`;
@@ -154,7 +121,7 @@ export default function CanvasConfigurator({
   submitting = false,
 }) {
   const [configurationName, setConfigurationName] = useState(
-    "USB breakout to solder splice harness",
+    "New canvas harness configuration",
   );
   const [quantity, setQuantity] = useState(10);
   const [nodes, setNodes] = useState(defaultNodes);
@@ -184,10 +151,14 @@ export default function CanvasConfigurator({
   }, [wires]);
 
   const reviewItems = useMemo(() => buildReviewItems(nodes, wires), [nodes, wires]);
-  const configuredSummary = `${nodes.filter((node) => node.type === "connector").length} connector + ${nodes.filter((node) => node.type === "mid").length} mid element + ${wires.length} wire`;
+  const connectorCount = nodes.filter((node) => node.type === "connector").length;
+  const midCount = nodes.filter((node) => node.type === "mid").length;
+  const configuredSummary = `${connectorCount} connector + ${midCount} mid element + ${wires.length} wire`;
 
   const selectedWire = wires.find((wire) => wire.id === wireModalId);
   const selectedMid = nodes.find((node) => node.id === midModalId && node.type === "mid");
+  const hasLeftConnector = nodes.some((node) => node.type === "connector" && node.side !== "right");
+  const hasRightConnector = nodes.some((node) => node.type === "connector" && node.side === "right");
 
   useEffect(() => {
     const updateGeometry = () => {
@@ -302,6 +273,16 @@ export default function CanvasConfigurator({
 
   const handlePinClick = (endpoint) => {
     setSubmitError("");
+    const key = endpointKey(endpoint);
+    if (!pendingEndpoint && connectedPins.has(key)) {
+      setWires((current) =>
+        current.filter(
+          (wire) =>
+            endpointKey(wire.from) !== key && endpointKey(wire.to) !== key,
+        ),
+      );
+      return;
+    }
     if (!pendingEndpoint) {
       setPendingEndpoint(endpoint);
       return;
@@ -430,10 +411,6 @@ export default function CanvasConfigurator({
             onChange={(event) => setConfigurationName(event.target.value)}
           />
         </label>
-        <div className="canvas-config-status">
-          <span>Canvas configuration</span>
-          <strong>Price review needed</strong>
-        </div>
       </div>
 
       <main className="canvas-stage-wrap">
@@ -517,37 +494,55 @@ export default function CanvasConfigurator({
             ),
           )}
 
+          {!hasRightConnector && (
+            <AddCanvasPoint
+              x="calc(100% - 155px)"
+              y={72}
+              label="Add connector"
+              onClick={() =>
+                setConnectorPicker({
+                  x: "calc(100% - 380px)",
+                  y: 88,
+                  side: "right",
+                  view: "choices",
+                  query: "",
+                })
+              }
+            />
+          )}
+          {!hasLeftConnector && (
+            <AddCanvasPoint
+              x={112}
+              y={72}
+              label="Add connector"
+              onClick={() =>
+                setConnectorPicker({
+                  x: 26,
+                  y: 88,
+                  side: "left",
+                  view: "choices",
+                  query: "",
+                })
+              }
+            />
+          )}
           <AddCanvasPoint
-            x={1420}
-            y={78}
-            label="Add connector"
-            onClick={() =>
-              setConnectorPicker({
-                x: 1180,
-                y: 70,
-                side: "right",
-                view: "choices",
-                query: "",
-              })
-            }
+            x={560}
+            y={312}
+            label="Add mid element"
+            onClick={() => setMidSlotStack({ x: 490, y: 170 })}
           />
           <AddCanvasPoint
-            x={900}
-            y={310}
+            x={880}
+            y={312}
             label="Add mid element"
-            onClick={() => setMidSlotStack({ x: 820, y: 160 })}
+            onClick={() => setMidSlotStack({ x: 810, y: 170 })}
           />
           <AddCanvasPoint
             x={1200}
-            y={310}
+            y={312}
             label="Add mid element"
-            onClick={() => setMidSlotStack({ x: 1120, y: 160 })}
-          />
-          <AddCanvasPoint
-            x={560}
-            y={470}
-            label="Add mid element"
-            onClick={() => setMidSlotStack({ x: 500, y: 330 })}
+            onClick={() => setMidSlotStack({ x: 1130, y: 170 })}
           />
 
           {connectorPicker && (
@@ -571,8 +566,11 @@ export default function CanvasConfigurator({
 
       <footer className="canvas-configurator-footer">
         <div className="canvas-footer-summary">
-          <strong>Configured item: {configuredSummary}</strong>
-          <span>Saved under Requests as a canvas configuration. Easy Harness will release price before order.</span>
+          <strong>
+            {nodes.length || wires.length
+              ? `Configured item: ${configuredSummary}`
+              : "Start by adding a connector or mid element"}
+          </strong>
           {submitError && <small>{submitError}</small>}
         </div>
         <label className="canvas-quantity-field">
