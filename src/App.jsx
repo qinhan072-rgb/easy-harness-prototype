@@ -37,6 +37,7 @@ import {
   supabaseConfigured,
 } from "./supabaseClient.js";
 import AgentDraftLab from "./AgentDraftLab.jsx";
+import CanvasConfigurator from "./CanvasConfigurator.jsx";
 import RequirementMapVisual from "./RequirementMapVisual.jsx";
 
 const processingSteps = [
@@ -1536,10 +1537,13 @@ function requestMessageRecord(request, message) {
 
 function requestBodyFromBlocks(blocks = []) {
   const textBlock = blocks.find((block) => block.type === "text");
+  const canvasBlock = blocks.find((block) => block.type === "canvas_configuration");
   const eventBlock = blocks.find((block) => block.type === "event");
   const priceBlock = blocks.find((block) => block.type === "price");
   const attachmentBlock = blocks.find((block) => block.type === "attachments");
   if (textBlock?.text) return textBlock.text;
+  if (canvasBlock?.configuration?.title)
+    return `Canvas configuration: ${canvasBlock.configuration.title}`;
   if (eventBlock?.body) return eventBlock.body;
   if (priceBlock?.amount)
     return `Harness price released: $${priceBlock.amount}`;
@@ -1548,6 +1552,55 @@ function requestBodyFromBlocks(blocks = []) {
   if (blocks.some((block) => block.type === "preview" || block.type === "table"))
     return "Visual update added.";
   return "";
+}
+
+function canvasConfigurationFromRequest(request = {}) {
+  if (request.canvasConfiguration) return request.canvasConfiguration;
+  for (const message of request.messages || []) {
+    const block = (message.blocks || []).find(
+      (item) => item.type === "canvas_configuration",
+    );
+    if (block?.configuration) return block.configuration;
+  }
+  return null;
+}
+
+function isCanvasConfigurationRequest(request = {}) {
+  return Boolean(canvasConfigurationFromRequest(request));
+}
+
+function canvasConfigurationSummaryText(configuration = {}) {
+  const endpoints = configuration.endpoints || [];
+  const mids = configuration.midElements || [];
+  const wires = configuration.connectionGroups || [];
+  const lines = [
+    `Canvas configuration submitted for Easy Harness price review: ${configuration.title || "Harness configuration"}.`,
+    `Quantity: ${configuration.quantity || 1}`,
+    endpoints.length
+      ? `Catalog endpoints: ${endpoints
+          .map((endpoint) => `${endpoint.id} ${endpoint.manufacturer || ""} ${endpoint.mpn || endpoint.family || ""}`.trim())
+          .join("; ")}`
+      : "Catalog endpoints: Easy Harness review needed",
+    mids.length
+      ? `Mid elements: ${mids
+          .map((element) => `${element.id} ${element.label || element.elementType}`)
+          .join("; ")}`
+      : "Mid elements: none selected",
+    wires.length
+      ? `Circuits: ${wires
+          .map(
+            (wire) =>
+              `${wire.id} ${wire.startLabel} to ${wire.endLabel}, ${wire.lengthMm}mm, ${wire.wireGaugeAwg} AWG, ${wire.wireColor}`,
+          )
+          .join("; ")}`
+      : "Circuits: no wires connected",
+  ];
+  if (configuration.reviewItems?.length) {
+    lines.push(
+      `Easy Harness will review: ${configuration.reviewItems.join("; ")}`,
+    );
+  }
+  return lines.join("\n");
 }
 
 function sanitizeBlocksForStorage(blocks = []) {
@@ -1811,6 +1864,7 @@ function localRequestFromSupabase(row, currentUser) {
           ? enrichBlocksWithAttachments(message.blocks, message.id, attachments)
           : [{ type: "text", text: message.body || "" }],
     }));
+  const canvasConfiguration = canvasConfigurationFromRequest({ messages });
   const files = attachments.length
     ? attachments
     : [...new Set((row.attachments || []).map((attachment) => attachment.name))];
@@ -1837,6 +1891,7 @@ function localRequestFromSupabase(row, currentUser) {
     files,
     updated: displayTime(row.updated_at || row.created_at),
     messages,
+    canvasConfiguration,
   });
 }
 
@@ -3086,6 +3141,15 @@ function App() {
       window.location.hash === "#agent-lab");
   if (labPath) return <AgentDraftLab />;
 
+  const urlEntryMode =
+    typeof window !== "undefined"
+      ? new URLSearchParams(window.location.search).get("entry")
+      : "";
+  const initialRequestEntryMode =
+    urlEntryMode === "canvas" || urlEntryMode === "agent"
+      ? urlEntryMode
+      : "agent";
+
   const [users, setUsers] = useStoredState("easy-harness.users", seedUsers);
   const [currentUserId, setCurrentUserId] = useStoredState(
     "easy-harness.currentUserId",
@@ -3096,8 +3160,14 @@ function App() {
     null,
   );
   const [userView, setUserView] = useStoredState("easy-harness.userView", "start");
+  const [requestEntryMode, setRequestEntryMode] = useStoredState(
+    "easy-harness.requestEntryMode",
+    initialRequestEntryMode,
+  );
   const [staffView, setStaffView] = useStoredState("easy-harness.staffView", "queue");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(
+    initialRequestEntryMode !== "canvas",
+  );
   // Server-backed business data must not use browser localStorage as the
   // source of truth when Supabase is configured. In hosted mode, these records
   // are loaded from Supabase after auth/session restore; localStorage is kept
@@ -3202,12 +3272,25 @@ function App() {
   const userComposerUploadRef = useRef(null);
   const submittingRequestRef = useRef(false);
   const sendingUserMessageRef = useRef(false);
+  const pendingCanvasConfigurationRef = useRef(null);
   const currentUserIdRef = useRef(currentUserId);
   const checkingRecoveryAttemptsRef = useRef(new Set());
 
   useEffect(() => {
     currentUserIdRef.current = currentUserId;
   }, [currentUserId]);
+
+  useEffect(() => {
+    const entry = new URLSearchParams(window.location.search).get("entry");
+    if (entry === "canvas") setRequestEntryMode("canvas");
+    if (entry === "agent") setRequestEntryMode("agent");
+  }, [setRequestEntryMode]);
+
+  useEffect(() => {
+    if (userView === "start" && requestEntryMode === "canvas") {
+      setSidebarOpen(false);
+    }
+  }, [requestEntryMode, userView]);
 
   const currentUser = useMemo(
     () => users.find((user) => user.id === currentUserId) || null,
@@ -4327,6 +4410,16 @@ function App() {
     closeAuthModal();
     if (after === "submit_request" && user.role === "customer") {
       window.setTimeout(() => submitRequestForUser(user), 0);
+    }
+    if (after === "submit_canvas_configuration" && user.role === "customer") {
+      window.setTimeout(
+        () =>
+          submitCanvasConfigurationForUser(
+            user,
+            pendingCanvasConfigurationRef.current,
+          ),
+        0,
+      );
     }
   }
 
@@ -5663,6 +5756,145 @@ function App() {
     }
   }
 
+  async function submitCanvasConfiguration(configuration) {
+    if (!configuration) return;
+    pendingCanvasConfigurationRef.current = configuration;
+    if (!currentUser) {
+      openAuthModal(
+        "register",
+        "Sign in or create an account to save this canvas configuration.",
+        "submit_canvas_configuration",
+      );
+      return;
+    }
+    await submitCanvasConfigurationForUser(currentUser, configuration);
+  }
+
+  async function submitCanvasConfigurationForUser(actor, configuration) {
+    if (!configuration) throw new Error("This canvas configuration is empty.");
+    if (!actor || actor.role !== "customer") {
+      throw new Error("Please use a customer account to submit this configuration.");
+    }
+    if (submittingRequestRef.current) return;
+    if (
+      supabaseConfigured &&
+      (!authSession ||
+        authSession.adapter !== "supabase-auth" ||
+        authSession.userId !== actor.id ||
+        !isUuidLike(actor.id))
+    ) {
+      throw new Error("Please finish signing in before submitting this configuration.");
+    }
+
+    submittingRequestRef.current = true;
+    setSubmittingRequest(true);
+    setSubmissionPhase("creating");
+    try {
+      const text = canvasConfigurationSummaryText(configuration);
+      const firstMessage = {
+        id: messageId(),
+        role: "customer",
+        createdAt: "Now",
+        blocks: [
+          { type: "text", text },
+          { type: "canvas_configuration", configuration },
+        ],
+      };
+      const nextId =
+        supabase && isUuidLike(actor.id)
+          ? `pending-${Date.now()}`
+          : makeRequestId(requests);
+      const nextRequest = {
+        id: nextId,
+        customerId: actor.id,
+        customer: actor.name,
+        title: configuration.title || "Canvas harness configuration",
+        source: "canvas_configurator",
+        canvasConfiguration: configuration,
+        status: "in_review",
+        checkResult: {
+          status: "accepted",
+          adapter: "canvas-configurator-v1",
+          reason:
+            "Customer selected a structured canvas configuration from the catalog.",
+          customer_summary: text,
+          missing: configuration.reviewItems || [],
+          checkedAt: new Date().toISOString(),
+        },
+        quotes: [],
+        activeQuoteId: "",
+        confirmedQuoteId: "",
+        price: "",
+        files: [],
+        updated: "Just now",
+        messages: [firstMessage],
+      };
+
+      const savedBundle = await createSupabaseRequestBundle(
+        nextRequest,
+        firstMessage,
+        [],
+        actor,
+      );
+      if (supabase && isUuidLike(actor.id) && !savedBundle?.requestRow) {
+        throw new Error("Configuration could not be saved. Please try again.");
+      }
+      const savedRequest = savedBundle?.requestRow
+        ? {
+            ...nextRequest,
+            id: savedBundle.requestRow.request_number,
+            supabaseId: savedBundle.requestRow.id,
+            updated: displayTime(
+              savedBundle.requestRow.updated_at ||
+                savedBundle.requestRow.created_at,
+            ),
+            messages: savedBundle.messageRow
+              ? [
+                  {
+                    ...firstMessage,
+                    id: savedBundle.messageRow.id,
+                    createdAt: displayTime(savedBundle.messageRow.created_at),
+                  },
+                ]
+              : nextRequest.messages,
+          }
+        : nextRequest;
+
+      setRequests((current) =>
+        dedupeRequestsByIdentity([savedRequest, ...current]),
+      );
+      writeRequestMessageLedger(savedRequest, savedRequest.messages[0]);
+      addNotification({
+        role: "staff",
+        requestId: savedRequest.id,
+        title: "New canvas configuration",
+        body: `${savedRequest.id} is ready for price review.`,
+      });
+      recordAudit(
+        "canvas_configuration_created",
+        "request",
+        savedRequest.id,
+        `${actor.email} submitted ${savedRequest.title}.`,
+        actor,
+      );
+      recordServiceEvent(
+        "canvas-configurator",
+        "configuration_saved",
+        "request",
+        savedRequest.id,
+        "Canvas configuration saved under Requests for Easy Harness price review.",
+      );
+      pendingCanvasConfigurationRef.current = null;
+      setActiveRequestId(savedRequest.id);
+      setRequestEntryMode("canvas");
+      setUserView("thread");
+    } finally {
+      submittingRequestRef.current = false;
+      setSubmittingRequest(false);
+      setSubmissionPhase("");
+    }
+  }
+
   async function sendUserMessage() {
     if (sendingUserMessageRef.current) return;
     const text = userComposer.trim();
@@ -6434,7 +6666,13 @@ function App() {
   }
 
   return (
-    <div className={`app-shell ${sidebarOpen ? "sidebar-expanded" : ""}`}>
+    <div
+      className={`app-shell ${sidebarOpen ? "sidebar-expanded" : ""} ${
+        userView === "start" && requestEntryMode === "canvas"
+          ? "canvas-focus-shell"
+          : ""
+      }`}
+    >
       <UserSidebar
         sidebarOpen={sidebarOpen}
         setSidebarOpen={setSidebarOpen}
@@ -6484,6 +6722,9 @@ function App() {
             submittingRequest={submittingRequest}
             submissionPhase={submissionPhase}
             currentUser={currentUser}
+            requestEntryMode={requestEntryMode}
+            setRequestEntryMode={setRequestEntryMode}
+            submitCanvasConfiguration={submitCanvasConfiguration}
             uploadTermsAccepted={uploadTermsAccepted}
             termsChecked={termsChecked}
             setTermsChecked={setTermsChecked}
@@ -6536,6 +6777,9 @@ function App() {
               submittingRequest={submittingRequest}
               submissionPhase={submissionPhase}
               currentUser={currentUser}
+              requestEntryMode={requestEntryMode}
+              setRequestEntryMode={setRequestEntryMode}
+              submitCanvasConfiguration={submitCanvasConfiguration}
               uploadTermsAccepted={uploadTermsAccepted}
               termsChecked={termsChecked}
               setTermsChecked={setTermsChecked}
@@ -7049,7 +7293,11 @@ function UserSidebar({
                 >
                   <strong>{request.title}</strong>
                   <span>{request.id}</span>
-                  <small>{statusCopy[request.status]}</small>
+                  <small>
+                    {isCanvasConfigurationRequest(request)
+                      ? `Canvas configuration · ${statusCopy[request.status]}`
+                      : statusCopy[request.status]}
+                  </small>
                 </button>
               ))}
             </>
@@ -7342,6 +7590,9 @@ function StartScreen({
   submittingRequest = false,
   submissionPhase = "",
   currentUser,
+  requestEntryMode = "agent",
+  setRequestEntryMode,
+  submitCanvasConfiguration,
   uploadTermsAccepted = false,
   termsChecked,
   setTermsChecked,
@@ -7355,6 +7606,20 @@ function StartScreen({
     checking: "Easy Harness is checking your request…",
   };
   const [dragActive, setDragActive] = useState(false);
+
+  if (requestEntryMode === "canvas") {
+    return (
+      <section className="start-screen canvas-start-screen">
+        <CanvasConfigurator
+          activeMode="canvas"
+          onSwitchMode={setRequestEntryMode}
+          onSubmitConfiguration={submitCanvasConfiguration}
+          submitting={submittingRequest}
+        />
+      </section>
+    );
+  }
+
   return (
     <section
       className={`start-screen ${dragActive ? "drop-active" : ""}`}
@@ -7373,6 +7638,24 @@ function StartScreen({
         handleDrop?.(event);
       }}
     >
+      <div
+        className="request-entry-switch start-request-switch"
+        aria-label="Request entry mode"
+      >
+        <button
+          className={requestEntryMode === "agent" ? "active" : ""}
+          onClick={() => setRequestEntryMode?.("agent")}
+        >
+          Chat with Easy Harness AI Agent
+        </button>
+        <button
+          className={requestEntryMode === "canvas" ? "active" : ""}
+          onClick={() => setRequestEntryMode?.("canvas")}
+        >
+          Canvas configurator
+        </button>
+      </div>
+
       <div className="start-copy clean">
         <h1>Upload what you have. We’ll build the harness you need.</h1>
         <p>Tell us what should connect. Upload any files you already have.</p>
@@ -7534,8 +7817,8 @@ function RequestsList({ requests, orders = [], openRequest, startNewRequest }) {
         <span className="eyebrow">Requests</span>
         <h1>Your harness requests</h1>
         <p>
-          Continue an active request, review an Easy Harness Draft, or confirm a
-          price when it is ready.
+          Continue AI Agent requests, review canvas configurations, or confirm
+          a price when it is ready.
         </p>
       </div>
 
@@ -7549,7 +7832,12 @@ function RequestsList({ requests, orders = [], openRequest, startNewRequest }) {
             >
               <div>
                 <strong>{request.title}</strong>
-                <span>{request.id}</span>
+                <span>
+                  {request.id}
+                  {isCanvasConfigurationRequest(request)
+                    ? " · Canvas configuration"
+                    : " · AI Agent request"}
+                </span>
               </div>
               <div className="request-row-meta">
                 <StatusBadge status={request.status} />
@@ -8086,13 +8374,18 @@ function formatMissingInfoItem(item) {
 }
 
 function ThreadHeader({ request }) {
+  const canvasRequest = isCanvasConfigurationRequest(request);
   return (
     <header className="thread-header">
       <div className="thread-title">
         <div>
           <span className="eyebrow">Request {request.id}</span>
           <h1>{request.title}</h1>
-          <p>Continue the thread, review the Draft, or confirm the price when it is ready.</p>
+          <p>
+            {canvasRequest
+              ? "Review the selected canvas configuration, then continue when Easy Harness releases the price."
+              : "Continue the thread, review the Draft, or confirm the price when it is ready."}
+          </p>
         </div>
         <StatusBadge status={request.status} />
       </div>
@@ -8273,6 +8566,10 @@ function ContentBlock({ block, request }) {
     return <ThreadDraftSummary block={block} request={request} />;
   }
 
+  if (block.type === "canvas_configuration") {
+    return <CanvasConfigurationThreadBlock configuration={block.configuration} />;
+  }
+
   if (block.type === "event") {
     return (
       <div className="event-note">
@@ -8300,6 +8597,76 @@ function ContentBlock({ block, request }) {
   if (block.type === "table") return <BomTable request={request} />;
   if (block.type === "preview") return <HarnessPreview request={request} />;
   return null;
+}
+
+function CanvasConfigurationThreadBlock({ configuration = {} }) {
+  const endpoints = configuration.endpoints || [];
+  const midElements = configuration.midElements || [];
+  const wires = configuration.connectionGroups || [];
+  const reviewItems = configuration.reviewItems || [];
+
+  return (
+    <div className="canvas-thread-card">
+      <div className="canvas-thread-card-head">
+        <div>
+          <span className="eyebrow">Canvas configuration</span>
+          <h2>{configuration.title || "Harness configuration"}</h2>
+        </div>
+        <span>{configuration.quantity || 1} pcs</span>
+      </div>
+      <div className="canvas-thread-grid">
+        <section>
+          <strong>Catalog endpoints</strong>
+          {endpoints.length ? (
+            endpoints.map((endpoint) => (
+              <p key={endpoint.id}>
+                {endpoint.id}: {endpoint.manufacturer} {endpoint.mpn}
+                <small>{endpoint.pinCount} pins · AWG {endpoint.awgRange?.join("-")}</small>
+              </p>
+            ))
+          ) : (
+            <p>Easy Harness review needed</p>
+          )}
+        </section>
+        <section>
+          <strong>Mid elements</strong>
+          {midElements.length ? (
+            midElements.map((element) => (
+              <p key={element.id}>
+                {element.id}: {element.label}
+                <small>{element.selectedOption}</small>
+              </p>
+            ))
+          ) : (
+            <p>None selected</p>
+          )}
+        </section>
+      </div>
+      {!!wires.length && (
+        <div className="canvas-thread-circuits">
+          <strong>Circuits</strong>
+          {wires.map((wire) => (
+            <p key={wire.id}>
+              {wire.id}: {wire.startLabel} to {wire.endLabel}
+              <small>
+                {wire.lengthMm}mm · {wire.wireGaugeAwg} AWG · {wire.wireColor}
+              </small>
+            </p>
+          ))}
+        </div>
+      )}
+      {!!reviewItems.length && (
+        <div className="canvas-thread-review">
+          <strong>Easy Harness will review</strong>
+          <ul>
+            {reviewItems.slice(0, 5).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
 }
 
 function splitDetailRow(item = "") {
@@ -8901,10 +9268,15 @@ function RequestSidePanel({
   const hasOrder = confirmed || paid || linkedOrder;
   const quote = activeQuoteForRequest(request);
   const showPriceCard = Boolean(request.price || ready || hasOrder || quote);
+  const canvasConfiguration = canvasConfigurationFromRequest(request);
 
   return (
     <aside className="request-side-panel">
-      <IntakeDraftCard checkResult={request.checkResult} request={request} />
+      {canvasConfiguration ? (
+        <CanvasConfigurationSideCard configuration={canvasConfiguration} />
+      ) : (
+        <IntakeDraftCard checkResult={request.checkResult} request={request} />
+      )}
       {showPriceCard && (
         <div className="side-card price-card compact-price-card">
           <div className="price-header">
@@ -8966,6 +9338,40 @@ function RequestSidePanel({
         </div>
       )}
     </aside>
+  );
+}
+
+function CanvasConfigurationSideCard({ configuration = {} }) {
+  const endpoints = configuration.endpoints || [];
+  const wires = configuration.connectionGroups || [];
+  return (
+    <div className="side-card request-summary-card canvas-side-card">
+      <span className="summary-kicker">Current step</span>
+      <h2>Price review needed</h2>
+      <p>
+        This is a selected canvas configuration. Easy Harness will release the
+        price before it can become an order.
+      </p>
+      <div className="summary-section compact-meta">
+        <span>Configured item</span>
+        <strong>{configuration.title || "Harness configuration"}</strong>
+        <div className="summary-chips">
+          <em>{configuration.quantity || 1} pcs</em>
+          <em>{endpoints.length} endpoint{endpoints.length === 1 ? "" : "s"}</em>
+          <em>{wires.length} wire{wires.length === 1 ? "" : "s"}</em>
+        </div>
+      </div>
+      {!!configuration.reviewItems?.length && (
+        <div className="summary-section review-items">
+          <span>Easy Harness will review</span>
+          <ul>
+            {configuration.reviewItems.slice(0, 4).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 
