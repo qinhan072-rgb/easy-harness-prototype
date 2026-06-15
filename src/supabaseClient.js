@@ -21,14 +21,20 @@ export const supabase = supabaseConfigured
       auth: {
         persistSession: true,
         autoRefreshToken: true,
-        detectSessionInUrl: true
+        detectSessionInUrl: false,
+        flowType: "pkce"
       }
     })
   : null;
 
 export function getAuthRedirectUrl() {
-  const configuredBaseUrl = import.meta.env.VITE_APP_BASE_URL?.trim();
-  if (configuredBaseUrl) return configuredBaseUrl.replace(/\/$/, "");
-  if (typeof window !== "undefined") return window.location.origin;
-  return "";
+  if (typeof window !== "undefined") {
+    const pathname =
+      window.location.pathname && window.location.pathname !== "/"
+        ? window.location.pathname.replace(/\/index\.html$/, "/")
+        : "";
+    return `${window.location.origin}${pathname}`.replace(/\/$/, "");
+  }
+
+  return (import.meta.env.VITE_APP_BASE_URL || "").trim().replace(/\/$/, "");
 }

@@ -26,15 +26,15 @@ import {
 const defaultNodes = [];
 const defaultWires = [];
 
-const CONNECTOR_TOP = 50;
+const CONNECTOR_TOP = 24;
 const CONNECTOR_LEFT_X = 26;
 const CONNECTOR_RIGHT_X = "calc(100% - 280px)";
 const CONNECTOR_SLOT_STEP = 300;
 
 const MID_COLUMNS = [
-  { id: "mid-a", x: 520 },
-  { id: "mid-b", x: 840 },
-  { id: "mid-c", x: 1160 },
+  { id: "mid-a", x: "30%", centerX: "calc(30% + 76px)" },
+  { id: "mid-b", x: "50%", centerX: "calc(50% + 76px)" },
+  { id: "mid-c", x: "70%", centerX: "calc(70% + 76px)" },
 ];
 const MID_SLOT_TOP = 58;
 const MID_SLOT_STEP = 164;
@@ -235,6 +235,17 @@ export default function CanvasConfigurator({
     [nodes],
   );
 
+  const canvasContentHeight = useMemo(() => {
+    const connectorBottoms = nodes
+      .filter((node) => node.type === "connector")
+      .map((node) => CONNECTOR_TOP + (Number(node.slotIndex) || 0) * CONNECTOR_SLOT_STEP + 420);
+    const midBottoms = nodes
+      .filter((node) => node.type === "mid")
+      .map((node) => MID_SLOT_TOP + (Number(node.slotIndex) || 0) * MID_SLOT_STEP + 250);
+    const addPointBottoms = midColumnStates.map((column) => column.addY + 120);
+    return Math.max(560, ...connectorBottoms, ...midBottoms, ...addPointBottoms);
+  }, [midColumnStates, nodes]);
+
   const connectedPins = useMemo(() => {
     const keys = new Set();
     wires.forEach((wire) => {
@@ -275,29 +286,24 @@ export default function CanvasConfigurator({
           x: endRect.left - canvasRect.left + endRect.width / 2,
           y: endRect.top - canvasRect.top + endRect.height / 2,
         };
-        const dx = Math.abs(end.x - start.x);
-        const sign = end.x >= start.x ? 1 : -1;
-        const laneOffsets = [0, -18, 18, -34, 34, -50, 50];
-        const laneY = clamp(
-          (start.y + end.y) / 2 + laneOffsets[wireIndex % laneOffsets.length],
-          34,
-          Math.max(120, canvasRect.height - 96),
-        );
-        const middleX = (start.x + end.x) / 2;
-        const startLead = clamp(dx * 0.22, 42, 96);
-        const endLead = clamp(dx * 0.22, 42, 96);
-        const labelOffset = wireIndex % 2 === 0 ? -14 : 16;
+        const visualStart = start.x <= end.x ? start : end;
+        const visualEnd = start.x <= end.x ? end : start;
+        const dx = Math.abs(visualEnd.x - visualStart.x);
+        const control = clamp(dx * 0.42, 56, 220);
+        const labelNudges = [-13, 13, -28, 28, 0];
+        const labelX = visualStart.x + clamp(dx * 0.28, 78, 148);
+        const labelY = visualStart.y + (visualEnd.y - visualStart.y) * 0.16 + labelNudges[wireIndex % labelNudges.length];
         nextGeometry[wire.id] = {
           start,
           end,
           label: {
-            x: middleX,
-            y: laneY + labelOffset,
+            x: labelX,
+            y: clamp(labelY, 24, Math.max(120, canvasRect.height - 80)),
           },
           path:
-            `M ${start.x} ${start.y} ` +
-            `C ${start.x + sign * startLead} ${start.y}, ${middleX - sign * 42} ${laneY}, ${middleX} ${laneY} ` +
-            `C ${middleX + sign * 42} ${laneY}, ${end.x - sign * endLead} ${end.y}, ${end.x} ${end.y}`,
+            `M ${visualStart.x} ${visualStart.y} ` +
+            `C ${visualStart.x + control} ${visualStart.y}, ` +
+            `${visualEnd.x - control} ${visualEnd.y}, ${visualEnd.x} ${visualEnd.y}`,
         };
       });
       setWireGeometry(nextGeometry);
@@ -355,6 +361,7 @@ export default function CanvasConfigurator({
       option: part.options[0],
     };
     setNodes((current) => [...current, nextNode]);
+    setMidSlotStack(null);
     setConnectorPicker(null);
   };
 
@@ -382,13 +389,38 @@ export default function CanvasConfigurator({
   };
 
   const deleteNode = (nodeId) => {
-    setNodes((current) => current.filter((node) => node.id !== nodeId));
+    const targetNode = nodes.find((node) => node.id === nodeId);
+    setNodes((current) => {
+      const remaining = current.filter((node) => node.id !== nodeId);
+      if (!targetNode) return remaining;
+      const deletedSlot = Number(targetNode.slotIndex) || 0;
+      if (targetNode.type === "connector") {
+        return remaining.map((node) =>
+          node.type === "connector" &&
+          node.side === targetNode.side &&
+          (Number(node.slotIndex) || 0) > deletedSlot
+            ? { ...node, slotIndex: (Number(node.slotIndex) || 0) - 1 }
+            : node,
+        );
+      }
+      if (targetNode.type === "mid") {
+        return remaining.map((node) =>
+          node.type === "mid" &&
+          node.columnId === targetNode.columnId &&
+          (Number(node.slotIndex) || 0) > deletedSlot
+            ? { ...node, slotIndex: (Number(node.slotIndex) || 0) - 1 }
+            : node,
+        );
+      }
+      return remaining;
+    });
     setWires((current) =>
       current.filter(
         (wire) => wire.from.nodeId !== nodeId && wire.to.nodeId !== nodeId,
       ),
     );
     if (pendingEndpoint?.nodeId === nodeId) setPendingEndpoint(null);
+    if (midModalId === nodeId) setMidModalId("");
   };
 
   const handlePinClick = (endpoint) => {
@@ -534,7 +566,11 @@ export default function CanvasConfigurator({
       </div>
 
       <main className="canvas-stage-wrap">
-        <div className="canvas-stage" ref={canvasRef}>
+        <div
+          className="canvas-stage"
+          ref={canvasRef}
+          style={{ minHeight: canvasContentHeight }}
+        >
           <svg className="canvas-wire-layer" aria-hidden="true">
             {wires.map((wire) => {
               const geometry = wireGeometry[wire.id];
@@ -566,7 +602,6 @@ export default function CanvasConfigurator({
                 <span>{wire.id}</span>
                 <span>{wire.lengthMm}mm</span>
                 <span>{wire.gauge}AWG</span>
-                <span>{wire.color}</span>
               </button>
             );
           })}
@@ -586,6 +621,7 @@ export default function CanvasConfigurator({
                 onOptionChange={(option) => updateConnector(node.id, { option })}
                 onAddConnector={() => {
                   const slotIndex = connectorSlotIndex(nodes, node.side);
+                  setMidSlotStack(null);
                   setConnectorPicker({
                     ...connectorPickerPosition(node.side, slotIndex),
                     side: node.side,
@@ -614,15 +650,16 @@ export default function CanvasConfigurator({
               x="calc(100% - 155px)"
               y={72}
               label="Add connector"
-              onClick={() =>
+              onClick={() => {
+                setMidSlotStack(null);
                 setConnectorPicker({
                   ...connectorPickerPosition("right", 0),
                   side: "right",
                   slotIndex: 0,
                   view: "choices",
                   query: "",
-                })
-              }
+                });
+              }}
             />
           )}
           {!hasLeftConnector && (
@@ -630,24 +667,28 @@ export default function CanvasConfigurator({
               x={112}
               y={72}
               label="Add connector"
-              onClick={() =>
+              onClick={() => {
+                setMidSlotStack(null);
                 setConnectorPicker({
                   ...connectorPickerPosition("left", 0),
                   side: "left",
                   slotIndex: 0,
                   view: "choices",
                   query: "",
-                })
-              }
+                });
+              }}
             />
           )}
           {midColumnStates.map((column) => (
             <AddCanvasPoint
               key={column.id}
-              x={column.x + MID_NODE_WIDTH / 2}
+              x={column.centerX}
               y={column.addY}
               label="Add mid element"
-              onClick={() => setMidSlotStack({ columnId: column.id })}
+              onClick={() => {
+                setConnectorPicker(null);
+                setMidSlotStack({ columnId: column.id });
+              }}
             />
           ))}
 
@@ -878,7 +919,7 @@ function PinRail({
             <button
               ref={registerPin(endpoint)}
               className={`pin-dot ${connected ? "connected" : ""} ${selected ? "selected" : ""}`}
-              aria-label={`${nodeId} ${pinId}`}
+              aria-label={`${nodeId} ${side} ${pinId}`}
               onClick={() => onPinClick(endpoint)}
             >
               {connected ? <Check size={9} /> : null}
@@ -972,7 +1013,10 @@ function MidSlotStack({ stack, nodes, onAdd, onClose }) {
   }));
 
   return (
-    <div className="mid-slot-stack" style={{ left: column.x, top: stackTop }}>
+    <div
+      className="mid-slot-stack"
+      style={{ left: column.x, top: stackTop, width: MID_NODE_WIDTH }}
+    >
       {slots.map((slot, index) => (
         <button
           key={`${slot.columnId}-${slot.slotIndex}-${index}`}

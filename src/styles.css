@@ -6339,14 +6339,16 @@ button:disabled {
 }
 
 .request-entry-switch button {
+  flex: 0 0 210px;
+  box-sizing: border-box;
   min-height: 32px;
-  padding: 0 17px;
+  padding: 0 13px;
   border: 0;
   border-radius: 999px;
   background: transparent;
   color: #53615e;
-  font-size: 14px;
-  font-weight: 680;
+  font-size: 13px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -6384,16 +6386,16 @@ button:disabled {
 
 .canvas-configurator-header {
   display: grid;
-  grid-template-columns: minmax(390px, 1fr) minmax(420px, 520px);
+  grid-template-columns: minmax(360px, 1fr) auto;
   gap: 20px;
   align-items: start;
-  padding: 24px 300px 16px 28px;
+  padding: 24px 270px 16px 28px;
 }
 
 .canvas-configurator-header h1 {
   margin: 5px 0 6px;
   color: var(--text);
-  font-size: 28px;
+  font-size: 26px;
   line-height: 1.12;
 }
 
@@ -6412,7 +6414,7 @@ button:disabled {
   grid-template-columns: minmax(0, 1fr);
   align-items: center;
   min-height: 62px;
-  padding: 10px 300px 10px 28px;
+  padding: 10px 28px;
   border-top: 1px solid var(--line);
   border-bottom: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.88);
@@ -6430,7 +6432,7 @@ button:disabled {
   flex: 0 0 auto;
   color: #5c6a66;
   font-size: 13px;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .canvas-name-field input {
@@ -6442,7 +6444,7 @@ button:disabled {
   border-radius: var(--radius);
   background: #fff;
   color: var(--text);
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .canvas-stage-wrap {
@@ -6454,8 +6456,7 @@ button:disabled {
 
 .canvas-stage {
   position: relative;
-  width: max(1700px, 100%);
-  height: 100%;
+  width: max(1440px, 100%);
   min-height: 560px;
   color: #050808;
   font-size: 12px;
@@ -6500,16 +6501,16 @@ button:disabled {
   z-index: 6;
   display: inline-flex;
   align-items: center;
-  height: 22px;
+  height: 20px;
   transform: translate(-50%, -50%);
   overflow: hidden;
-  padding: 0 5px;
+  padding: 0 4px;
   border: 1px solid #111;
-  border-radius: 4px;
+  border-radius: 3px;
   background: #fff;
   color: #050808;
-  font-size: 11px;
-  font-weight: 650;
+  font-size: 10.5px;
+  font-weight: 600;
   line-height: 1;
   white-space: nowrap;
 }
@@ -6518,7 +6519,7 @@ button:disabled {
   display: inline-flex;
   align-items: center;
   height: 100%;
-  padding: 0 4px;
+  padding: 0 3px;
   border-left: 1px solid #111;
 }
 
@@ -6537,7 +6538,7 @@ button:disabled {
 .connector-node {
   width: auto;
   border: 1px solid #aab5bf;
-  border-radius: 8px 8px 0 0;
+  border-radius: 8px;
   background: #fff;
   box-shadow: 0 18px 34px rgba(25, 32, 38, 0.11);
 }
@@ -6557,12 +6558,12 @@ button:disabled {
   display: grid;
   width: 184px;
   border: 0;
-  border-radius: 7px 0 0 0;
+  border-radius: 7px 0 0 7px;
   box-shadow: none;
 }
 
 .connector-node.right-end .connector-card {
-  border-radius: 0 7px 0 0;
+  border-radius: 0 7px 7px 0;
 }
 
 .node-card-top,
@@ -6578,7 +6579,7 @@ button:disabled {
 .node-card-top strong,
 .mid-card-head strong {
   font-size: 14px;
-  font-weight: 680;
+  font-weight: 620;
 }
 
 .node-card-top button,
@@ -6663,7 +6664,7 @@ button:disabled {
   min-height: 24px;
   place-items: center;
   border-bottom: 1px solid #c7d0d8;
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .connector-awg {
@@ -6678,7 +6679,7 @@ button:disabled {
 
 .connector-card label span {
   font-size: 12px;
-  font-weight: 620;
+  font-weight: 600;
 }
 
 .connector-card select,
@@ -6693,6 +6694,7 @@ button:disabled {
   background: #fff;
   color: #050808;
   font-size: 13px;
+  font-weight: 500;
 }
 
 .pin-rail {
@@ -6715,13 +6717,13 @@ button:disabled {
 .connector-node .pin-rail.right {
   border-right: 0;
   border-left: 1px solid #aab5bf;
-  border-radius: 0 7px 0 0;
+  border-radius: 0 7px 7px 0;
 }
 
 .connector-node .pin-rail.left {
   border-right: 1px solid #aab5bf;
   border-left: 0;
-  border-radius: 7px 0 0 0;
+  border-radius: 7px 0 0 7px;
 }
 
 .pin-rail.right {
@@ -6764,7 +6766,7 @@ button:disabled {
   width: 18px;
   color: #050808;
   font-size: 13px;
-  font-weight: 500;
+  font-weight: 480;
   line-height: 1;
 }
 
@@ -6803,14 +6805,15 @@ button:disabled {
   background: transparent;
   color: #050808;
   font-size: 13px;
-  font-weight: 620;
+  font-weight: 560;
   text-align: center;
   white-space: nowrap;
 }
 
 .node-add-below {
-  left: 34px;
+  left: 50%;
   top: calc(100% + 15px);
+  transform: translateX(-50%);
 }
 
 .canvas-add-point {
@@ -6826,7 +6829,7 @@ button:disabled {
   justify-content: center;
   width: 31px;
   height: 31px;
-  border: 3px solid #0f1715;
+  border: 2.5px solid #0f1715;
   border-radius: 999px;
   background: #fff;
 }
@@ -6854,7 +6857,7 @@ button:disabled {
   padding: 8px 7px;
   border-bottom: 1px solid #c7d0d8;
   font-size: 12px;
-  font-weight: 620;
+  font-weight: 580;
   line-height: 1.22;
   text-align: center;
 }
@@ -6873,7 +6876,7 @@ button:disabled {
 }
 
 .mid-awg strong {
-  font-weight: 650;
+  font-weight: 600;
 }
 
 .connector-picker {
@@ -6898,7 +6901,7 @@ button:disabled {
   border-radius: 6px;
   color: #fff;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 650;
 }
 
 .picker-choice.teal {
@@ -6955,7 +6958,7 @@ button:disabled {
   padding: 10px 12px 8px;
   color: #89938f;
   font-size: 11px;
-  font-weight: 700;
+  font-weight: 650;
   text-transform: uppercase;
 }
 
@@ -7005,7 +7008,6 @@ button:disabled {
 .mid-slot-stack {
   position: absolute;
   z-index: 18;
-  width: 138px;
 }
 
 .mid-slot-stack button {
@@ -7034,7 +7036,7 @@ button:disabled {
   min-width: 28px;
   min-height: 28px;
   aspect-ratio: 1;
-  border-width: 3px;
+  border-width: 2.5px;
 }
 
 .mid-slot-stack .mid-stack-close {
@@ -7304,17 +7306,6 @@ button:disabled {
   color: var(--teal);
 }
 
-@media (max-width: 1320px) {
-  .canvas-configurator-header,
-  .canvas-configurator-meta {
-    padding-right: 320px;
-  }
-
-  .start-request-switch {
-    right: 320px;
-  }
-}
-
 @media (max-width: 1080px) {
   .canvas-configurator-header {
     grid-template-columns: 1fr;
@@ -7331,7 +7322,7 @@ button:disabled {
   }
 
   .canvas-stage {
-    width: max(1300px, 100%);
+    width: max(1440px, 100%);
   }
 
   .start-request-switch {
@@ -7353,6 +7344,7 @@ button:disabled {
   }
 
   .request-entry-switch button {
+    flex-basis: auto;
     width: 100%;
   }
 

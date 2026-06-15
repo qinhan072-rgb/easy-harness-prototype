@@ -100,3 +100,15 @@ The front end now starts Google OAuth through Supabase. To make it work online:
    settings, enable the provider, and save.
 5. Test the Google button from the Vercel deployment.
 
+## Redirect URLs
+
+The front end uses the current browser origin for email and Google redirects.
+Keep these URLs in Supabase Dashboard -> Authentication -> URL Configuration:
+
+- `https://easy-harness-prototype.vercel.app/**`
+- `http://127.0.0.1:5173/**`
+- `http://localhost:5173/**`
+
+If a new production domain is added, add that domain before testing sign-in.
+`VITE_APP_BASE_URL` is only a non-browser fallback and should not force local,
+preview, and production deployments to the same callback origin.

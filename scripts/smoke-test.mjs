@@ -113,6 +113,17 @@ const checks = [
       app.includes("Account access is not available yet")
   },
   {
+    name: "hosted auth restores sessions on the active deployment",
+    pass: supabaseClient.includes('flowType: "pkce"') &&
+      supabaseClient.includes("detectSessionInUrl: false") &&
+      supabaseClient.includes("window.location.origin") &&
+      app.includes("readAuthCallback") &&
+      app.includes("clearAuthCallback") &&
+      app.includes("supabase.auth.exchangeCodeForSession") &&
+      app.includes("Promise.allSettled") &&
+      app.includes("shouldCreateUser: true")
+  },
+  {
     name: "supabase request data path is wired",
     pass: app.includes("loadSupabaseRequestData") &&
       app.includes("createSupabaseRequestBundle") &&

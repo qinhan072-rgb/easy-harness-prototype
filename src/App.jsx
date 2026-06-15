@@ -1146,6 +1146,27 @@ function writeUploadTermsAccepted(userId) {
   writeStoredState(uploadTermsKey(userId), true);
 }
 
+function readAuthCallback() {
+  if (typeof window === "undefined") {
+    return { code: "", error: "", errorDescription: "" };
+  }
+  const params = new URLSearchParams(window.location.search);
+  return {
+    code: params.get("code") || "",
+    error: params.get("error") || params.get("error_code") || "",
+    errorDescription: params.get("error_description") || "",
+  };
+}
+
+function clearAuthCallback() {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  ["code", "error", "error_code", "error_description"].forEach((key) =>
+    url.searchParams.delete(key),
+  );
+  window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
 function useStoredState(key, fallback) {
   const [value, setValue] = useState(() => readStoredState(key, fallback));
 
@@ -3616,11 +3637,72 @@ function App() {
     const restoreSession = async () => {
       setAuthProviderStatus("connecting");
       setSupabaseSessionReady(false);
-      const { data, error } = await supabase.auth.getSession();
+      let data;
+      let error;
+      try {
+        const callback = readAuthCallback();
+        if (callback.error || callback.errorDescription) {
+          clearAuthCallback();
+          const detail =
+            callback.errorDescription ||
+            "The account provider did not complete sign-in.";
+          recordServiceEvent(
+            "supabase-auth",
+            "callback_failed",
+            "session",
+            "current",
+            detail,
+          );
+          setAuthProviderStatus("error");
+          setSupabaseSessionReady(true);
+          setAuthModal({
+            open: true,
+            mode: "login",
+            reason:
+              "Sign-in could not be completed. Please try again or use the email option.",
+            after: "",
+          });
+          return;
+        }
+
+        if (callback.code) {
+          const exchangeResult =
+            await supabase.auth.exchangeCodeForSession(callback.code);
+          clearAuthCallback();
+          if (exchangeResult.error) {
+            throw exchangeResult.error;
+          }
+          if (exchangeResult.data.session) {
+            await syncSupabaseSession(
+              exchangeResult.data.session,
+              "callback_session_created",
+            );
+            return;
+          }
+        }
+
+        ({ data, error } = await supabase.auth.getSession());
+      } catch (sessionError) {
+        error = sessionError;
+      }
       if (disposed) return;
       if (error) {
+        recordServiceEvent(
+          "supabase-auth",
+          "session_restore_failed",
+          "session",
+          "current",
+          error.message || "The saved account session could not be restored.",
+        );
         setAuthProviderStatus("error");
         setSupabaseSessionReady(true);
+        setAuthModal({
+          open: true,
+          mode: "login",
+          reason:
+            "Sign-in could not be completed. Please try again in this browser.",
+          after: "",
+        });
         return;
       }
       if (data.session) {
@@ -3646,7 +3728,7 @@ function App() {
         }
         setSupabaseSessionReady(false);
         window.setTimeout(() => {
-          syncSupabaseSession(session, event.toLowerCase());
+          void syncSupabaseSession(session, event.toLowerCase());
         }, 0);
       },
     );
@@ -5168,53 +5250,95 @@ function App() {
 
   async function syncSupabaseSession(session, action = "session_created") {
     if (!session?.user) return null;
-    const profile = await fetchSupabaseProfile(session.user);
-    const user = profileUserFromSupabase(profile, session.user);
+    setAuthProviderStatus("connecting");
+    setSupabaseSessionReady(false);
 
-    if (!user.id || user.status === "suspended") {
-      await supabase?.auth.signOut();
+    try {
+      const profile = await fetchSupabaseProfile(session.user);
+      const user = profileUserFromSupabase(profile, session.user);
+
+      if (!user.id || user.status === "suspended") {
+        await supabase?.auth.signOut();
+        setCurrentUserId("");
+        setAuthSession(null);
+        return null;
+      }
+
+      let mergedUser = user;
+      setUsers((current) => {
+        const existing = current.find((item) => item.id === user.id);
+        mergedUser = existing
+          ? {
+              ...existing,
+              ...user,
+              termsAccepted:
+                existing.termsAccepted ||
+                user.termsAccepted ||
+                readUploadTermsAccepted(user.id),
+              termsAcceptedAt:
+                existing.termsAcceptedAt || user.termsAcceptedAt || "",
+            }
+          : {
+              ...user,
+              termsAccepted:
+                user.termsAccepted || readUploadTermsAccepted(user.id),
+            };
+        return existing
+          ? current.map((item) => (item.id === user.id ? mergedUser : item))
+          : [mergedUser, ...current];
+      });
+
+      signIn(
+        user.id,
+        createSupabaseAuthSession(session, mergedUser),
+        mergedUser,
+        {
+          resetView: false,
+        },
+      );
+      setSupabaseSessionReady(true);
+      setAuthProviderStatus("ready");
+
+      const workspaceLoads = await Promise.allSettled([
+        loadSupabaseRequestData(mergedUser),
+        loadSupabaseOrderData(mergedUser),
+        loadSupabaseNotificationData(mergedUser),
+      ]);
+      const failedLoad = workspaceLoads.find(
+        (result) => result.status === "rejected",
+      );
+      if (failedLoad) {
+        recordServiceEvent(
+          "supabase-database",
+          "workspace_restore_incomplete",
+          "user",
+          user.id,
+          failedLoad.reason?.message ||
+            "Some account data could not be loaded after sign-in.",
+        );
+      }
+
+      recordServiceEvent(
+        "supabase-auth",
+        action,
+        "user",
+        user.id,
+        `${roleCopy[user.role]} session is active.`,
+      );
+      return user;
+    } catch (error) {
+      recordServiceEvent(
+        "supabase-auth",
+        "session_sync_failed",
+        "user",
+        session.user.id,
+        error?.message || "The account session could not be opened.",
+      );
+      setAuthProviderStatus("error");
       return null;
+    } finally {
+      setSupabaseSessionReady(true);
     }
-
-    let mergedUser = user;
-    setUsers((current) => {
-      const existing = current.find((item) => item.id === user.id);
-      mergedUser = existing
-        ? {
-            ...existing,
-            ...user,
-            termsAccepted:
-              existing.termsAccepted ||
-              user.termsAccepted ||
-              readUploadTermsAccepted(user.id),
-            termsAcceptedAt:
-              existing.termsAcceptedAt || user.termsAcceptedAt || "",
-          }
-        : {
-            ...user,
-            termsAccepted: user.termsAccepted || readUploadTermsAccepted(user.id),
-          };
-      return existing
-        ? current.map((item) => (item.id === user.id ? mergedUser : item))
-        : [mergedUser, ...current];
-    });
-
-    signIn(user.id, createSupabaseAuthSession(session, mergedUser), mergedUser, {
-      resetView: false,
-    });
-    await loadSupabaseRequestData(mergedUser);
-    await loadSupabaseOrderData(mergedUser);
-    await loadSupabaseNotificationData(mergedUser);
-    recordServiceEvent(
-      "supabase-auth",
-      action,
-      "user",
-      user.id,
-      `${roleCopy[user.role]} session is active.`,
-    );
-    setSupabaseSessionReady(true);
-    setAuthProviderStatus("ready");
-    return user;
   }
 
   function signIn(userId, session = null, userOverride = null, options = {}) {
@@ -5268,8 +5392,12 @@ function App() {
       const { error } = await supabase.auth.signInWithOtp({
         email: normalized,
         options: {
-          shouldCreateUser: false,
+          shouldCreateUser: true,
           emailRedirectTo: getAuthRedirectUrl(),
+          data: {
+            nickname: normalized.split("@")[0],
+            role: "customer",
+          },
         },
       });
 
