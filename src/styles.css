@@ -267,16 +267,17 @@ button:disabled {
 .top-account {
   position: fixed;
   z-index: 10;
-  top: 22px;
+  top: 24px;
   right: 30px;
   display: flex;
   align-items: center;
   gap: 8px;
+  min-height: 40px;
 }
 
 .account-icon {
-  width: 36px;
-  height: 36px;
+  width: 40px;
+  height: 40px;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.76);
@@ -352,7 +353,11 @@ button:disabled {
 }
 
 .signin-button {
-  min-height: 36px;
+  display: inline-flex;
+  height: 40px;
+  min-height: 40px;
+  align-items: center;
+  justify-content: center;
   padding: 0 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -5282,7 +5287,8 @@ button:disabled {
 /* UX cleanup: focused account, clearer empty states, and calmer intake copy */
 .account-pill {
   display: inline-flex;
-  min-height: 38px;
+  height: 40px;
+  min-height: 40px;
   align-items: center;
   gap: 9px;
   padding: 3px 12px 3px 4px;
@@ -6328,34 +6334,43 @@ button:disabled {
 
 .request-entry-switch {
   display: inline-flex;
+  box-sizing: border-box;
+  width: 488px;
+  height: 40px;
   align-items: center;
   gap: 4px;
   min-height: 40px;
   padding: 3px;
-  border: 1px solid var(--line);
+  border: 1px solid rgba(12, 108, 100, 0.16);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.86);
-  box-shadow: 0 10px 24px rgba(18, 32, 29, 0.045);
+  background: linear-gradient(180deg, rgba(239, 250, 248, 0.98), rgba(247, 252, 251, 0.94));
+  box-shadow: 0 12px 28px rgba(18, 32, 29, 0.08);
 }
 
 .request-entry-switch button {
-  flex: 0 0 210px;
+  display: inline-flex;
+  flex: 1 1 0;
   box-sizing: border-box;
+  height: 32px;
+  min-width: 0;
   min-height: 32px;
+  align-items: center;
+  justify-content: center;
   padding: 0 13px;
   border: 0;
   border-radius: 999px;
   background: transparent;
-  color: #53615e;
+  color: #34413f;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 760;
   white-space: nowrap;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
 }
 
 .request-entry-switch button.active {
-  background: #fff;
-  color: var(--teal);
-  box-shadow: 0 7px 16px rgba(18, 32, 29, 0.07);
+  background: var(--teal);
+  color: #fff;
+  box-shadow: 0 8px 18px rgba(18, 153, 139, 0.18);
 }
 
 .start-request-switch {
@@ -6386,10 +6401,10 @@ button:disabled {
 
 .canvas-configurator-header {
   display: grid;
-  grid-template-columns: minmax(360px, 1fr) auto;
+  grid-template-columns: minmax(360px, 1fr) 488px;
   gap: 20px;
   align-items: start;
-  padding: 24px 270px 16px 28px;
+  padding: 24px 300px 16px 28px;
 }
 
 .canvas-configurator-header h1 {
@@ -6406,6 +6421,7 @@ button:disabled {
 }
 
 .request-entry-switch.compact {
+  align-self: start;
   justify-self: end;
 }
 
@@ -7317,7 +7333,7 @@ button:disabled {
   color: var(--teal);
 }
 
-@media (max-width: 1080px) {
+@media (max-width: 1260px) {
   .canvas-configurator-header {
     grid-template-columns: 1fr;
     padding-right: 24px;
@@ -7362,11 +7378,14 @@ button:disabled {
   .request-entry-switch {
     flex-direction: column;
     align-items: stretch;
+    height: auto;
     width: min(100%, 360px);
+    min-height: 0;
   }
 
   .request-entry-switch button {
     flex-basis: auto;
+    height: 34px;
     width: 100%;
   }
 
