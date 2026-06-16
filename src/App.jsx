@@ -1120,19 +1120,68 @@ function inferTitle(text) {
 function readStoredState(key, fallback) {
   try {
     const raw = window.localStorage.getItem(key);
-    return raw ? JSON.parse(raw) : fallback;
+    return raw ? pruneStoredStateValue(key, JSON.parse(raw)) : fallback;
   } catch {
     return fallback;
   }
 }
 
 function writeStoredState(key, value) {
+  const serializedValue = JSON.stringify(pruneStoredStateValue(key, value));
   try {
-    window.localStorage.setItem(key, JSON.stringify(value));
+    window.localStorage.setItem(key, serializedValue);
+  } catch {
+    cleanupHostedLocalStorage();
+    try {
+      window.localStorage.setItem(key, serializedValue);
+    } catch {
+      // Local storage can be unavailable in private or restricted browsing modes.
+    }
+  }
+}
+
+const hostedLocalStorageCleanupKeys = [
+  "easy-harness.requests",
+  "easy-harness.orders",
+  "easy-harness.activeOrderId",
+  "easy-harness.attachments",
+  "easy-harness.storageObjects",
+  "easy-harness.requestMessages",
+  "easy-harness.quotes",
+  "easy-harness.payments",
+  "easy-harness.shipments",
+  "easy-harness.orderMessages",
+  "easy-harness.activeRequestId",
+];
+
+const storedStateMaxItems = {
+  "easy-harness.auditLogs": 200,
+  "easy-harness.notifications": 200,
+  "easy-harness.notificationDeliveries": 300,
+  "easy-harness.readNotificationIds": 300,
+  "easy-harness.serviceEvents": 120,
+};
+
+function pruneStoredStateValue(key, value) {
+  const maxItems = storedStateMaxItems[key];
+  if (Array.isArray(value) && Number.isInteger(maxItems) && value.length > maxItems) {
+    return value.slice(0, maxItems);
+  }
+  return value;
+}
+
+function cleanupHostedLocalStorage() {
+  if (typeof window === "undefined" || !supabaseConfigured) return;
+  try {
+    hostedLocalStorageCleanupKeys.forEach((key) => {
+      window.localStorage.removeItem(key);
+    });
   } catch {
     // Local storage can be unavailable in private or restricted browsing modes.
   }
 }
+
+cleanupHostedLocalStorage();
 
 function uploadTermsKey(userId) {
   return `easy-harness.uploadTermsAccepted.${userId || "anonymous"}`;
@@ -1171,11 +1220,7 @@ function useStoredState(key, fallback) {
   const [value, setValue] = useState(() => readStoredState(key, fallback));
 
   useEffect(() => {
-    try {
-      window.localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      // Local storage can be unavailable in private or restricted browsing modes.
-    }
+    writeStoredState(key, value);
   }, [key, value]);
 
   return [value, setValue];
@@ -4319,7 +4364,12 @@ function App() {
     setNotificationDeliveryRecords((current) =>
       mergeById(current, routed.deliveries),
     );
-    setServiceEvents((current) => [routed.event, ...current]);
+    setServiceEvents((current) =>
+      [routed.event, ...current].slice(
+        0,
+        storedStateMaxItems["easy-harness.serviceEvents"],
+      ),
+    );
     persistSupabaseNotification(payload, routed.notification).then(
       (remoteNotification) => {
         if (!remoteNotification) return;
@@ -4349,7 +4399,7 @@ function App() {
     setServiceEvents((current) => [
       makeServiceEvent(adapter, action, targetType, targetId, detail),
       ...current,
-    ]);
+    ].slice(0, storedStateMaxItems["easy-harness.serviceEvents"]));
   }
 
   function writeRequestMessageLedger(request, message) {
