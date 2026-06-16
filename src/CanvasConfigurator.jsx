@@ -39,7 +39,6 @@ const MID_COLUMNS = [
 const MID_SLOT_TOP = 58;
 const MID_SLOT_STEP = 164;
 const MID_EMPTY_ADD_Y = 312;
-const MID_NODE_WIDTH = 152;
 
 function endpointKey(endpoint) {
   return `${endpoint.nodeId}:${endpoint.side}:${endpoint.pinId}`;
@@ -62,10 +61,11 @@ function createConnectorId(nodes, side) {
 }
 
 function createMidId(nodes) {
-  const used = new Set(nodes.map((node) => node.id));
-  let index = 0;
-  while (used.has(`CL${index}`)) index += 1;
-  return `CL${index}`;
+  const indexes = nodes
+    .map((node) => /^CL(\d+)$/.exec(node.id)?.[1])
+    .filter((value) => value !== undefined)
+    .map((value) => Number(value));
+  return `CL${indexes.length ? Math.max(...indexes) + 1 : 0}`;
 }
 
 function createWireId(wires) {
@@ -97,15 +97,11 @@ function midColumnById(columnId) {
   return MID_COLUMNS.find((column) => column.id === columnId) || MID_COLUMNS[0];
 }
 
-function firstOpenMidSlot(nodes, columnId) {
-  const usedSlots = new Set(
-    nodes
-      .filter((node) => node.type === "mid" && node.columnId === columnId)
-      .map((node) => Number(node.slotIndex) || 0),
-  );
-  let slotIndex = 0;
-  while (usedSlots.has(slotIndex)) slotIndex += 1;
-  return slotIndex;
+function nextMidSlotIndex(nodes, columnId) {
+  const usedSlots = nodes
+    .filter((node) => node.type === "mid" && node.columnId === columnId)
+    .map((node) => Number(node.slotIndex) || 0);
+  return usedSlots.length ? Math.max(...usedSlots) + 1 : 0;
 }
 
 function midPosition(columnId, slotIndex = 0) {
@@ -117,7 +113,7 @@ function midPosition(columnId, slotIndex = 0) {
 }
 
 function midAddPointY(nodes, columnId) {
-  const nextSlot = firstOpenMidSlot(nodes, columnId);
+  const nextSlot = nextMidSlotIndex(nodes, columnId);
   if (nextSlot === 0) return MID_EMPTY_ADD_Y;
   return MID_SLOT_TOP + nextSlot * MID_SLOT_STEP + 82;
 }
@@ -210,7 +206,6 @@ export default function CanvasConfigurator({
   const [wires, setWires] = useState(defaultWires);
   const [pendingEndpoint, setPendingEndpoint] = useState(null);
   const [connectorPicker, setConnectorPicker] = useState(null);
-  const [midSlotStack, setMidSlotStack] = useState(null);
   const [wireGeometry, setWireGeometry] = useState({});
   const [wireModalId, setWireModalId] = useState("");
   const [midModalId, setMidModalId] = useState("");
@@ -229,7 +224,7 @@ export default function CanvasConfigurator({
     () =>
       MID_COLUMNS.map((column) => ({
         ...column,
-        nextSlot: firstOpenMidSlot(nodes, column.id),
+        nextSlot: nextMidSlotIndex(nodes, column.id),
         addY: midAddPointY(nodes, column.id),
       })),
     [nodes],
@@ -315,7 +310,7 @@ export default function CanvasConfigurator({
       window.cancelAnimationFrame(frame);
       window.removeEventListener("resize", updateGeometry);
     };
-  }, [layoutNodes, wires, connectorPicker, midSlotStack, nodeById]);
+  }, [layoutNodes, wires, connectorPicker, nodeById]);
 
   const registerPin = (endpoint) => (element) => {
     const key = endpointKey(endpoint);
@@ -361,31 +356,29 @@ export default function CanvasConfigurator({
       option: part.options[0],
     };
     setNodes((current) => [...current, nextNode]);
-    setMidSlotStack(null);
     setConnectorPicker(null);
   };
 
   const addMidElement = (slot) => {
     const type = midElementTypes[0];
     const columnId = slot?.columnId || MID_COLUMNS[0].id;
-    const slotIndex = Number.isInteger(slot?.slotIndex)
-      ? slot.slotIndex
-      : firstOpenMidSlot(nodes, columnId);
-    const position = midPosition(columnId, slotIndex);
-    const nextNode = {
-      id: createMidId(nodes),
-      type: "mid",
-      columnId,
-      slotIndex,
-      x: position.x,
-      y: position.y,
-      elementType: type.id,
-      option: type.options[0],
-      leftPins: type.defaultLeftPins,
-      rightPins: type.defaultRightPins,
-    };
-    setNodes((current) => [...current, nextNode]);
-    setMidSlotStack(null);
+    setNodes((current) => {
+      const slotIndex = nextMidSlotIndex(current, columnId);
+      const position = midPosition(columnId, slotIndex);
+      const nextNode = {
+        id: createMidId(current),
+        type: "mid",
+        columnId,
+        slotIndex,
+        x: position.x,
+        y: position.y,
+        elementType: type.id,
+        option: type.options[0],
+        leftPins: type.defaultLeftPins,
+        rightPins: type.defaultRightPins,
+      };
+      return [...current, nextNode];
+    });
   };
 
   const deleteNode = (nodeId) => {
@@ -621,7 +614,6 @@ export default function CanvasConfigurator({
                 onOptionChange={(option) => updateConnector(node.id, { option })}
                 onAddConnector={() => {
                   const slotIndex = connectorSlotIndex(nodes, node.side);
-                  setMidSlotStack(null);
                   setConnectorPicker({
                     ...connectorPickerPosition(node.side, slotIndex),
                     side: node.side,
@@ -651,7 +643,6 @@ export default function CanvasConfigurator({
               y={72}
               label="Add connector"
               onClick={() => {
-                setMidSlotStack(null);
                 setConnectorPicker({
                   ...connectorPickerPosition("right", 0),
                   side: "right",
@@ -668,7 +659,6 @@ export default function CanvasConfigurator({
               y={72}
               label="Add connector"
               onClick={() => {
-                setMidSlotStack(null);
                 setConnectorPicker({
                   ...connectorPickerPosition("left", 0),
                   side: "left",
@@ -687,7 +677,7 @@ export default function CanvasConfigurator({
               label="Add mid element"
               onClick={() => {
                 setConnectorPicker(null);
-                setMidSlotStack({ columnId: column.id });
+                addMidElement({ columnId: column.id });
               }}
             />
           ))}
@@ -698,14 +688,6 @@ export default function CanvasConfigurator({
               onChange={setConnectorPicker}
               onSelect={(part) => selectConnectorPart(part, connectorPicker)}
               onClose={() => setConnectorPicker(null)}
-            />
-          )}
-          {midSlotStack && (
-            <MidSlotStack
-              stack={midSlotStack}
-              nodes={nodes}
-              onAdd={addMidElement}
-              onClose={() => setMidSlotStack(null)}
             />
           )}
         </div>
@@ -997,37 +979,6 @@ function ConnectorPicker({ picker, onChange, onSelect, onClose }) {
       )}
       <button className="picker-close" onClick={onClose} aria-label="Close connector picker">
         <X size={13} />
-      </button>
-    </div>
-  );
-}
-
-function MidSlotStack({ stack, nodes, onAdd, onClose }) {
-  const columnId = stack.columnId || MID_COLUMNS[0].id;
-  const column = midColumnById(columnId);
-  const startSlot = firstOpenMidSlot(nodes, columnId);
-  const stackTop = Math.max(30, MID_SLOT_TOP + startSlot * MID_SLOT_STEP - 8);
-  const slots = Array.from({ length: 5 }, (_, index) => ({
-    columnId,
-    slotIndex: startSlot + index,
-  }));
-
-  return (
-    <div
-      className="mid-slot-stack"
-      style={{ left: column.x, top: stackTop, width: MID_NODE_WIDTH }}
-    >
-      {slots.map((slot, index) => (
-        <button
-          key={`${slot.columnId}-${slot.slotIndex}-${index}`}
-          onClick={() => onAdd(slot)}
-        >
-          <span><Plus size={18} /></span>
-          Add an element
-        </button>
-      ))}
-      <button className="mid-stack-close" onClick={onClose} aria-label="Close element list">
-        <X size={16} />
       </button>
     </div>
   );

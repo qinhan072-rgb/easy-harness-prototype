@@ -7052,6 +7052,7 @@ button:disabled {
 }
 
 .canvas-configurator-footer {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) 118px 184px;
   gap: 12px;
@@ -7062,6 +7063,11 @@ button:disabled {
 }
 
 .canvas-footer-summary {
+  position: absolute;
+  bottom: 17px;
+  left: 50%;
+  width: min(620px, calc(100% - 430px));
+  transform: translateX(-50%);
   display: grid;
   gap: 4px;
   justify-items: center;
@@ -7086,6 +7092,7 @@ button:disabled {
 }
 
 .canvas-quantity-field {
+  grid-column: 2;
   display: grid;
   gap: 5px;
 }
@@ -7106,6 +7113,10 @@ button:disabled {
   background: var(--teal);
   color: #fff;
   font-weight: 700;
+}
+
+.canvas-submit-button {
+  grid-column: 3;
 }
 
 .canvas-submit-button:disabled {
@@ -7335,6 +7346,17 @@ button:disabled {
   .canvas-configurator-footer {
     grid-template-columns: 1fr;
     align-items: stretch;
+  }
+
+  .canvas-footer-summary {
+    position: static;
+    width: 100%;
+    transform: none;
+  }
+
+  .canvas-quantity-field,
+  .canvas-submit-button {
+    grid-column: auto;
   }
 
   .request-entry-switch {
