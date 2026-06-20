@@ -39,6 +39,7 @@ import {
 import AgentDraftLab from "./AgentDraftLab.jsx";
 import CanvasConfigurator from "./CanvasConfigurator.jsx";
 import RequirementMapVisual from "./RequirementMapVisual.jsx";
+import UploadDesignRequest from "./UploadDesignRequest.jsx";
 
 const processingSteps = [
   "Upload received",
@@ -1604,12 +1605,15 @@ function requestMessageRecord(request, message) {
 function requestBodyFromBlocks(blocks = []) {
   const textBlock = blocks.find((block) => block.type === "text");
   const canvasBlock = blocks.find((block) => block.type === "canvas_configuration");
+  const uploadDesignBlock = blocks.find((block) => block.type === "upload_design");
   const eventBlock = blocks.find((block) => block.type === "event");
   const priceBlock = blocks.find((block) => block.type === "price");
   const attachmentBlock = blocks.find((block) => block.type === "attachments");
   if (textBlock?.text) return textBlock.text;
   if (canvasBlock?.configuration?.title)
     return `Canvas configuration: ${canvasBlock.configuration.title}`;
+  if (uploadDesignBlock?.uploadDesign?.title)
+    return `Upload design package: ${uploadDesignBlock.uploadDesign.title}`;
   if (eventBlock?.body) return eventBlock.body;
   if (priceBlock?.amount)
     return `Harness price released: $${priceBlock.amount}`;
@@ -1669,13 +1673,129 @@ function canvasConfigurationSummaryText(configuration = {}) {
   return lines.join("\n");
 }
 
+function cleanUploadDesignFile(file = {}) {
+  return {
+    id: file.id || "",
+    name: file.name || file.displayName || "",
+    displayName: file.displayName || file.name || "",
+    size: file.size || 0,
+    type: file.type || "application/octet-stream",
+    extension: file.extension || "",
+    category: file.category || "",
+    harnessId: file.harnessId || "",
+    harnessName: file.harnessName || "",
+  };
+}
+
+function sanitizeUploadDesignForStorage(uploadDesign = {}) {
+  const harnesses = (uploadDesign.harnesses || []).map((harness) => ({
+    id: harness.id || "",
+    name: harness.name || "",
+    quantities: (harness.quantities || []).map((quantity) =>
+      Math.max(1, Number(quantity) || 1),
+    ),
+    substitution: harness.substitution || "",
+    tolerance: harness.tolerance || "",
+    notes: harness.notes || "",
+    files: (harness.files || []).map(cleanUploadDesignFile),
+  }));
+  return {
+    schemaVersion: uploadDesign.schemaVersion || "easy-harness.upload-design.v1",
+    source: "upload_design",
+    title: uploadDesign.title || "Uploaded harness design",
+    contact: {
+      name: uploadDesign.contact?.name || "",
+      email: uploadDesign.contact?.email || "",
+      phone: uploadDesign.contact?.phone || "",
+      company: uploadDesign.contact?.company || "",
+    },
+    harnesses,
+    files: (uploadDesign.files || []).map(cleanUploadDesignFile),
+    leadTime: uploadDesign.leadTime || {},
+    qualityGate: {
+      engineeringFileCount: uploadDesign.qualityGate?.engineeringFileCount || 0,
+      supportingFileCount: uploadDesign.qualityGate?.supportingFileCount || 0,
+      acceptedExtensions: uploadDesign.qualityGate?.acceptedExtensions || [],
+      supportingExtensions: uploadDesign.qualityGate?.supportingExtensions || [],
+    },
+    checklist: {
+      reviewedPreparedDesign: Boolean(
+        uploadDesign.checklist?.reviewedPreparedDesign,
+      ),
+      acceptedTerms: Boolean(uploadDesign.checklist?.acceptedTerms),
+    },
+    reviewItems: uploadDesign.reviewItems || [],
+    submittedAt: uploadDesign.submittedAt || "",
+  };
+}
+
+function uploadDesignFromRequest(request = {}) {
+  if (request.uploadDesign) return request.uploadDesign;
+  for (const message of request.messages || []) {
+    const block = (message.blocks || []).find(
+      (item) => item.type === "upload_design",
+    );
+    if (block?.uploadDesign) return block.uploadDesign;
+  }
+  return null;
+}
+
+function isUploadDesignRequest(request = {}) {
+  return Boolean(uploadDesignFromRequest(request));
+}
+
+function requestSourceLabel(request = {}) {
+  if (isUploadDesignRequest(request) || request.source === "upload_design") {
+    return "Upload design";
+  }
+  if (
+    isCanvasConfigurationRequest(request) ||
+    request.source === "canvas_configurator"
+  ) {
+    return "Canvas configuration";
+  }
+  return "AI Agent request";
+}
+
+function uploadDesignSummaryText(uploadDesign = {}) {
+  const harnesses = uploadDesign.harnesses || [];
+  const files = uploadDesign.files || [];
+  const contact = uploadDesign.contact || {};
+  const lines = [
+    `Upload design package submitted for Easy Harness quote review: ${uploadDesign.title || "Uploaded harness design"}.`,
+    `Contact: ${contact.name || "Not provided"}${contact.email ? `, ${contact.email}` : ""}${contact.company ? `, ${contact.company}` : ""}`,
+    `Harnesses: ${harnesses.length || 0}`,
+    `Files: ${files.length || 0} total, ${uploadDesign.qualityGate?.engineeringFileCount || 0} engineering source file(s)`,
+    `Requested review speed: ${uploadDesign.leadTime?.title || "Standard review"}`,
+  ];
+  harnesses.forEach((harness) => {
+    lines.push(
+      `${harness.name || "Harness"}: quantities ${(harness.quantities || []).join(", ") || "not specified"}; tolerance ${harness.tolerance || "Easy Harness review"}.`,
+    );
+  });
+  if (uploadDesign.reviewItems?.length) {
+    lines.push(`Easy Harness will review: ${uploadDesign.reviewItems.join("; ")}`);
+  }
+  return lines.join("\n");
+}
+
 function sanitizeBlocksForStorage(blocks = []) {
   return blocks.map((block) => {
-    if (block.type !== "attachments") return block;
-    return {
-      ...block,
-      files: (block.files || []).map((file) => attachmentBlockFile(file, false)),
-    };
+    if (block.type === "attachments") {
+      return {
+        ...block,
+        files: (block.files || []).map((file) =>
+          attachmentBlockFile(file, false),
+        ),
+      };
+    }
+    if (block.type === "upload_design") {
+      return {
+        ...block,
+        uploadDesign: sanitizeUploadDesignForStorage(block.uploadDesign),
+      };
+    }
+    return block;
   });
 }
 
@@ -1931,6 +2051,7 @@ function localRequestFromSupabase(row, currentUser) {
           : [{ type: "text", text: message.body || "" }],
     }));
   const canvasConfiguration = canvasConfigurationFromRequest({ messages });
+  const uploadDesign = uploadDesignFromRequest({ messages });
   const files = attachments.length
     ? attachments
     : [...new Set((row.attachments || []).map((attachment) => attachment.name))];
@@ -1957,7 +2078,13 @@ function localRequestFromSupabase(row, currentUser) {
     files,
     updated: displayTime(row.updated_at || row.created_at),
     messages,
+    source: uploadDesign
+      ? "upload_design"
+      : canvasConfiguration
+        ? "canvas_configurator"
+        : "",
     canvasConfiguration,
+    uploadDesign,
   });
 }
 
@@ -2796,6 +2923,9 @@ function activeQuoteForRequest(request) {
 }
 
 function normalizeRequestShape(request) {
+  const inferredUploadDesign = request.uploadDesign || uploadDesignFromRequest(request);
+  const inferredCanvasConfiguration =
+    request.canvasConfiguration || canvasConfigurationFromRequest(request);
   const quotes =
     request.quotes ||
     (request.price
@@ -2822,7 +2952,7 @@ function normalizeRequestShape(request) {
         ]
       : []);
 
-  return {
+  const normalized = {
     checkResult: request.checkResult || {
       status:
         request.status === "checking"
@@ -2842,6 +2972,19 @@ function normalizeRequestShape(request) {
     activeQuoteId: request.activeQuoteId || quotes[quotes.length - 1]?.id || "",
     confirmedQuoteId: request.confirmedQuoteId || "",
     ...request,
+  };
+
+  return {
+    ...normalized,
+    source:
+      normalized.source ||
+      (inferredUploadDesign
+        ? "upload_design"
+        : inferredCanvasConfiguration
+          ? "canvas_configurator"
+          : "ai_agent"),
+    canvasConfiguration: normalized.canvasConfiguration || inferredCanvasConfiguration,
+    uploadDesign: normalized.uploadDesign || inferredUploadDesign,
   };
 }
 
@@ -3200,7 +3343,39 @@ const seedServiceEvents = [
   ),
 ];
 
+const serverBackedStorageKeys = [
+  "easy-harness.requests",
+  "easy-harness.orders",
+  "easy-harness.activeOrderId",
+  "easy-harness.attachments",
+  "easy-harness.storageObjects",
+  "easy-harness.requestMessages",
+  "easy-harness.quotes",
+  "easy-harness.payments",
+  "easy-harness.shipments",
+  "easy-harness.orderMessages",
+  "easy-harness.activeRequestId",
+  "easy-harness.notifications",
+  "easy-harness.notificationDeliveries",
+  "easy-harness.readNotificationIds",
+  "easy-harness.auditLogs",
+  "easy-harness.serviceEvents",
+];
+
+function pruneServerBackedStorageForHostedMode() {
+  if (!supabaseConfigured || typeof window === "undefined") return;
+  serverBackedStorageKeys.forEach((key) => {
+    try {
+      window.localStorage.removeItem(key);
+    } catch {
+      // Ignore browser storage failures. Supabase remains the source of truth.
+    }
+  });
+}
+
 function App() {
+  pruneServerBackedStorageForHostedMode();
+
   const labPath =
     typeof window !== "undefined" &&
     (window.location.pathname.startsWith("/agent-lab") ||
@@ -3211,10 +3386,10 @@ function App() {
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("entry")
       : "";
-  const initialRequestEntryMode =
-    urlEntryMode === "canvas" || urlEntryMode === "agent"
-      ? urlEntryMode
-      : "agent";
+  const requestEntryModes = ["agent", "canvas", "upload"];
+  const initialRequestEntryMode = requestEntryModes.includes(urlEntryMode)
+    ? urlEntryMode
+    : "agent";
 
   const [users, setUsers] = useStoredState("easy-harness.users", seedUsers);
   const [currentUserId, setCurrentUserId] = useStoredState(
@@ -3232,7 +3407,7 @@ function App() {
   );
   const [staffView, setStaffView] = useStoredState("easy-harness.staffView", "queue");
   const [sidebarOpen, setSidebarOpen] = useState(
-    initialRequestEntryMode !== "canvas",
+    !["canvas", "upload"].includes(initialRequestEntryMode),
   );
   // Server-backed business data must not use browser localStorage as the
   // source of truth when Supabase is configured. In hosted mode, these records
@@ -3339,6 +3514,7 @@ function App() {
   const submittingRequestRef = useRef(false);
   const sendingUserMessageRef = useRef(false);
   const pendingCanvasConfigurationRef = useRef(null);
+  const pendingUploadDesignRef = useRef(null);
   const currentUserIdRef = useRef(currentUserId);
   const checkingRecoveryAttemptsRef = useRef(new Set());
 
@@ -3348,12 +3524,11 @@ function App() {
 
   useEffect(() => {
     const entry = new URLSearchParams(window.location.search).get("entry");
-    if (entry === "canvas") setRequestEntryMode("canvas");
-    if (entry === "agent") setRequestEntryMode("agent");
+    if (requestEntryModes.includes(entry)) setRequestEntryMode(entry);
   }, [setRequestEntryMode]);
 
   useEffect(() => {
-    if (userView === "start" && requestEntryMode === "canvas") {
+    if (userView === "start" && ["canvas", "upload"].includes(requestEntryMode)) {
       setSidebarOpen(false);
     }
   }, [requestEntryMode, userView]);
@@ -4549,6 +4724,19 @@ function App() {
           submitCanvasConfigurationForUser(
             user,
             pendingCanvasConfigurationRef.current,
+          ),
+        0,
+      );
+    }
+    if (after === "submit_upload_design" && user.role === "customer") {
+      window.setTimeout(
+        () =>
+          submitUploadDesignForUser(user, pendingUploadDesignRef.current).catch(
+            (error) =>
+              setFileError(
+                error?.message ||
+                  "Please reattach your design files after signing in.",
+              ),
           ),
         0,
       );
@@ -6073,6 +6261,191 @@ function App() {
     }
   }
 
+  async function submitUploadDesign(uploadDesign) {
+    if (!uploadDesign) return;
+    pendingUploadDesignRef.current = uploadDesign;
+    if (!currentUser) {
+      openAuthModal(
+        "register",
+        "Sign in or create an account to submit this uploaded design package.",
+        "submit_upload_design",
+      );
+      return;
+    }
+    await submitUploadDesignForUser(currentUser, uploadDesign);
+  }
+
+  async function submitUploadDesignForUser(actor, uploadDesign) {
+    if (!uploadDesign) throw new Error("This uploaded design package is empty.");
+    if (!actor || actor.role !== "customer") {
+      throw new Error("Please use a customer account to submit this design package.");
+    }
+    if (submittingRequestRef.current) return;
+    if (
+      supabaseConfigured &&
+      (!authSession ||
+        authSession.adapter !== "supabase-auth" ||
+        authSession.userId !== actor.id ||
+        !isUuidLike(actor.id))
+    ) {
+      throw new Error("Please finish signing in before submitting this design package.");
+    }
+
+    const uploadDrafts = (uploadDesign.fileDrafts || []).filter(
+      (file) => file?.sourceFile,
+    );
+    const engineeringSourceCount =
+      uploadDesign.qualityGate?.engineeringFileCount ||
+      uploadDrafts.filter((file) => file.category === "engineering_source")
+        .length;
+
+    if (!uploadDrafts.length) {
+      throw new Error(
+        "Please reattach your design files after signing in. Browser security does not keep file handles across sign-in redirects.",
+      );
+    }
+    if (!engineeringSourceCount) {
+      throw new Error(
+        "Upload design needs at least one engineering source file such as PDF, CAD, STEP, spreadsheet, CSV, TSV, or ZIP. Use the AI Agent for rough ideas, photos, or informal sketches.",
+      );
+    }
+
+    submittingRequestRef.current = true;
+    setSubmittingRequest(true);
+    setSubmissionPhase("creating");
+    try {
+      const serializableUploadDesign =
+        sanitizeUploadDesignForStorage(uploadDesign);
+      const text = uploadDesignSummaryText(serializableUploadDesign);
+      const uploadedAttachmentBlocks = uploadDrafts.map((file) =>
+        attachmentBlockFile(file, true),
+      );
+      const storedAttachmentBlocks = uploadDrafts.map((file) =>
+        attachmentBlockFile(file, false),
+      );
+      const firstMessage = {
+        id: messageId(),
+        role: "customer",
+        createdAt: "Now",
+        blocks: [
+          { type: "text", text },
+          { type: "upload_design", uploadDesign: serializableUploadDesign },
+          { type: "attachments", files: uploadedAttachmentBlocks },
+        ],
+      };
+      const storedFirstMessage = {
+        ...firstMessage,
+        blocks: sanitizeBlocksForStorage(firstMessage.blocks),
+      };
+      const nextId =
+        supabase && isUuidLike(actor.id)
+          ? `pending-${Date.now()}`
+          : makeRequestId(requests);
+      const nextRequest = {
+        id: nextId,
+        customerId: actor.id,
+        customer: serializableUploadDesign.contact?.name || actor.name,
+        title: serializableUploadDesign.title || "Uploaded harness design",
+        source: "upload_design",
+        uploadDesign: serializableUploadDesign,
+        status: "in_review",
+        checkResult: {
+          status: "accepted",
+          adapter: "upload-design-v1",
+          reason:
+            "Customer submitted prepared engineering design files for Easy Harness quote review.",
+          customer_summary: text,
+          missing: serializableUploadDesign.reviewItems || [],
+          checkedAt: new Date().toISOString(),
+        },
+        quotes: [],
+        activeQuoteId: "",
+        confirmedQuoteId: "",
+        price: "",
+        files: storedAttachmentBlocks,
+        updated: "Just now",
+        messages: [storedFirstMessage],
+      };
+
+      setSubmissionPhase("uploading");
+      const savedBundle = await createSupabaseRequestBundle(
+        nextRequest,
+        firstMessage,
+        uploadDrafts,
+        actor,
+      );
+      if (supabase && isUuidLike(actor.id) && !savedBundle?.requestRow) {
+        throw new Error("Uploaded design package could not be saved. Please try again.");
+      }
+      const savedRequest = savedBundle?.requestRow
+        ? {
+            ...nextRequest,
+            id: savedBundle.requestRow.request_number,
+            supabaseId: savedBundle.requestRow.id,
+            updated: displayTime(
+              savedBundle.requestRow.updated_at ||
+                savedBundle.requestRow.created_at,
+            ),
+            messages: savedBundle.messageRow
+              ? [
+                  {
+                    ...storedFirstMessage,
+                    id: savedBundle.messageRow.id,
+                    createdAt: displayTime(savedBundle.messageRow.created_at),
+                  },
+                ]
+              : nextRequest.messages,
+          }
+        : nextRequest;
+
+      setRequests((current) =>
+        dedupeRequestsByIdentity([savedRequest, ...current]),
+      );
+      writeRequestMessageLedger(savedRequest, savedRequest.messages[0]);
+      if (savedBundle?.attachments?.length) {
+        setAttachmentRecords((current) => [
+          ...savedBundle.attachments,
+          ...current,
+        ]);
+      } else {
+        appendAttachmentRecords(
+          uploadDrafts,
+          savedRequest.id,
+          savedRequest.messages[0].id,
+          actor.id,
+        );
+      }
+      addNotification({
+        role: "staff",
+        requestId: savedRequest.id,
+        title: "New uploaded design",
+        body: `${savedRequest.id} is ready for quote review.`,
+      });
+      recordAudit(
+        "upload_design_created",
+        "request",
+        savedRequest.id,
+        `${actor.email} submitted ${savedRequest.title}.`,
+        actor,
+      );
+      recordServiceEvent(
+        "upload-design",
+        "design_package_saved",
+        "request",
+        savedRequest.id,
+        "Uploaded design package saved under Requests for Easy Harness quote review.",
+      );
+      pendingUploadDesignRef.current = null;
+      setActiveRequestId(savedRequest.id);
+      setRequestEntryMode("upload");
+      setUserView("thread");
+    } finally {
+      submittingRequestRef.current = false;
+      setSubmittingRequest(false);
+      setSubmissionPhase("");
+    }
+  }
+
   async function sendUserMessage() {
     if (sendingUserMessageRef.current) return;
     const text = userComposer.trim();
@@ -6846,7 +7219,8 @@ function App() {
   return (
     <div
       className={`app-shell ${sidebarOpen ? "sidebar-expanded" : ""} ${
-        userView === "start" && requestEntryMode === "canvas"
+        userView === "start" &&
+        (requestEntryMode === "canvas" || requestEntryMode === "upload")
           ? "canvas-focus-shell"
           : ""
       }`}
@@ -6903,6 +7277,7 @@ function App() {
             requestEntryMode={requestEntryMode}
             setRequestEntryMode={setRequestEntryMode}
             submitCanvasConfiguration={submitCanvasConfiguration}
+            submitUploadDesign={submitUploadDesign}
             uploadTermsAccepted={uploadTermsAccepted}
             termsChecked={termsChecked}
             setTermsChecked={setTermsChecked}
@@ -6958,6 +7333,7 @@ function App() {
               requestEntryMode={requestEntryMode}
               setRequestEntryMode={setRequestEntryMode}
               submitCanvasConfiguration={submitCanvasConfiguration}
+              submitUploadDesign={submitUploadDesign}
               uploadTermsAccepted={uploadTermsAccepted}
               termsChecked={termsChecked}
               setTermsChecked={setTermsChecked}
@@ -7196,7 +7572,7 @@ function AuthModal({
             >
               <span>
                 <strong>
-                  {loading ? "Opening Google sign-in…" : "Continue with Google"}
+                  {loading ? "Opening Google sign-in..." : "Continue with Google"}
                 </strong>
                 <small>Secure account sign-in</small>
               </span>
@@ -7234,7 +7610,7 @@ function AuthModal({
             </div>
             <h3>
               {notice.type === "google"
-                ? "Opening Google sign-in…"
+                ? "Opening Google sign-in..."
                 : "Check your email"}
             </h3>
             <p>
@@ -7472,9 +7848,7 @@ function UserSidebar({
                   <strong>{request.title}</strong>
                   <span>{request.id}</span>
                   <small>
-                    {isCanvasConfigurationRequest(request)
-                      ? `Canvas configuration · ${statusCopy[request.status]}`
-                      : statusCopy[request.status]}
+                    {requestSourceLabel(request)} - {statusCopy[request.status]}
                   </small>
                 </button>
               ))}
@@ -7771,6 +8145,7 @@ function StartScreen({
   requestEntryMode = "agent",
   setRequestEntryMode,
   submitCanvasConfiguration,
+  submitUploadDesign,
   uploadTermsAccepted = false,
   termsChecked,
   setTermsChecked,
@@ -7779,9 +8154,9 @@ function StartScreen({
   openPolicy,
 }) {
   const phaseCopy = {
-    creating: "Creating your request…",
-    uploading: "Uploading files…",
-    checking: "Easy Harness is checking your request…",
+    creating: "Creating your request...",
+    uploading: "Uploading files...",
+    checking: "Easy Harness is checking your request...",
   };
   const [dragActive, setDragActive] = useState(false);
 
@@ -7793,6 +8168,20 @@ function StartScreen({
           onSwitchMode={setRequestEntryMode}
           onSubmitConfiguration={submitCanvasConfiguration}
           submitting={submittingRequest}
+        />
+      </section>
+    );
+  }
+
+  if (requestEntryMode === "upload") {
+    return (
+      <section className="start-screen upload-start-screen">
+        <UploadDesignRequest
+          activeMode="upload"
+          onSwitchMode={setRequestEntryMode}
+          onSubmitUploadDesign={submitUploadDesign}
+          submitting={submittingRequest}
+          currentUser={currentUser}
         />
       </section>
     );
@@ -7832,10 +8221,16 @@ function StartScreen({
         >
           Canvas configurator
         </button>
+        <button
+          className={requestEntryMode === "upload" ? "active" : ""}
+          onClick={() => setRequestEntryMode?.("upload")}
+        >
+          Upload design
+        </button>
       </div>
 
       <div className="start-copy clean">
-        <h1>Upload what you have. We’ll build the harness you need.</h1>
+        <h1>Upload what you have. We'll build the harness you need.</h1>
         <p>Tell us what should connect. Upload any files you already have.</p>
       </div>
 
@@ -7903,7 +8298,7 @@ function StartScreen({
         <div className="submission-progress-card">
           <Clock3 size={17} />
           <div>
-            <strong>{phaseCopy[submissionPhase] || "Creating your request…"}</strong>
+            <strong>{phaseCopy[submissionPhase] || "Creating your request..."}</strong>
             <p>Keep this page open. Easy Harness will move you into the request thread automatically.</p>
           </div>
         </div>
@@ -7995,8 +8390,8 @@ function RequestsList({ requests, orders = [], openRequest, startNewRequest }) {
         <span className="eyebrow">Requests</span>
         <h1>Your harness requests</h1>
         <p>
-          Continue AI Agent requests, review canvas configurations, or confirm
-          a price when it is ready.
+          Continue AI Agent requests, review canvas configurations or uploaded
+          design packages, and confirm quotes when they are ready.
         </p>
       </div>
 
@@ -8010,12 +8405,7 @@ function RequestsList({ requests, orders = [], openRequest, startNewRequest }) {
             >
               <div>
                 <strong>{request.title}</strong>
-                <span>
-                  {request.id}
-                  {isCanvasConfigurationRequest(request)
-                    ? " · Canvas configuration"
-                    : " · AI Agent request"}
-                </span>
+                <span>{request.id} - {requestSourceLabel(request)}</span>
               </div>
               <div className="request-row-meta">
                 <StatusBadge status={request.status} />
@@ -8553,6 +8943,7 @@ function formatMissingInfoItem(item) {
 
 function ThreadHeader({ request }) {
   const canvasRequest = isCanvasConfigurationRequest(request);
+  const uploadRequest = isUploadDesignRequest(request);
   return (
     <header className="thread-header">
       <div className="thread-title">
@@ -8560,9 +8951,11 @@ function ThreadHeader({ request }) {
           <span className="eyebrow">Request {request.id}</span>
           <h1>{request.title}</h1>
           <p>
-            {canvasRequest
-              ? "Review the selected canvas configuration, then continue when Easy Harness releases the price."
-              : "Continue the thread, review the Draft, or confirm the price when it is ready."}
+            {uploadRequest
+              ? "Review the uploaded design package, then continue when Easy Harness releases the quote."
+              : canvasRequest
+                ? "Review the selected canvas configuration, then continue when Easy Harness releases the price."
+                : "Continue the thread, review the Draft, or confirm the price when it is ready."}
           </p>
         </div>
         <StatusBadge status={request.status} />
@@ -8748,6 +9141,10 @@ function ContentBlock({ block, request }) {
     return <CanvasConfigurationThreadBlock configuration={block.configuration} />;
   }
 
+  if (block.type === "upload_design") {
+    return <UploadDesignThreadBlock uploadDesign={block.uploadDesign} />;
+  }
+
   if (block.type === "event") {
     return (
       <div className="event-note">
@@ -8799,7 +9196,7 @@ function CanvasConfigurationThreadBlock({ configuration = {} }) {
             endpoints.map((endpoint) => (
               <p key={endpoint.id}>
                 {endpoint.id}: {endpoint.manufacturer} {endpoint.mpn}
-                <small>{endpoint.pinCount} pins · AWG {endpoint.awgRange?.join("-")}</small>
+                <small>{endpoint.pinCount} pins - AWG {endpoint.awgRange?.join("-")}</small>
               </p>
             ))
           ) : (
@@ -8827,7 +9224,7 @@ function CanvasConfigurationThreadBlock({ configuration = {} }) {
             <p key={wire.id}>
               {wire.id}: {wire.startLabel} to {wire.endLabel}
               <small>
-                {wire.lengthMm}mm · {wire.wireGaugeAwg} AWG · {wire.wireColor}
+                {wire.lengthMm}mm - {wire.wireGaugeAwg} AWG - {wire.wireColor}
               </small>
             </p>
           ))}
@@ -8838,6 +9235,75 @@ function CanvasConfigurationThreadBlock({ configuration = {} }) {
           <strong>Easy Harness will review</strong>
           <ul>
             {reviewItems.slice(0, 5).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UploadDesignThreadBlock({ uploadDesign = {} }) {
+  const harnesses = uploadDesign.harnesses || [];
+  const files = uploadDesign.files || [];
+  const contact = uploadDesign.contact || {};
+  const leadTime = uploadDesign.leadTime || {};
+  const qualityGate = uploadDesign.qualityGate || {};
+
+  return (
+    <div className="upload-design-thread-card">
+      <div className="upload-design-thread-head">
+        <div>
+          <span className="eyebrow">Upload design package</span>
+          <h2>{uploadDesign.title || "Uploaded harness design"}</h2>
+          <p>
+            {contact.name || "Contact pending"}
+            {contact.email ? ` - ${contact.email}` : ""}
+          </p>
+        </div>
+        <span>
+          {harnesses.length || 0} harness
+          {harnesses.length === 1 ? "" : "es"}
+        </span>
+      </div>
+
+      <div className="upload-design-thread-grid">
+        <section>
+          <strong>Files received</strong>
+          <p>{files.length || 0} total file(s)</p>
+          <small>
+            {qualityGate.engineeringFileCount || 0} engineering source file(s),{" "}
+            {qualityGate.supportingFileCount || 0} supporting reference file(s)
+          </small>
+        </section>
+        <section>
+          <strong>Review speed</strong>
+          <p>{leadTime.title || "Standard review"}</p>
+          <small>{leadTime.detail || "Easy Harness review"}</small>
+        </section>
+      </div>
+
+      {!!harnesses.length && (
+        <div className="upload-design-thread-harnesses">
+          <strong>Harnesses</strong>
+          {harnesses.map((harness) => (
+            <p key={harness.id || harness.name}>
+              {harness.name || "Harness"}
+              <small>
+                {(harness.quantities || []).join(", ") || "Quantity to review"}{" "}
+                units - {harness.tolerance || "Easy Harness review"}
+              </small>
+            </p>
+          ))}
+        </div>
+      )}
+
+      {!!uploadDesign.reviewItems?.length && (
+        <div className="upload-design-thread-review">
+          <strong>Easy Harness will review</strong>
+          <ul>
+            {uploadDesign.reviewItems.slice(0, 5).map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
@@ -9447,10 +9913,13 @@ function RequestSidePanel({
   const quote = activeQuoteForRequest(request);
   const showPriceCard = Boolean(request.price || ready || hasOrder || quote);
   const canvasConfiguration = canvasConfigurationFromRequest(request);
+  const uploadDesign = uploadDesignFromRequest(request);
 
   return (
     <aside className="request-side-panel">
-      {canvasConfiguration ? (
+      {uploadDesign ? (
+        <UploadDesignSideCard uploadDesign={uploadDesign} />
+      ) : canvasConfiguration ? (
         <CanvasConfigurationSideCard configuration={canvasConfiguration} />
       ) : (
         <IntakeDraftCard checkResult={request.checkResult} request={request} />
@@ -9516,6 +9985,46 @@ function RequestSidePanel({
         </div>
       )}
     </aside>
+  );
+}
+
+function UploadDesignSideCard({ uploadDesign = {} }) {
+  const harnesses = uploadDesign.harnesses || [];
+  const files = uploadDesign.files || [];
+  return (
+    <div className="side-card request-summary-card upload-design-side-card">
+      <span className="summary-kicker">Current step</span>
+      <h2>Quote review needed</h2>
+      <p>
+        Easy Harness will review the uploaded engineering package before
+        releasing a quote.
+      </p>
+      <div className="summary-section compact-meta">
+        <span>Uploaded package</span>
+        <strong>{uploadDesign.title || "Uploaded harness design"}</strong>
+        <div className="summary-chips">
+          <em>
+            {harnesses.length || 0} harness
+            {harnesses.length === 1 ? "" : "es"}
+          </em>
+          <em>
+            {files.length || 0} file
+            {files.length === 1 ? "" : "s"}
+          </em>
+          <em>{uploadDesign.leadTime?.title || "Standard review"}</em>
+        </div>
+      </div>
+      {!!uploadDesign.reviewItems?.length && (
+        <div className="summary-section review-items">
+          <span>Easy Harness will review</span>
+          <ul>
+            {uploadDesign.reviewItems.slice(0, 4).map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
   );
 }
 

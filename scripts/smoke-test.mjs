@@ -35,6 +35,8 @@ const agentDraftLabApiPath = resolve(root, "scripts", "agent-draft-lab-api.mjs")
 const agentDraftLabPath = resolve(root, "src", "AgentDraftLab.jsx");
 const requirementMapVisualPath = resolve(root, "src", "RequirementMapVisual.jsx");
 const agentDraftLabEvalPath = resolve(root, "scripts", "agent-draft-lab-eval.mjs");
+const canvasConfiguratorPath = resolve(root, "src", "CanvasConfigurator.jsx");
+const uploadDesignPath = resolve(root, "src", "UploadDesignRequest.jsx");
 
 function readIfExists(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -73,6 +75,8 @@ const checkingFunction = readIfExists(checkingFunctionPath);
 const agentDraftLabApi = readIfExists(agentDraftLabApiPath);
 const agentDraftLab = readIfExists(agentDraftLabPath);
 const agentDraftLabEval = readIfExists(agentDraftLabEvalPath);
+const canvasConfigurator = readIfExists(canvasConfiguratorPath);
+const uploadDesign = readIfExists(uploadDesignPath);
 let visualDraftEvalCases = [];
 try {
   const parsed = JSON.parse(visualDraftAgentEval);
@@ -369,6 +373,38 @@ const checks = [
       app.includes("Describe the harness you need...") &&
       !app.includes("Describe the connection, upload photos, old samples, sketches, pinouts, or BOM files.") &&
       !app.includes("Old harness samples")
+  },
+  {
+    name: "new request offers ai canvas and upload entry paths",
+    pass: app.includes('requestEntryModes = ["agent", "canvas", "upload"]') &&
+      app.includes("Chat with Easy Harness AI Agent") &&
+      app.includes("Canvas configurator") &&
+      app.includes("Upload design") &&
+      canvasConfigurator.includes("Upload design") &&
+      uploadDesign.includes("Upload prepared harness design")
+  },
+  {
+    name: "upload design path creates structured quote-review requests",
+    pass: app.includes("UploadDesignRequest") &&
+      app.includes("submitUploadDesignForUser") &&
+      app.includes("source: \"upload_design\"") &&
+      app.includes("sanitizeUploadDesignForStorage") &&
+      app.includes("UploadDesignThreadBlock") &&
+      app.includes("UploadDesignSideCard") &&
+      app.includes("sanitizeBlocksForStorage(firstMessage.blocks)") &&
+      app.includes("attachmentBlockFile(file, false)") &&
+      uploadDesign.includes("Engineering source required") &&
+      uploadDesign.includes("Submit for quote review")
+  },
+  {
+    name: "upload design keeps engineering files separate from rough ai intake",
+    pass: uploadDesign.includes("engineeringExtensions") &&
+      uploadDesign.includes("supportingExtensions") &&
+      uploadDesign.includes("fileDrafts: allFiles") &&
+      uploadDesign.includes("schemaVersion: \"easy-harness.upload-design.v1\"") &&
+      uploadDesign.includes("Use the AI Agent for rough ideas") &&
+      app.includes("Upload design needs at least one engineering source file") &&
+      app.includes("pruneServerBackedStorageForHostedMode")
   },
   {
     name: "draft basis table uses full customer thread and avoids BOM promise",

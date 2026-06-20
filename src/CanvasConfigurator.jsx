@@ -545,6 +545,12 @@ export default function CanvasConfigurator({
           >
             Canvas configurator
           </button>
+          <button
+            className={activeMode === "upload" ? "active" : ""}
+            onClick={() => onSwitchMode?.("upload")}
+          >
+            Upload design
+          </button>
         </div>
       </header>
 
