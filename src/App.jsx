@@ -38,6 +38,11 @@ import {
 } from "./supabaseClient.js";
 import AgentDraftLab from "./AgentDraftLab.jsx";
 import CanvasConfigurator from "./CanvasConfigurator.jsx";
+import {
+  calculateCanvasConfigurationPrice,
+  formatPriceCents,
+  priceEstimateToQuoteAmount,
+} from "./canvasPricing.js";
 import RequirementMapVisual from "./RequirementMapVisual.jsx";
 import UploadDesignRequest from "./UploadDesignRequest.jsx";
 
@@ -1643,9 +1648,15 @@ function canvasConfigurationSummaryText(configuration = {}) {
   const endpoints = configuration.endpoints || [];
   const mids = configuration.midElements || [];
   const wires = configuration.connectionGroups || [];
+  const estimate =
+    configuration.pricingEstimate ||
+    calculateCanvasConfigurationPrice(configuration);
   const lines = [
-    `Canvas configuration submitted for Easy Harness price review: ${configuration.title || "Harness configuration"}.`,
+    `Canvas configuration priced from Easy Harness internal catalog: ${configuration.title || "Harness configuration"}.`,
     `Quantity: ${configuration.quantity || 1}`,
+    estimate?.totalCents
+      ? `Catalog price: ${formatPriceCents(estimate.totalCents)} total, ${formatPriceCents(estimate.unitPriceCents)} each.`
+      : "Catalog price: not available",
     endpoints.length
       ? `Catalog endpoints: ${endpoints
           .map((endpoint) => `${endpoint.id} ${endpoint.manufacturer || ""} ${endpoint.mpn || endpoint.family || ""}`.trim())
@@ -1665,9 +1676,9 @@ function canvasConfigurationSummaryText(configuration = {}) {
           .join("; ")}`
       : "Circuits: no wires connected",
   ];
-  if (configuration.reviewItems?.length) {
+  if (estimate?.blockers?.length) {
     lines.push(
-      `Easy Harness will review: ${configuration.reviewItems.join("; ")}`,
+      `Checkout blockers: ${estimate.blockers.join("; ")}`,
     );
   }
   return lines.join("\n");
@@ -4203,6 +4214,46 @@ function App() {
     );
   }
 
+  async function releaseSupabaseCanvasQuote(request, configuration, messageIds = []) {
+    if (!supabase || !request?.supabaseId) return null;
+    const pricingEstimate =
+      configuration.pricingEstimate ||
+      calculateCanvasConfigurationPrice(configuration);
+    const { data, error } = await supabase.rpc(
+      "release_canvas_configuration_quote",
+      {
+        p_request_id: request.supabaseId,
+        p_title: configuration.title || request.title,
+        p_quantity: Number(configuration.quantity) || 1,
+        p_catalog_version:
+          pricingEstimate.catalogVersion || configuration.catalogVersion || "",
+        p_configuration: configuration,
+        p_pricing_summary: pricingEstimate,
+        p_basis_message_ids: messageIds.filter(isUuidLike),
+      },
+    );
+
+    if (error) {
+      recordServiceEvent(
+        "supabase-database",
+        "canvas_quote_release_failed",
+        "request",
+        request.id,
+        error.message,
+      );
+      throw new Error("Catalog price could not be released. Please try again.");
+    }
+
+    recordServiceEvent(
+      "supabase-database",
+      "canvas_quote_released",
+      "request",
+      request.id,
+      "Canvas catalog price saved as a released quote.",
+    );
+    return localQuoteFromSupabase(data);
+  }
+
   async function persistSupabasePayment(order, method, session, patch, status) {
     if (!supabase || !order?.supabaseId) return null;
     const { data, error } = await supabase.rpc("record_order_payment", {
@@ -6141,6 +6192,15 @@ function App() {
     if (!actor || actor.role !== "customer") {
       throw new Error("Please use a customer account to submit this configuration.");
     }
+    const pricingEstimate =
+      configuration.pricingEstimate ||
+      calculateCanvasConfigurationPrice(configuration);
+    if (!pricingEstimate.directCheckoutEligible) {
+      throw new Error(
+        pricingEstimate.blockers?.[0] ||
+          "Resolve catalog selections before checkout.",
+      );
+    }
     if (submittingRequestRef.current) return;
     if (
       supabaseConfigured &&
@@ -6156,14 +6216,18 @@ function App() {
     setSubmittingRequest(true);
     setSubmissionPhase("creating");
     try {
-      const text = canvasConfigurationSummaryText(configuration);
+      const pricedConfiguration = {
+        ...configuration,
+        pricingEstimate,
+      };
+      const text = canvasConfigurationSummaryText(pricedConfiguration);
       const firstMessage = {
         id: messageId(),
         role: "customer",
         createdAt: "Now",
         blocks: [
           { type: "text", text },
-          { type: "canvas_configuration", configuration },
+          { type: "canvas_configuration", configuration: pricedConfiguration },
         ],
       };
       const nextId =
@@ -6176,15 +6240,21 @@ function App() {
         customer: actor.name,
         title: configuration.title || "Canvas harness configuration",
         source: "canvas_configurator",
-        canvasConfiguration: configuration,
+        canvasConfiguration: pricedConfiguration,
         status: "in_review",
         checkResult: {
           status: "accepted",
           adapter: "canvas-configurator-v1",
           reason:
-            "Customer selected a structured canvas configuration from the catalog.",
+            "Customer selected a structured canvas configuration with an internal catalog price.",
           customer_summary: text,
-          missing: configuration.reviewItems || [],
+          missing: pricingEstimate.blockers || [],
+          pricing: {
+            source: "canvas_configurator",
+            pricingBookVersion: pricingEstimate.pricingBookVersion,
+            totalCents: pricingEstimate.totalCents,
+            currency: pricingEstimate.currency,
+          },
           checkedAt: new Date().toISOString(),
         },
         quotes: [],
@@ -6226,34 +6296,88 @@ function App() {
           }
         : nextRequest;
 
+      const quoteAmount = priceEstimateToQuoteAmount(pricingEstimate);
+      const draftQuote = createQuoteRecord(savedRequest, quoteAmount, {
+        id: "canvas-pricing-engine",
+      });
+      let releasedQuote = draftQuote;
+
+      if (supabase && savedRequest.supabaseId) {
+        releasedQuote = await releaseSupabaseCanvasQuote(
+          savedRequest,
+          pricedConfiguration,
+          [savedRequest.messages[0]?.id],
+        );
+      }
+
+      const pricedRequest = {
+        ...savedRequest,
+        status: "ready_to_confirm",
+        price: releasedQuote.amount,
+        quotes: [releasedQuote],
+        activeQuoteId: releasedQuote.id,
+        updated: "Just now",
+      };
+
+      const localOrder = createOrderFromRequest(pricedRequest, actor);
+      const savedOrder =
+        supabase && savedRequest.supabaseId
+          ? await confirmSupabaseRequestOrder(
+              pricedRequest,
+              releasedQuote,
+              localOrder,
+            )
+          : localOrder;
+
+      if (!savedOrder?.id) {
+        throw new Error("Checkout order could not be created. Please try again.");
+      }
+
+      const completedRequest = {
+        ...pricedRequest,
+        status: "confirmed",
+        confirmedQuoteId: releasedQuote.id,
+        quotes: pricedRequest.quotes.map((quote) =>
+          quote.id === releasedQuote.id
+            ? { ...quote, status: "confirmed" }
+            : quote,
+        ),
+      };
+
       setRequests((current) =>
-        dedupeRequestsByIdentity([savedRequest, ...current]),
+        dedupeRequestsByIdentity([completedRequest, ...current]),
       );
-      writeRequestMessageLedger(savedRequest, savedRequest.messages[0]);
+      setOrders((current) => [
+        savedOrder,
+        ...current.filter((order) => order.id !== savedOrder.id),
+      ]);
+      writeRequestMessageLedger(completedRequest, completedRequest.messages[0]);
+      writeShipmentLedger(savedOrder);
       addNotification({
         role: "staff",
-        requestId: savedRequest.id,
-        title: "New canvas configuration",
-        body: `${savedRequest.id} is ready for price review.`,
+        requestId: completedRequest.id,
+        title: "Canvas checkout order created",
+        body: `${savedOrder.id} was created from ${completedRequest.id}.`,
       });
       recordAudit(
-        "canvas_configuration_created",
+        "canvas_checkout_order_created",
         "request",
-        savedRequest.id,
-        `${actor.email} submitted ${savedRequest.title}.`,
+        completedRequest.id,
+        `${actor.email} submitted ${completedRequest.title} and entered checkout.`,
         actor,
       );
       recordServiceEvent(
         "canvas-configurator",
-        "configuration_saved",
-        "request",
-        savedRequest.id,
-        "Canvas configuration saved under Requests for Easy Harness price review.",
+        "checkout_order_created",
+        "order",
+        savedOrder.id,
+        "Canvas configuration priced from the internal catalog and converted to checkout.",
       );
       pendingCanvasConfigurationRef.current = null;
-      setActiveRequestId(savedRequest.id);
+      setActiveRequestId(completedRequest.id);
+      setActiveOrderId(savedOrder.id);
       setRequestEntryMode("canvas");
-      setUserView("thread");
+      setUserView("order");
     } finally {
       submittingRequestRef.current = false;
       setSubmittingRequest(false);
@@ -12124,8 +12248,8 @@ function staffRequestBuckets(requests) {
       ),
     },
     {
-      title: "Needs price review",
-      description: "Draft is ready enough for Easy Harness to prepare a price.",
+      title: "Needs quote",
+      description: "Draft is ready enough for Easy Harness to prepare a quote.",
       requests: requests.filter(
         (request) => request.status === "in_review" && !request.price,
       ),

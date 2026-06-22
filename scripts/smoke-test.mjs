@@ -36,8 +36,10 @@ const agentDraftLabPath = resolve(root, "src", "AgentDraftLab.jsx");
 const requirementMapVisualPath = resolve(root, "src", "RequirementMapVisual.jsx");
 const agentDraftLabEvalPath = resolve(root, "scripts", "agent-draft-lab-eval.mjs");
 const canvasConfiguratorPath = resolve(root, "src", "CanvasConfigurator.jsx");
+const canvasPricingPath = resolve(root, "src", "canvasPricing.js");
 const uploadDesignPath = resolve(root, "src", "UploadDesignRequest.jsx");
 const canvasCatalogSchemaPath = resolve(root, "supabase", "migrations", "202606220001_canvas_catalog_schema.sql");
+const canvasDirectPricingPath = resolve(root, "supabase", "migrations", "202606220002_canvas_direct_pricing.sql");
 
 function readIfExists(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -77,8 +79,10 @@ const agentDraftLabApi = readIfExists(agentDraftLabApiPath);
 const agentDraftLab = readIfExists(agentDraftLabPath);
 const agentDraftLabEval = readIfExists(agentDraftLabEvalPath);
 const canvasConfigurator = readIfExists(canvasConfiguratorPath);
+const canvasPricing = readIfExists(canvasPricingPath);
 const uploadDesign = readIfExists(uploadDesignPath);
 const canvasCatalogSql = readIfExists(canvasCatalogSchemaPath);
+const canvasDirectPricingSql = readIfExists(canvasDirectPricingPath);
 let visualDraftEvalCases = [];
 try {
   const parsed = JSON.parse(visualDraftAgentEval);
@@ -568,7 +572,7 @@ const checks = [
   {
     name: "staff queues are grouped by real work lanes",
     pass: app.includes("Needs customer details") &&
-      app.includes("Needs price review") &&
+      app.includes("Needs quote") &&
       app.includes("Payment needed") &&
       app.includes("requestNextAction") &&
       app.includes("orderNextAction")
@@ -621,7 +625,7 @@ const checks = [
       canvasCatalogSql.includes("grant select, insert, update on public.canvas_configurations to authenticated")
   },
   {
-    name: "canvas catalog keeps direct checkout behind pricing gate",
+    name: "canvas catalog starts with direct checkout behind pricing gate",
     pass: canvasCatalogSql.includes("direct_checkout_enabled boolean not null default false") &&
       canvasCatalogSql.includes("direct_checkout_allowed boolean not null default false") &&
       canvasCatalogSql.includes("direct_checkout_eligible boolean not null default false") &&
@@ -636,6 +640,44 @@ const checks = [
       canvasCatalogSql.includes("'digikey-api'") &&
       canvasCatalogSql.includes("'mouser-api'") &&
       canvasCatalogSql.includes("'nexar-api'")
+  },
+  {
+    name: "canvas pricing engine emits deterministic internal catalog totals",
+    pass: canvasPricing.includes("export function calculateCanvasConfigurationPrice") &&
+      canvasPricing.includes("pricingBookVersion") &&
+      canvasPricing.includes("connectorHousingPrices") &&
+      canvasPricing.includes("wireMeterPrices") &&
+      canvasPricing.includes("minimumHarnessPriceCents") &&
+      canvasPricing.includes("directCheckoutEligible") &&
+      canvasPricing.includes("priceEstimateToQuoteAmount")
+  },
+  {
+    name: "canvas configurator shows exact catalog price and checkout action",
+    pass: canvasConfigurator.includes("pricingEstimate") &&
+      canvasConfigurator.includes("Easy Harness internal catalog price") &&
+      canvasConfigurator.includes("Continue to checkout") &&
+      canvasConfigurator.includes("formatPriceCents(pricingPreview.totalCents)") &&
+      !canvasConfigurator.includes("Continue to quote") &&
+      !canvasConfigurator.includes("price review")
+  },
+  {
+    name: "canvas submission creates released quote and checkout order",
+    pass: app.includes("releaseSupabaseCanvasQuote") &&
+      app.includes("priceEstimateToQuoteAmount(pricingEstimate)") &&
+      app.includes("createQuoteRecord(savedRequest, quoteAmount") &&
+      app.includes("confirmSupabaseRequestOrder(") &&
+      app.includes('setUserView("order")') &&
+      app.includes("Canvas configuration priced from the internal catalog")
+  },
+  {
+    name: "canvas direct pricing migration seeds internal price book and release rpc",
+    pass: canvasDirectPricingSql.includes("'easy-harness-internal-price-book'") &&
+      canvasDirectPricingSql.includes("create or replace function public.release_canvas_configuration_quote") &&
+      canvasDirectPricingSql.includes("insert into public.canvas_configurations") &&
+      canvasDirectPricingSql.includes("insert into public.canvas_price_estimates") &&
+      canvasDirectPricingSql.includes("insert into public.quotes") &&
+      canvasDirectPricingSql.includes("status = 'ready_to_confirm'") &&
+      canvasDirectPricingSql.includes("grant execute on function public.release_canvas_configuration_quote")
   },
   {
     name: "stage 2A security hardening migration exists",

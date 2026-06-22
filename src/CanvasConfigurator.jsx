@@ -22,6 +22,10 @@ import {
   wireTypeById,
   wireTypes,
 } from "./harnessCatalog.js";
+import {
+  calculateCanvasConfigurationPrice,
+  formatPriceCents,
+} from "./canvasPricing.js";
 
 const defaultNodes = [];
 const defaultWires = [];
@@ -149,6 +153,8 @@ function summarizeNode(node) {
     return {
       id: node.id,
       type: "connector",
+      catalogPartId: part.id,
+      catalogFamilyId: family.id,
       manufacturer: part.manufacturer,
       family: family.name,
       mpn: part.mpn,
@@ -166,6 +172,7 @@ function summarizeNode(node) {
   return {
     id: node.id,
     type: "mid_element",
+    catalogElementId: elementType.id,
     elementType: elementType.id,
     label: elementType.label,
     selectedOption: node.option,
@@ -184,10 +191,10 @@ function buildReviewItems(nodes, wires) {
     items.push("Connect at least two pins to define a circuit.");
   }
   if (nodes.some((node) => node.type === "connector" && !connectorPartById(node.partId)?.compatibleTerminals?.length)) {
-    items.push("Easy Harness will review terminals or soldering method for breakout-board endpoints.");
+    items.push("Breakout-board endpoints use the internal solder-pad assembly standard.");
   }
   if (nodes.some((node) => node.type === "connector" && connectorPartById(node.partId)?.sealed)) {
-    items.push("Easy Harness will review seals, wedges, and backshell details.");
+    items.push("Sealed endpoints include the internal seal and wedge accessory standard.");
   }
   return items;
 }
@@ -489,7 +496,7 @@ export default function CanvasConfigurator({
       };
     });
 
-    return {
+    const baseConfiguration = {
       schemaVersion: "easy-harness.canvas-configuration.v1",
       catalogVersion: harnessCatalogVersion,
       source: "canvas_configurator",
@@ -500,20 +507,59 @@ export default function CanvasConfigurator({
       connectionGroups,
       knownRequirements: {
         selectedFromCatalog: true,
-        pricePath: "Easy Harness price review before order",
+        pricePath: "Easy Harness internal catalog price",
       },
-      reviewItems,
       visualDraftData: {
         nodes: layoutNodes,
         wires,
       },
     };
+
+    const pricingEstimate = calculateCanvasConfigurationPrice(baseConfiguration);
+    return {
+      ...baseConfiguration,
+      pricingEstimate,
+      reviewItems: [
+        ...reviewItems,
+        ...pricingEstimate.blockers,
+      ],
+    };
   };
+
+  const pricingPreview = calculateCanvasConfigurationPrice({
+    schemaVersion: "easy-harness.canvas-configuration.v1",
+    catalogVersion: harnessCatalogVersion,
+    source: "canvas_configurator",
+    title: configurationName.trim() || "Canvas harness configuration",
+    quantity: Number(quantity) || 1,
+    endpoints: nodes.filter((node) => node.type === "connector").map(summarizeNode),
+    midElements: nodes.filter((node) => node.type === "mid").map(summarizeNode),
+    connectionGroups: wires.map((wire) => {
+      const type = wireTypeById(wire.wireType);
+      return {
+        id: wire.id,
+        start: wire.from,
+        end: wire.to,
+        startLabel: endpointLabel(wire.from),
+        endLabel: endpointLabel(wire.to),
+        lengthMm: Number(wire.lengthMm),
+        wireType: type.label,
+        wireTypeId: type.id,
+        wireGaugeAwg: Number(wire.gauge),
+        wireColor: wire.color,
+      };
+    }),
+  });
+  const canContinueToOrder = pricingPreview.directCheckoutEligible;
 
   const submitConfiguration = async () => {
     const configuration = buildConfiguration();
     if (!configuration.connectionGroups.length) {
-      setSubmitError("Connect at least two pins before continuing to quote.");
+      setSubmitError("Connect at least two pins before continuing to checkout.");
+      return;
+    }
+    if (!configuration.pricingEstimate?.directCheckoutEligible) {
+      setSubmitError(configuration.pricingEstimate?.blockers?.[0] || "Resolve catalog selections before checkout.");
       return;
     }
     setSubmitError("");
@@ -530,7 +576,7 @@ export default function CanvasConfigurator({
         <div>
           <span className="eyebrow">New request</span>
           <h1>Configure a harness on canvas</h1>
-          <p>Choose catalog parts, connect pins, set quantity, then continue to quote.</p>
+          <p>Choose catalog parts, connect pins, set quantity, then continue to checkout.</p>
         </div>
         <div className="request-entry-switch compact" aria-label="Request entry mode">
           <button
@@ -706,6 +752,13 @@ export default function CanvasConfigurator({
               ? `Configured item: ${configuredSummary}`
               : "Start by adding a connector or mid element"}
           </strong>
+          {nodes.length || wires.length ? (
+            <span>
+              {canContinueToOrder
+                ? `${formatPriceCents(pricingPreview.totalCents)} total - ${formatPriceCents(pricingPreview.unitPriceCents)} each - internal catalog price`
+                : pricingPreview.blockers[0] || "Complete catalog selections to price this harness"}
+            </span>
+          ) : null}
           {submitError && <small>{submitError}</small>}
         </div>
         <label className="canvas-quantity-field">
@@ -720,9 +773,9 @@ export default function CanvasConfigurator({
         <button
           className="canvas-submit-button"
           onClick={submitConfiguration}
-          disabled={submitting}
+          disabled={submitting || !canContinueToOrder}
         >
-          {submitting ? "Saving..." : "Continue to quote"}
+          {submitting ? "Saving..." : "Continue to checkout"}
         </button>
       </footer>
 
