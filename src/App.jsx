@@ -8213,7 +8213,7 @@ function StartScreen({
           className={requestEntryMode === "agent" ? "active" : ""}
           onClick={() => setRequestEntryMode?.("agent")}
         >
-          Chat with Easy Harness AI Agent
+          Chat with AI
         </button>
         <button
           className={requestEntryMode === "canvas" ? "active" : ""}

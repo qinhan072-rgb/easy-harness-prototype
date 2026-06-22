@@ -537,7 +537,7 @@ export default function CanvasConfigurator({
             className={activeMode === "agent" ? "active" : ""}
             onClick={() => onSwitchMode?.("agent")}
           >
-            Chat with Easy Harness AI Agent
+            Chat with AI
           </button>
           <button
             className={activeMode === "canvas" ? "active" : ""}

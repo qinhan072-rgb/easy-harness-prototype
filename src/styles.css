@@ -7800,8 +7800,8 @@ button:disabled {
 
 .upload-quantity-card {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 86px auto;
-  gap: 8px;
+  grid-template-columns: 52px minmax(74px, 1fr) 28px;
+  gap: 7px;
   align-items: center;
   min-height: 48px;
   padding: 8px 10px;
@@ -7810,6 +7810,10 @@ button:disabled {
   color: var(--text);
   font-size: 13px;
   font-weight: 650;
+}
+
+.upload-quantity-card span {
+  white-space: nowrap;
 }
 
 .upload-quantity-card input {
@@ -8193,7 +8197,7 @@ button:disabled {
   }
 
   .upload-quantity-card {
-    grid-template-columns: minmax(0, 1fr) 92px auto;
+    grid-template-columns: 52px minmax(84px, 1fr) 28px;
   }
 
   .upload-actions {

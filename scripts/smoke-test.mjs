@@ -377,7 +377,7 @@ const checks = [
   {
     name: "new request offers ai canvas and upload entry paths",
     pass: app.includes('requestEntryModes = ["agent", "canvas", "upload"]') &&
-      app.includes("Chat with Easy Harness AI Agent") &&
+      app.includes("Chat with AI") &&
       app.includes("Canvas configurator") &&
       app.includes("Upload design") &&
       canvasConfigurator.includes("Upload design") &&

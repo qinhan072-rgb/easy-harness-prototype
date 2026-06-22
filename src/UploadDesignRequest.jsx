@@ -432,7 +432,7 @@ export default function UploadDesignRequest({
             onClick={() => onSwitchMode?.("agent")}
             type="button"
           >
-            Chat with Easy Harness AI Agent
+            Chat with AI
           </button>
           <button
             className={activeMode === "canvas" ? "active" : ""}
@@ -805,7 +805,7 @@ function DesignPackageStep({
               <div className="upload-quantity-grid">
                 {(activeHarness.quantities || []).map((quantity, index) => (
                   <label className="upload-quantity-card" key={`${activeHarness.id}-${index}`}>
-                    <span>Quantity {String.fromCharCode(65 + index)}</span>
+                    <span>Qty {String.fromCharCode(65 + index)}</span>
                     <input
                       type="number"
                       min="1"
