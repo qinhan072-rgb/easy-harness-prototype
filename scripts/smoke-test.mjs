@@ -657,8 +657,18 @@ const checks = [
       canvasConfigurator.includes("Easy Harness internal catalog price") &&
       canvasConfigurator.includes("Continue to checkout") &&
       canvasConfigurator.includes("formatPriceCents(pricingPreview.totalCents)") &&
+      canvasConfigurator.includes("pricingPreview.blockers[0]") &&
       !canvasConfigurator.includes("Continue to quote") &&
       !canvasConfigurator.includes("price review")
+  },
+  {
+    name: "canvas configurator restores draft and chooses compatible default wire gauge",
+    pass: canvasConfigurator.includes("readCanvasDraft") &&
+      canvasConfigurator.includes("clearCanvasDraft") &&
+      canvasConfigurator.includes("draftStorageKey") &&
+      canvasConfigurator.includes("defaultGaugeForEndpoints") &&
+      canvasConfigurator.includes("preferredGauges") &&
+      app.includes("easy-harness.canvasDraft.")
   },
   {
     name: "canvas submission creates released quote and checkout order",

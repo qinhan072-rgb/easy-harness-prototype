@@ -8292,6 +8292,7 @@ function StartScreen({
           onSwitchMode={setRequestEntryMode}
           onSubmitConfiguration={submitCanvasConfiguration}
           submitting={submittingRequest}
+          draftStorageKey={`easy-harness.canvasDraft.${currentUser?.id || "visitor"}`}
         />
       </section>
     );

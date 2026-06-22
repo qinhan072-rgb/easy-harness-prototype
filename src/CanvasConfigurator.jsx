@@ -29,6 +29,7 @@ import {
 
 const defaultNodes = [];
 const defaultWires = [];
+const canvasDraftVersion = 1;
 
 const CONNECTOR_TOP = 24;
 const CONNECTOR_LEFT_X = 26;
@@ -54,6 +55,25 @@ function pinList(count) {
 
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
+}
+
+function readCanvasDraft(storageKey) {
+  if (!storageKey || typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(storageKey);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed?.version !== canvasDraftVersion) return null;
+    if (!Array.isArray(parsed.nodes) || !Array.isArray(parsed.wires)) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function clearCanvasDraft(storageKey) {
+  if (!storageKey || typeof window === "undefined") return;
+  window.localStorage.removeItem(storageKey);
 }
 
 function createConnectorId(nodes, side) {
@@ -146,6 +166,37 @@ function endpointLabel(endpoint) {
   return `${endpoint.pinId} of ${endpoint.nodeId}`;
 }
 
+function nodeAwgRange(node) {
+  if (!node) return [10, 32];
+  if (node.type === "connector") return connectorPartById(node.partId).awgRange;
+  if (node.type === "mid") return midElementTypeById(node.elementType).awgRange;
+  return [10, 32];
+}
+
+function rangeIncludes(range, gauge) {
+  const [min, max] = range.map(Number);
+  return Number.isFinite(min) && Number.isFinite(max) && gauge >= min && gauge <= max;
+}
+
+function defaultGaugeForEndpoints(nodes, firstEndpoint, secondEndpoint) {
+  const firstRange = nodeAwgRange(nodes.find((node) => node.id === firstEndpoint?.nodeId));
+  const secondRange = nodeAwgRange(nodes.find((node) => node.id === secondEndpoint?.nodeId));
+  const wireType = wireTypeById(defaultWireTypeId);
+  const preferredGauges = [22, 24, 20, 26, 18, 28, 16, 30, 14, 12, 10];
+  return (
+    preferredGauges.find(
+      (gauge) =>
+        wireType.gauges.includes(gauge) &&
+        rangeIncludes(firstRange, gauge) &&
+        rangeIncludes(secondRange, gauge),
+    ) ||
+    wireType.gauges.find(
+      (gauge) => rangeIncludes(firstRange, gauge) && rangeIncludes(secondRange, gauge),
+    ) ||
+    22
+  );
+}
+
 function summarizeNode(node) {
   if (node.type === "connector") {
     const part = connectorPartById(node.partId);
@@ -204,13 +255,15 @@ export default function CanvasConfigurator({
   onSwitchMode,
   onSubmitConfiguration,
   submitting = false,
+  draftStorageKey = "",
 }) {
+  const initialDraft = readCanvasDraft(draftStorageKey);
   const [configurationName, setConfigurationName] = useState(
-    "New canvas harness configuration",
+    initialDraft?.configurationName || "New canvas harness configuration",
   );
-  const [quantity, setQuantity] = useState(10);
-  const [nodes, setNodes] = useState(defaultNodes);
-  const [wires, setWires] = useState(defaultWires);
+  const [quantity, setQuantity] = useState(initialDraft?.quantity || 10);
+  const [nodes, setNodes] = useState(initialDraft?.nodes || defaultNodes);
+  const [wires, setWires] = useState(initialDraft?.wires || defaultWires);
   const [pendingEndpoint, setPendingEndpoint] = useState(null);
   const [connectorPicker, setConnectorPicker] = useState(null);
   const [wireGeometry, setWireGeometry] = useState({});
@@ -318,6 +371,25 @@ export default function CanvasConfigurator({
       window.removeEventListener("resize", updateGeometry);
     };
   }, [layoutNodes, wires, connectorPicker, nodeById]);
+
+  useEffect(() => {
+    if (!draftStorageKey || typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(
+        draftStorageKey,
+        JSON.stringify({
+          version: canvasDraftVersion,
+          configurationName,
+          quantity,
+          nodes,
+          wires,
+          updatedAt: new Date().toISOString(),
+        }),
+      );
+    } catch {
+      // Draft restore is a convenience; checkout should not depend on browser storage.
+    }
+  }, [configurationName, draftStorageKey, nodes, quantity, wires]);
 
   const registerPin = (endpoint) => (element) => {
     const key = endpointKey(endpoint);
@@ -451,6 +523,7 @@ export default function CanvasConfigurator({
       return (a === first && b === second) || (a === second && b === first);
     });
     if (!duplicate) {
+      const defaultGauge = defaultGaugeForEndpoints(nodes, pendingEndpoint, endpoint);
       setWires((current) => [
         ...current,
         {
@@ -459,7 +532,7 @@ export default function CanvasConfigurator({
           to: endpoint,
           lengthMm: 100,
           wireType: defaultWireTypeId,
-          gauge: 22,
+          gauge: defaultGauge,
           color: "Black",
         },
       ]);
@@ -565,6 +638,7 @@ export default function CanvasConfigurator({
     setSubmitError("");
     try {
       await onSubmitConfiguration?.(configuration);
+      clearCanvasDraft(draftStorageKey);
     } catch (error) {
       setSubmitError(error?.message || "This configuration could not be saved.");
     }
@@ -753,11 +827,14 @@ export default function CanvasConfigurator({
               : "Start by adding a connector or mid element"}
           </strong>
           {nodes.length || wires.length ? (
-            <span>
-              {canContinueToOrder
-                ? `${formatPriceCents(pricingPreview.totalCents)} total - ${formatPriceCents(pricingPreview.unitPriceCents)} each - internal catalog price`
-                : pricingPreview.blockers[0] || "Complete catalog selections to price this harness"}
-            </span>
+            <>
+              <span className="canvas-price-line">
+                {formatPriceCents(pricingPreview.totalCents)} total - {formatPriceCents(pricingPreview.unitPriceCents)} each - internal catalog price
+              </span>
+              {!canContinueToOrder && (
+                <small>{pricingPreview.blockers[0] || "Complete catalog selections before checkout."}</small>
+              )}
+            </>
           ) : null}
           {submitError && <small>{submitError}</small>}
         </div>
