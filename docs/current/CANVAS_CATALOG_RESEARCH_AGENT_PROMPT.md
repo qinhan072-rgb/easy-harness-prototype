@@ -10,6 +10,29 @@ The target user selects connectors, terminals, wire, cable, seals, accessories, 
 
 Do not create a drawing tool database. Create a purchasable and manufacturable harness configuration database.
 
+## Implementation Target
+
+Use the existing Easy Harness Supabase migration as the target schema:
+
+`supabase/migrations/202606220001_canvas_catalog_schema.sql`
+
+Do not design a separate schema unless a critical gap is found. If a gap is found, report the gap separately instead of silently changing field names. Normalized output must map to these tables:
+
+- `catalog_sources`
+- `catalog_manufacturers`
+- `catalog_connector_families`
+- `catalog_connector_housings`
+- `catalog_terminals`
+- `catalog_accessories`
+- `catalog_wires`
+- `catalog_mid_elements`
+- `catalog_compatibility_edges`
+- `catalog_price_snapshots`
+- `catalog_labor_operations`
+- `catalog_pricing_rules`
+
+Use `canvas_configurations` and `canvas_price_estimates` only for generated customer configurations and estimates, not for catalog seed data.
+
 ## Non-Negotiable Rules
 
 1. Use primary, official, or commercially reliable sources first.
@@ -384,8 +407,7 @@ Create these deliverables:
    - labor_operations.jsonl
    - pricing_rules.jsonl
 3. `catalog_sql/`
-   - proposed Postgres schema
-   - seed SQL or Supabase migration draft
+   - seed SQL or Supabase migration draft targeting `202606220001_canvas_catalog_schema.sql`
    - RLS notes if customer-specific saved configurations are included
 4. `catalog_quality_report.md`
    - coverage by manufacturer and family

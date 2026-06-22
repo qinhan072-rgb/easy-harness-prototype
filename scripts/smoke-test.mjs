@@ -37,6 +37,7 @@ const requirementMapVisualPath = resolve(root, "src", "RequirementMapVisual.jsx"
 const agentDraftLabEvalPath = resolve(root, "scripts", "agent-draft-lab-eval.mjs");
 const canvasConfiguratorPath = resolve(root, "src", "CanvasConfigurator.jsx");
 const uploadDesignPath = resolve(root, "src", "UploadDesignRequest.jsx");
+const canvasCatalogSchemaPath = resolve(root, "supabase", "migrations", "202606220001_canvas_catalog_schema.sql");
 
 function readIfExists(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -77,6 +78,7 @@ const agentDraftLab = readIfExists(agentDraftLabPath);
 const agentDraftLabEval = readIfExists(agentDraftLabEvalPath);
 const canvasConfigurator = readIfExists(canvasConfiguratorPath);
 const uploadDesign = readIfExists(uploadDesignPath);
+const canvasCatalogSql = readIfExists(canvasCatalogSchemaPath);
 let visualDraftEvalCases = [];
 try {
   const parsed = JSON.parse(visualDraftAgentEval);
@@ -599,6 +601,41 @@ const checks = [
       rlsSql.includes("Only admins can change profile role") &&
       rlsSql.includes("requests_select_owner_or_staff") &&
       rlsSql.includes("audit_logs_admin_select")
+  },
+  {
+    name: "canvas catalog schema migration exists",
+    pass: canvasCatalogSql.includes("create table if not exists public.catalog_connector_families") &&
+      canvasCatalogSql.includes("create table if not exists public.catalog_connector_housings") &&
+      canvasCatalogSql.includes("create table if not exists public.catalog_terminals") &&
+      canvasCatalogSql.includes("create table if not exists public.catalog_accessories") &&
+      canvasCatalogSql.includes("create table if not exists public.catalog_wires") &&
+      canvasCatalogSql.includes("create table if not exists public.catalog_price_snapshots") &&
+      canvasCatalogSql.includes("create table if not exists public.canvas_configurations")
+  },
+  {
+    name: "canvas catalog rls and grants protect customer data",
+    pass: canvasCatalogSql.includes("alter table public.catalog_connector_families enable row level security") &&
+      canvasCatalogSql.includes("create policy catalog_connector_housings_select_active") &&
+      canvasCatalogSql.includes("create policy canvas_configurations_select_owner_or_staff") &&
+      canvasCatalogSql.includes("grant select on") &&
+      canvasCatalogSql.includes("grant select, insert, update on public.canvas_configurations to authenticated")
+  },
+  {
+    name: "canvas catalog keeps direct checkout behind pricing gate",
+    pass: canvasCatalogSql.includes("direct_checkout_enabled boolean not null default false") &&
+      canvasCatalogSql.includes("direct_checkout_allowed boolean not null default false") &&
+      canvasCatalogSql.includes("direct_checkout_eligible boolean not null default false") &&
+      canvasCatalogSql.includes("needs_price_release") &&
+      canvasCatalogSql.includes("direct_checkout_gate_v1")
+  },
+  {
+    name: "canvas catalog records source-backed pricing evidence",
+    pass: canvasCatalogSql.includes("catalog_compatibility_edges") &&
+      canvasCatalogSql.includes("price_breaks jsonb") &&
+      canvasCatalogSql.includes("expires_at timestamptz") &&
+      canvasCatalogSql.includes("'digikey-api'") &&
+      canvasCatalogSql.includes("'mouser-api'") &&
+      canvasCatalogSql.includes("'nexar-api'")
   },
   {
     name: "stage 2A security hardening migration exists",
