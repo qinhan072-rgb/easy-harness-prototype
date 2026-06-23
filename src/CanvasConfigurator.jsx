@@ -270,6 +270,7 @@ export default function CanvasConfigurator({
   const [wireModalId, setWireModalId] = useState("");
   const [midModalId, setMidModalId] = useState("");
   const [submitError, setSubmitError] = useState("");
+  const [confirmingConfiguration, setConfirmingConfiguration] = useState(null);
   const canvasRef = useRef(null);
   const pinRefs = useRef(new Map());
 
@@ -625,7 +626,7 @@ export default function CanvasConfigurator({
   });
   const canContinueToOrder = pricingPreview.directCheckoutEligible;
 
-  const submitConfiguration = async () => {
+  const openCheckoutConfirmation = () => {
     const configuration = buildConfiguration();
     if (!configuration.connectionGroups.length) {
       setSubmitError("Connect at least two pins before continuing to checkout.");
@@ -636,11 +637,18 @@ export default function CanvasConfigurator({
       return;
     }
     setSubmitError("");
+    setConfirmingConfiguration(configuration);
+  };
+
+  const submitConfiguration = async () => {
+    const configuration = confirmingConfiguration || buildConfiguration();
     try {
       await onSubmitConfiguration?.(configuration);
       clearCanvasDraft(draftStorageKey);
+      setConfirmingConfiguration(null);
     } catch (error) {
       setSubmitError(error?.message || "This configuration could not be saved.");
+      setConfirmingConfiguration(null);
     }
   };
 
@@ -849,7 +857,7 @@ export default function CanvasConfigurator({
         </label>
         <button
           className="canvas-submit-button"
-          onClick={submitConfiguration}
+          onClick={openCheckoutConfirmation}
           disabled={submitting || !canContinueToOrder}
         >
           {submitting ? "Saving..." : "Continue to checkout"}
@@ -874,6 +882,15 @@ export default function CanvasConfigurator({
             updateMidElement(selectedMid.id, patch);
             setMidModalId("");
           }}
+        />
+      )}
+      {confirmingConfiguration && (
+        <CanvasCheckoutConfirmationModal
+          configuration={confirmingConfiguration}
+          estimate={confirmingConfiguration.pricingEstimate}
+          submitting={submitting}
+          onClose={() => setConfirmingConfiguration(null)}
+          onConfirm={submitConfiguration}
         />
       )}
     </div>
@@ -1134,6 +1151,83 @@ function ConnectorVisual({ visual }) {
     <div className={`connector-visual ${visual || "rect-housing"}`} aria-hidden="true">
       <span />
       <i />
+    </div>
+  );
+}
+
+function CanvasCheckoutConfirmationModal({
+  configuration,
+  estimate,
+  submitting,
+  onClose,
+  onConfirm,
+}) {
+  const endpoints = configuration.endpoints || [];
+  const midElements = configuration.midElements || [];
+  const wires = configuration.connectionGroups || [];
+
+  return (
+    <div className="canvas-modal-layer" role="presentation">
+      <section
+        className="canvas-modal canvas-checkout-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Confirm canvas checkout"
+      >
+        <button className="canvas-modal-close" onClick={onClose} aria-label="Close">
+          <X size={15} />
+        </button>
+        <div className="modal-title-row">
+          <Cable size={18} />
+          <h2>Confirm checkout price</h2>
+        </div>
+        <div className="canvas-checkout-items">
+          <div>
+            <span>Harness</span>
+            <strong>{configuration.title || "Canvas harness configuration"}</strong>
+          </div>
+          <div>
+            <span>Quantity</span>
+            <strong>{estimate.quantity}</strong>
+          </div>
+          <div>
+            <span>Unit price</span>
+            <strong>{formatPriceCents(estimate.unitPriceCents)}</strong>
+          </div>
+          <div>
+            <span>Harness total</span>
+            <strong>{formatPriceCents(estimate.totalCents)}</strong>
+          </div>
+        </div>
+        <div className="canvas-checkout-summary">
+          <div>
+            <span>Catalog basis</span>
+            <strong>
+              {endpoints.length} connector + {midElements.length} mid element + {wires.length} wire
+            </strong>
+          </div>
+          <div>
+            <span>Price source</span>
+            <strong>Easy Harness internal catalog price</strong>
+          </div>
+          <div>
+            <span>Shipping and import charges</span>
+            <strong>Handled on the order page</strong>
+          </div>
+        </div>
+        <p>
+          Review this price before creating the checkout order. You can close this
+          window to keep editing the canvas.
+        </p>
+        <div className="modal-actions canvas-checkout-actions">
+          <button className="secondary-action" onClick={onClose} disabled={submitting}>
+            Keep editing
+          </button>
+          <button className="modal-set-button" onClick={onConfirm} disabled={submitting}>
+            {submitting ? "Creating..." : "Create order"}
+          </button>
+        </div>
+      </section>
     </div>
   );
 }

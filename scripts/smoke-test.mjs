@@ -656,6 +656,9 @@ const checks = [
     pass: canvasConfigurator.includes("pricingEstimate") &&
       canvasConfigurator.includes("Easy Harness internal catalog price") &&
       canvasConfigurator.includes("Continue to checkout") &&
+      canvasConfigurator.includes("Confirm checkout price") &&
+      canvasConfigurator.includes("Create order") &&
+      canvasConfigurator.includes("CanvasCheckoutConfirmationModal") &&
       canvasConfigurator.includes("formatPriceCents(pricingPreview.totalCents)") &&
       canvasConfigurator.includes("pricingPreview.blockers[0]") &&
       !canvasConfigurator.includes("Continue to quote") &&
@@ -678,6 +681,14 @@ const checks = [
       app.includes("confirmSupabaseRequestOrder(") &&
       app.includes('setUserView("order")') &&
       app.includes("Canvas configuration priced from the internal catalog")
+  },
+  {
+    name: "canvas checkout keeps structured configuration visible on order",
+    pass: app.includes("canvasConfiguration: canvasConfigurationFromRequest(request)") &&
+      app.includes("CanvasOrderSnapshotSummary") &&
+      app.includes("canvas-order-summary") &&
+      app.includes("Catalog quote ready") &&
+      !app.includes("Price review needed")
   },
   {
     name: "canvas direct pricing migration seeds internal price book and release rpc",

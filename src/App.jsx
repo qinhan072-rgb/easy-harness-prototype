@@ -3100,6 +3100,7 @@ function createOrderFromRequest(request, user) {
     snapshot: {
       requestTitle: request.title,
       customerSummary: firstCustomerText,
+      canvasConfiguration: canvasConfigurationFromRequest(request),
       requestFiles: collectRequestFileNames(request),
       latestEasyBlocks: sanitizeBlocksForStorage(lastEasyMessage?.blocks || []),
       confirmedQuote: quote,
@@ -4241,7 +4242,7 @@ function App() {
         request.id,
         error.message,
       );
-      throw new Error("Catalog price could not be released. Please try again.");
+      throw new Error(error.message || "Catalog price could not be released. Please try again.");
     }
 
     recordServiceEvent(
@@ -10156,13 +10157,13 @@ function UploadDesignSideCard({ uploadDesign = {} }) {
 function CanvasConfigurationSideCard({ configuration = {} }) {
   const endpoints = configuration.endpoints || [];
   const wires = configuration.connectionGroups || [];
+  const estimate = configuration.pricingEstimate || null;
   return (
     <div className="side-card request-summary-card canvas-side-card">
       <span className="summary-kicker">Current step</span>
-      <h2>Price review needed</h2>
+      <h2>Catalog quote ready</h2>
       <p>
-        This is a selected canvas configuration. Easy Harness will release the
-        price before it can become an order.
+        This canvas configuration uses the Easy Harness internal catalog price.
       </p>
       <div className="summary-section compact-meta">
         <span>Configured item</span>
@@ -10171,18 +10172,42 @@ function CanvasConfigurationSideCard({ configuration = {} }) {
           <em>{configuration.quantity || 1} pcs</em>
           <em>{endpoints.length} endpoint{endpoints.length === 1 ? "" : "s"}</em>
           <em>{wires.length} wire{wires.length === 1 ? "" : "s"}</em>
+          {estimate?.totalCents ? (
+            <em>{formatPriceCents(estimate.totalCents)}</em>
+          ) : null}
         </div>
       </div>
-      {!!configuration.reviewItems?.length && (
+      {!!estimate?.blockers?.length && (
         <div className="summary-section review-items">
-          <span>Easy Harness will review</span>
+          <span>Checkout blockers</span>
           <ul>
-            {configuration.reviewItems.slice(0, 4).map((item) => (
+            {estimate.blockers.slice(0, 4).map((item) => (
               <li key={item}>{item}</li>
             ))}
           </ul>
         </div>
       )}
+    </div>
+  );
+}
+
+function CanvasOrderSnapshotSummary({ configuration = {} }) {
+  const estimate = configuration.pricingEstimate || {};
+  const endpoints = configuration.endpoints || [];
+  const midElements = configuration.midElements || [];
+  const wires = configuration.connectionGroups || [];
+
+  return (
+    <div className="canvas-order-summary">
+      <span>{endpoints.length} connector</span>
+      <span>{midElements.length} mid element</span>
+      <span>{wires.length} wire</span>
+      {estimate.unitPriceCents ? (
+        <span>{formatPriceCents(estimate.unitPriceCents)} each</span>
+      ) : null}
+      {estimate.totalCents ? (
+        <span>{formatPriceCents(estimate.totalCents)} harness total</span>
+      ) : null}
     </div>
   );
 }
@@ -10280,6 +10305,11 @@ function OrderWorkspace({
               <div>
                 <strong>{order.title}</strong>
                 <p>{order.snapshot.customerSummary}</p>
+                {order.snapshot.canvasConfiguration && (
+                  <CanvasOrderSnapshotSummary
+                    configuration={order.snapshot.canvasConfiguration}
+                  />
+                )}
                 {!!order.snapshot.requestFiles.length && (
                   <div className="file-strip compact">
                     {order.snapshot.requestFiles.map((file) => (
