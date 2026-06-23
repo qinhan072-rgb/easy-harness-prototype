@@ -284,7 +284,7 @@ const policyById = Object.fromEntries(
 );
 
 const orderStatusCopy = {
-  checkout: "Order in preparation",
+  checkout: "Checkout",
   awaiting_bank_transfer: "Bank transfer pending",
   paid: "Scheduled",
   scheduled: "Scheduled",
@@ -10283,7 +10283,7 @@ function OrderWorkspace({
             <div className="thread-title">
               <div>
                 <span className="eyebrow">Order</span>
-                <h1>{isPaid ? "Order details" : "Order in preparation"}</h1>
+                <h1>{isPaid ? "Order details" : "Checkout"}</h1>
                 <p>
                   {order.id} from {order.requestId}. Review the confirmed
                   harness quote, delivery basis, and payment path.
@@ -10619,7 +10619,7 @@ function OrderWorkspace({
               <CircleDollarSign size={19} />
             </div>
             <div className="summary-product">
-              <span className="summary-status">Order in preparation</span>
+              <span className="summary-status">{orderStatusCopy[order.status] || "Checkout"}</span>
               <strong>{order.title}</strong>
               <small>
                 Add delivery details and choose a payment method when everything

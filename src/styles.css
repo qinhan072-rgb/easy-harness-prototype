@@ -7160,10 +7160,13 @@ button:disabled {
   background: var(--teal);
   color: #fff;
   font-weight: 700;
+  white-space: nowrap;
 }
 
 .canvas-submit-button {
   grid-column: 3;
+  min-width: 210px;
+  padding: 0 20px;
 }
 
 .canvas-submit-button:disabled {
@@ -7268,7 +7271,13 @@ button:disabled {
 }
 
 .canvas-checkout-actions .modal-set-button {
-  width: 132px;
+  width: 160px;
+  min-height: 44px;
+}
+
+.canvas-checkout-actions .secondary-action {
+  width: 160px;
+  min-height: 44px;
 }
 
 .modal-pin-row {

@@ -18,6 +18,7 @@ import {
   harnessCatalogVersion,
   midElementTypeById,
   midElementTypes,
+  partForFamilyPinCount,
   partsForFamily,
   wireTypeById,
   wireTypes,
@@ -168,7 +169,13 @@ function endpointLabel(endpoint) {
 
 function nodeAwgRange(node) {
   if (!node) return [10, 32];
-  if (node.type === "connector") return connectorPartById(node.partId).awgRange;
+  if (node.type === "connector") {
+    const savedPart = connectorPartById(node.partId);
+    const part = savedPart.pinCounts.includes(Number(node.pinCount))
+      ? savedPart
+      : partForFamilyPinCount(savedPart.familyId, node.pinCount);
+    return part.awgRange;
+  }
   if (node.type === "mid") return midElementTypeById(node.elementType).awgRange;
   return [10, 32];
 }
@@ -199,7 +206,10 @@ function defaultGaugeForEndpoints(nodes, firstEndpoint, secondEndpoint) {
 
 function summarizeNode(node) {
   if (node.type === "connector") {
-    const part = connectorPartById(node.partId);
+    const savedPart = connectorPartById(node.partId);
+    const part = savedPart.pinCounts.includes(Number(node.pinCount))
+      ? savedPart
+      : partForFamilyPinCount(savedPart.familyId, node.pinCount);
     const family = connectorFamilyById(part.familyId);
     return {
       id: node.id,
@@ -414,6 +424,17 @@ export default function CanvasConfigurator({
       partId: part.id,
       pinCount: part.defaultPinCount,
       option: part.options[0],
+    });
+  };
+
+  const changeConnectorPinCount = (nodeId, pinCount) => {
+    const node = nodes.find((item) => item.id === nodeId);
+    const currentPart = connectorPartById(node?.partId);
+    const nextPart = partForFamilyPinCount(currentPart.familyId, pinCount);
+    updateConnector(nodeId, {
+      partId: nextPart.id,
+      pinCount: nextPart.defaultPinCount,
+      option: nextPart.options.includes(node?.option) ? node.option : nextPart.options[0],
     });
   };
 
@@ -744,7 +765,7 @@ export default function CanvasConfigurator({
                 registerPin={registerPin}
                 onDelete={() => deleteNode(node.id)}
                 onFamilyChange={(familyId) => changeConnectorFamily(node.id, familyId)}
-                onPinCountChange={(pinCount) => updateConnector(node.id, { pinCount })}
+                onPinCountChange={(pinCount) => changeConnectorPinCount(node.id, pinCount)}
                 onOptionChange={(option) => updateConnector(node.id, { option })}
                 onAddConnector={() => {
                   const slotIndex = connectorSlotIndex(nodes, node.side);
@@ -909,9 +930,13 @@ function ConnectorNode({
   onOptionChange,
   onAddConnector,
 }) {
-  const part = connectorPartById(node.partId);
+  const savedPart = connectorPartById(node.partId);
+  const part = savedPart.pinCounts.includes(Number(node.pinCount))
+    ? savedPart
+    : partForFamilyPinCount(savedPart.familyId, node.pinCount);
   const family = connectorFamilyById(part.familyId);
   const familyParts = partsForFamily(family.id);
+  const familyPinCounts = [...new Set(familyParts.flatMap((item) => item.pinCounts))].sort((a, b) => a - b);
   const railSide = node.side === "right" ? "left" : "right";
   const pins = pinList(node.pinCount);
 
@@ -942,7 +967,7 @@ function ConnectorNode({
         <label>
           <span>Pins</span>
           <select value={node.pinCount} onChange={(event) => onPinCountChange(Number(event.target.value))}>
-            {part.pinCounts.map((count) => (
+            {familyPinCounts.map((count) => (
               <option key={count} value={count}>
                 {count} pins
               </option>
@@ -1318,7 +1343,7 @@ function MidConfigurationModal({ node, onClose, onSave }) {
 
   return (
     <ModalShell title={`${node.id} Configuration`} onClose={onClose}>
-      <p>Configure this mid-harness element. Easy Harness will review exact part compatibility before quote.</p>
+      <p>Configure this mid-harness element. Checkout uses the Easy Harness internal catalog basis shown on canvas.</p>
       <label className="modal-field">
         <span>Element type</span>
         <select

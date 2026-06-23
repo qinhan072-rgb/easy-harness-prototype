@@ -37,9 +37,11 @@ const requirementMapVisualPath = resolve(root, "src", "RequirementMapVisual.jsx"
 const agentDraftLabEvalPath = resolve(root, "scripts", "agent-draft-lab-eval.mjs");
 const canvasConfiguratorPath = resolve(root, "src", "CanvasConfigurator.jsx");
 const canvasPricingPath = resolve(root, "src", "canvasPricing.js");
+const harnessCatalogPath = resolve(root, "src", "harnessCatalog.js");
 const uploadDesignPath = resolve(root, "src", "UploadDesignRequest.jsx");
 const canvasCatalogSchemaPath = resolve(root, "supabase", "migrations", "202606220001_canvas_catalog_schema.sql");
 const canvasDirectPricingPath = resolve(root, "supabase", "migrations", "202606220002_canvas_direct_pricing.sql");
+const makerCatalogPriceBookPath = resolve(root, "supabase", "migrations", "202606230001_maker_robotics_catalog_price_book.sql");
 
 function readIfExists(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -80,9 +82,11 @@ const agentDraftLab = readIfExists(agentDraftLabPath);
 const agentDraftLabEval = readIfExists(agentDraftLabEvalPath);
 const canvasConfigurator = readIfExists(canvasConfiguratorPath);
 const canvasPricing = readIfExists(canvasPricingPath);
+const harnessCatalog = readIfExists(harnessCatalogPath);
 const uploadDesign = readIfExists(uploadDesignPath);
 const canvasCatalogSql = readIfExists(canvasCatalogSchemaPath);
 const canvasDirectPricingSql = readIfExists(canvasDirectPricingPath);
+const makerCatalogPriceBookSql = readIfExists(makerCatalogPriceBookPath);
 let visualDraftEvalCases = [];
 try {
   const parsed = JSON.parse(visualDraftAgentEval);
@@ -647,9 +651,33 @@ const checks = [
       canvasPricing.includes("pricingBookVersion") &&
       canvasPricing.includes("connectorHousingPrices") &&
       canvasPricing.includes("wireMeterPrices") &&
+      canvasPricing.includes("firstCatalogPrice") &&
+      canvasPricing.includes("part.internalPriceCents") &&
+      canvasPricing.includes("wireType.pricePerMeterCentsByGauge") &&
       canvasPricing.includes("minimumHarnessPriceCents") &&
       canvasPricing.includes("directCheckoutEligible") &&
       canvasPricing.includes("priceEstimateToQuoteAmount")
+  },
+  {
+    name: "canvas frontend catalog covers maker robotics real MPN families",
+    pass: harnessCatalog.includes('harnessCatalogVersion = "maker-robotics-catalog-2026-06-v1"') &&
+      harnessCatalog.includes('"jst-sh"') &&
+      harnessCatalog.includes("jst-shr-04v-s-b") &&
+      harnessCatalog.includes("mpnForPin: (pins) => `SHR-") &&
+      harnessCatalog.includes("mpnForPin: (pins) => `PHR-") &&
+      harnessCatalog.includes("mpnForPin: (pins) => `XHP-") &&
+      harnessCatalog.includes("mpnForPin: (pins) => `GHR-") &&
+      harnessCatalog.includes("51021-0400") &&
+      harnessCatalog.includes("43025-0400") &&
+      harnessCatalog.includes("39-01-2040") &&
+      harnessCatalog.includes("353908-4") &&
+      harnessCatalog.includes("179228-4") &&
+      harnessCatalog.includes("1445022-4") &&
+      harnessCatalog.includes("104257-3") &&
+      harnessCatalog.includes("Grove-4P-2.0") &&
+      harnessCatalog.includes("Gravity-PH2.0-4P") &&
+      harnessCatalog.includes("XT30U-F") &&
+      harnessCatalog.includes("partForFamilyPinCount")
   },
   {
     name: "canvas configurator shows exact catalog price and checkout action",
@@ -699,6 +727,19 @@ const checks = [
       canvasDirectPricingSql.includes("insert into public.quotes") &&
       canvasDirectPricingSql.includes("status = 'ready_to_confirm'") &&
       canvasDirectPricingSql.includes("grant execute on function public.release_canvas_configuration_quote")
+  },
+  {
+    name: "maker robotics catalog migration seeds direct-checkout database price book",
+    pass: makerCatalogPriceBookSql.includes("'easy-harness-maker-price-book-v1'") &&
+      makerCatalogPriceBookSql.includes("maker_connector_seed") &&
+      makerCatalogPriceBookSql.includes("'jst-sh'") &&
+      makerCatalogPriceBookSql.includes("'molex-picoblade'") &&
+      makerCatalogPriceBookSql.includes("'te-amp-mini-ct'") &&
+      makerCatalogPriceBookSql.includes("'seeed-grove'") &&
+      makerCatalogPriceBookSql.includes("'dfrobot-gravity'") &&
+      makerCatalogPriceBookSql.includes("direct_checkout_enabled = true") &&
+      makerCatalogPriceBookSql.includes("delete from public.catalog_price_snapshots") &&
+      makerCatalogPriceBookSql.includes("insert into public.catalog_price_snapshots")
   },
   {
     name: "stage 2A security hardening migration exists",

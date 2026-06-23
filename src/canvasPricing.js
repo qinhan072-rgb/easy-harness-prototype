@@ -5,8 +5,8 @@ import {
   wireTypeById,
 } from "./harnessCatalog.js";
 
-export const canvasPricingCatalogVersion = "easy-harness-canvas-catalog-2026-06";
-export const pricingBookVersion = "easy-harness-internal-price-book-2026-06-22";
+export const canvasPricingCatalogVersion = "maker-robotics-catalog-2026-06-v1";
+export const pricingBookVersion = "easy-harness-maker-price-book-2026-06-v1";
 
 const connectorHousingPrices = {
   "adafruit-5978": 495,
@@ -95,6 +95,14 @@ function addLine(lineItems, line) {
   });
 }
 
+function firstCatalogPrice(...values) {
+  return values.find((value) => Number.isFinite(Number(value)));
+}
+
+function hasCatalogPrice(value) {
+  return Number.isFinite(Number(value));
+}
+
 function buildNodeMap(configuration) {
   const nodes = [
     ...(configuration.endpoints || []),
@@ -151,11 +159,19 @@ export function calculateCanvasConfigurationPrice(configuration = {}) {
     const part = connectorPartById(partId);
     const family = connectorFamilyById(familyId);
     const terminations = countConnectorTerminations(configuration, endpoint.id);
-    const housingCents = connectorHousingPrices[part.id];
-    const terminalCents = terminalPrices[family.id];
+    const housingCents = firstCatalogPrice(part.internalPriceCents, connectorHousingPrices[part.id]);
+    const terminalCents = firstCatalogPrice(
+      part.terminalPriceCents,
+      family.terminalPriceCents,
+      terminalPrices[family.id],
+    );
+    const usesSolderLabor =
+      part.terminationStyle === "solder" ||
+      family.laborProfile === "solder" ||
+      !part.compatibleTerminals?.length;
 
-    if (!housingCents) blockers.push(`${endpoint.id} is not mapped to the internal connector price book.`);
-    if (!terminalCents) blockers.push(`${endpoint.id} is not mapped to the internal contact price book.`);
+    if (!hasCatalogPrice(housingCents)) blockers.push(`${endpoint.id} is not mapped to the internal connector price book.`);
+    if (!hasCatalogPrice(terminalCents)) blockers.push(`${endpoint.id} is not mapped to the internal contact price book.`);
 
     addLine(materialLines, {
       id: `connector-${endpoint.id}`,
@@ -180,9 +196,9 @@ export function calculateCanvasConfigurationPrice(configuration = {}) {
       category: "labor",
       label: `${endpoint.id} termination labor`,
       quantity: Math.max(terminations, 1),
-      unitCents: part.compatibleTerminals?.length
-        ? laborPrices.crimpTerminationPerEnd
-        : laborPrices.solderTerminationPerEnd,
+      unitCents: usesSolderLabor
+        ? laborPrices.solderTerminationPerEnd
+        : laborPrices.crimpTerminationPerEnd,
       source: "Easy Harness internal operation standard",
     });
   });
@@ -190,8 +206,13 @@ export function calculateCanvasConfigurationPrice(configuration = {}) {
   midElements.forEach((element) => {
     const elementId = element.catalogElementId || element.elementType;
     const type = midElementTypeById(elementId);
-    const unitCents = midElementPrices[type.id];
-    if (!unitCents) blockers.push(`${element.id} is not mapped to the internal mid element price book.`);
+    const unitCents = firstCatalogPrice(type.materialPriceCents, midElementPrices[type.id]);
+    const laborCents = firstCatalogPrice(
+      type.laborPriceCents,
+      laborPrices.midElementAssembly[type.id],
+      laborPrices.midElementAssembly.splice,
+    );
+    if (!hasCatalogPrice(unitCents)) blockers.push(`${element.id} is not mapped to the internal mid element price book.`);
     addLine(materialLines, {
       id: `mid-${element.id}`,
       category: "material",
@@ -205,7 +226,7 @@ export function calculateCanvasConfigurationPrice(configuration = {}) {
       category: "labor",
       label: `${element.id} assembly labor`,
       quantity: 1,
-      unitCents: laborPrices.midElementAssembly[type.id] || laborPrices.midElementAssembly.splice,
+      unitCents: laborCents || 0,
       source: "Easy Harness internal operation standard",
     });
   });
@@ -214,7 +235,10 @@ export function calculateCanvasConfigurationPrice(configuration = {}) {
     const wireType = wireTypeById(wire.wireTypeId);
     const gauge = Number(wire.wireGaugeAwg);
     const lengthMm = Math.max(0, Number(wire.lengthMm) || 0);
-    const meterPrice = wireMeterPrices[wireType.id]?.[gauge];
+    const meterPrice = firstCatalogPrice(
+      wireType.pricePerMeterCentsByGauge?.[gauge],
+      wireMeterPrices[wireType.id]?.[gauge],
+    );
     const wireCents = meterPrice ? Math.ceil(meterPrice * lengthMm / 1000) : 0;
 
     if (!wireType.gauges.includes(gauge)) {
