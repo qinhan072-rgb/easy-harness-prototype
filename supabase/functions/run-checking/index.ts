@@ -59,6 +59,16 @@ type StorageRow = {
   size_bytes: number | null;
 };
 
+type DraftJobRow = {
+  id: string;
+  request_id: string;
+  request_number: string;
+  trigger: string;
+  status: string;
+  provider: string;
+  model: string;
+};
+
 type DraftVisionImage = {
   filename: string;
   mime_type: string;
@@ -378,6 +388,13 @@ function draftAuditPassTimeoutMs() {
     15000,
     Math.min(180000, maxSafeMs),
   );
+}
+
+function externalDraftJobsEnabled() {
+  const raw = (Deno.env.get("AI_DRAFT_USE_EXTERNAL_WORKER") || "true")
+    .trim()
+    .toLowerCase();
+  return !["0", "false", "no", "off", "edge"].includes(raw);
 }
 
 async function fetchWithTimeout(
@@ -3214,149 +3231,6 @@ function buildMessageBlocks(draft: EasyHarnessDraft, customerMessage: string, re
 }
 
 
-function customerConversationText(requestRow: RequestRow, messages: MessageRow[]) {
-  const customerMessages = messages
-    .filter((message) => message.author_role === "customer")
-    .map((message) => textFromBlocks(message.blocks, message.body))
-    .filter(Boolean)
-    .join("\n\n");
-  return [requestRow.title, requestRow.customer_summary, customerMessages]
-    .filter(Boolean)
-    .join("\n\n")
-    .trim();
-}
-
-function buildLocalDraftFromRequest(
-  requestRow: RequestRow,
-  messages: MessageRow[],
-  attachments: Array<AttachmentRow & { storage?: StorageRow }>,
-  trigger = "manual",
-  primaryAgentIssue = "",
-) {
-  const text = customerConversationText(requestRow, messages);
-  const requestLine =
-    normalizeString(requestRow.title, "") ||
-    normalizeString(requestRow.customer_summary, "") ||
-    normalizeString(text.split(/\r?\n/).find(Boolean), "") ||
-    "Request received";
-  const question = "What should this harness or cable connect, copy, or replace?";
-  const easyHarnessReview: UnknownItem[] = attachments.length
-    ? [
-        {
-          field: "attachment_evidence_review",
-          reason:
-            "Review the supplied files and supported observations before relying on file details.",
-        },
-      ]
-    : [];
-
-  const rawDraft = {
-    schema_version: schemaVersion,
-    draft_meta: {
-      draft_status: "needs_harness_context",
-      draft_maturity_level: 0.1,
-      last_updated_reason: primaryAgentIssue
-        ? "Easy Harness intake result was limited to verified receipt evidence."
-        : trigger,
-    },
-    user_intent: {
-      intent_type: "unknown",
-      connection_goal: "",
-      from_side: "unknown",
-      to_side: [],
-      desired_outcome: requestLine,
-      intent_confidence: "vague",
-    },
-    provided_evidence: attachments.map((attachment) => ({
-      type: attachment.mime_type || "attachment",
-      filename: attachment.name,
-      content_summary: `${attachment.name} uploaded by the customer`,
-      relevance: "unclear",
-      what_it_may_show: "Reference material for Easy Harness review",
-      used_in_draft: false,
-      needs_review: true,
-    })),
-    known_requirements: {},
-    captured_professional_details: {
-      connectors: [],
-      terminals: [],
-      wire_gauge: null,
-      pinout: [],
-      materials: [],
-      shielding: null,
-      testing_requirements: [],
-    },
-    ai_interpretation: {
-      short_understanding: "Easy Harness received the written request and supplied files.",
-      likely_harness_type: "unknown",
-      likely_use: "unknown",
-      complexity_estimate: "unknown",
-      do_not_assume: [
-        "Attachment metadata is not visual or document evidence.",
-        "No connection topology was confirmed in this limited intake result.",
-      ],
-    },
-    unknowns: {
-      ask_user_now: [
-        {
-          field: "connection_goal",
-          reason: "A supported connection goal is needed before a Draft can be prepared.",
-          question,
-        },
-      ],
-      ask_user_if_likely_known: [],
-      easy_harness_review: easyHarnessReview,
-      later_supplier_or_engineering_confirmation: [],
-      not_applicable: [],
-    },
-    risk_flags: [],
-    user_facing_summary: {
-      request_line: requestLine,
-      compact_details: [],
-      what_we_have: [
-        text ? "Written instructions received" : "",
-        attachments.length ? `${attachments.length} file(s) received` : "",
-      ].filter(Boolean),
-      needed_next: [question],
-      next_step: "Add the connection goal so Easy Harness can prepare the Draft.",
-    },
-    requirement_map: {
-      schema_version: "easy_harness_requirement_map_v0_1",
-      connection_goal: "",
-      endpoints: [],
-      harness_sections: [],
-      connection_groups: [],
-      known_facts: [],
-      open_items: [
-        {
-          item: question,
-          owner: "customer",
-          why_it_matters:
-            "The current evidence does not support a connection topology yet.",
-          blocks_review: true,
-        },
-      ],
-      easy_harness_review_items: easyHarnessReview.map((item) => item.reason),
-      evidence_refs: attachments.map((attachment) => ({
-        source: attachment.name,
-        supports: "File received",
-        boundary: "Internal content was not relied on in this limited intake result.",
-      })),
-    },
-    draft_closure: {
-      can_close_user_draft: false,
-      closure_status: "needs_harness_context",
-      closure_reason:
-        "The verified intake result confirms receipt, but not a supported connection goal.",
-      next_action: "ask_user",
-      questions_to_ask: [question],
-      customer_message_type: "needs_harness_context",
-    },
-  };
-
-  return normalizeDraft(rawDraft, "easy_harness", "local-draft-builder", trigger);
-}
-
 async function createSignedAttachmentImageUrls(
   supabase: ReturnType<typeof createClient>,
   attachments: Array<AttachmentRow & { storage?: StorageRow }>,
@@ -4256,6 +4130,167 @@ async function markCheckingStillQueued(
   });
 }
 
+async function findActiveDraftJob(
+  supabase: ReturnType<typeof createClient>,
+  requestId: string,
+) {
+  const { data, error } = await supabase
+    .from("draft_jobs")
+    .select("id,request_id,request_number,trigger,status,provider,model")
+    .eq("request_id", requestId)
+    .in("status", ["queued", "running", "retry_needed"])
+    .order("created_at", { ascending: false })
+    .limit(1);
+
+  if (error) throw new Error(`Could not read draft_jobs: ${error.message}`);
+  return (data?.[0] || null) as DraftJobRow | null;
+}
+
+async function enqueueExternalDraftJob(
+  supabase: ReturnType<typeof createClient>,
+  requestRow: RequestRow,
+  trigger: string,
+  attachmentsWithStorage: Array<AttachmentRow & { storage?: StorageRow }>,
+) {
+  const existing = await findActiveDraftJob(supabase, requestRow.id);
+  if (existing) return existing;
+
+  const modelConfig = draftModelConfig();
+  const { data, error } = await supabase
+    .from("draft_jobs")
+    .insert({
+      request_id: requestRow.id,
+      request_number: requestRow.request_number,
+      trigger,
+      status: "queued",
+      provider: modelConfig.provider,
+      model: modelConfig.model,
+      input_snapshot: {
+        request_id: requestRow.id,
+        request_number: requestRow.request_number,
+        title: requestRow.title,
+        trigger,
+        attachment_count: attachmentsWithStorage.length,
+        attachment_names: attachmentsWithStorage.map((item) => item.name),
+        queued_at: new Date().toISOString(),
+      },
+    })
+    .select("id,request_id,request_number,trigger,status,provider,model")
+    .single();
+
+  if (error) throw new Error(`Could not enqueue draft job: ${error.message}`);
+  return data as DraftJobRow;
+}
+
+async function markRequestQueuedForExternalWorker(
+  supabase: ReturnType<typeof createClient>,
+  requestRow: RequestRow,
+  job: DraftJobRow,
+  trigger: string,
+) {
+  const checkedAt = new Date().toISOString();
+  const checkResult = {
+    status: "queued",
+    adapter: adapterId,
+    model: job.model,
+    provider: job.provider,
+    reason:
+      "Easy Harness is organizing the request with the Qwen intake worker.",
+    checkedAt,
+    source: {
+      request_id: requestRow.id,
+      request_number: requestRow.request_number,
+      draft_job_id: job.id,
+      trigger,
+      runtime: "external_worker",
+    },
+    agent_runtime: {
+      primary_agent_completed: false,
+      local_draft_builder_used: false,
+      external_worker_queued: true,
+    },
+  };
+
+  const { error } = await supabase
+    .from("requests")
+    .update({
+      status: "checking",
+      check_status: "pending",
+      check_result: checkResult,
+      updated_at: checkedAt,
+    })
+    .eq("id", requestRow.id);
+
+  if (error)
+    throw new Error(`Could not mark request queued for worker: ${error.message}`);
+}
+
+async function keepRequestPendingAfterModelFailure(
+  supabase: ReturnType<typeof createClient>,
+  requestRow: RequestRow,
+  trigger: string,
+  errorMessage: string,
+  modelInputMeta: {
+    visualImages: DraftVisionImage[];
+    attachmentObservations: AttachmentObservation[];
+    visionDiagnostics: DraftVisionDiagnostics;
+    qwenFileExtractEnabled: boolean;
+  },
+) {
+  const checkedAt = new Date().toISOString();
+  const checkResult = {
+    status: "pending",
+    adapter: adapterId,
+    model: draftModelConfig().model,
+    provider: selectedDraftProvider(),
+    reason:
+      "Easy Harness is still organizing the request and files. A full Draft has not been saved yet.",
+    checkedAt,
+    source: {
+      request_id: requestRow.id,
+      request_number: requestRow.request_number,
+      trigger,
+      failure: errorMessage.slice(0, 500),
+      ...modelInputMeta.visionDiagnostics,
+      qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
+      image_count_sent_to_model: modelInputMeta.visualImages.length,
+      image_files_sent_to_model: modelInputMeta.visualImages.map(
+        (image) => image.filename,
+      ),
+      attachment_observation_count:
+        modelInputMeta.attachmentObservations.length,
+      parsed_attachment_count: parsedAttachmentObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
+      qwen_file_extract_count: qwenFileExtractObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
+      cad_metadata_count: cadMetadataObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
+      parser_needed_count: parserNeededObservationCount(
+        modelInputMeta.attachmentObservations,
+      ),
+    },
+    attachment_observations: modelInputMeta.attachmentObservations,
+    agent_runtime: {
+      primary_agent_completed: false,
+      local_draft_builder_used: false,
+      external_worker_queued: false,
+    },
+  };
+
+  await supabase
+    .from("requests")
+    .update({
+      status: "checking",
+      check_status: "pending",
+      check_result: checkResult,
+      updated_at: checkedAt,
+    })
+    .eq("id", requestRow.id);
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return optionsResponse();
   if (request.method !== "POST")
@@ -4486,6 +4521,44 @@ Deno.serve(async (request) => {
       async: true,
     },
   });
+
+  if (externalDraftJobsEnabled()) {
+    const job = await enqueueExternalDraftJob(
+      supabase,
+      requestRow,
+      trigger,
+      attachmentsWithStorage,
+    );
+    await markRequestQueuedForExternalWorker(supabase, requestRow, job, trigger);
+    await supabase.from("integration_events").insert({
+      adapter: adapterId,
+      action: "draft_job_queued",
+      target_type: "request",
+      target_id: requestRow.id,
+      detail: "Easy Harness Qwen draft job queued for external worker.",
+      payload: {
+        requestNumber: requestRow.request_number,
+        trigger,
+        draftJobId: job.id,
+        provider: job.provider,
+        model: job.model,
+      },
+    });
+
+    return jsonResponse({
+      ok: true,
+      queued: true,
+      async: true,
+      externalWorker: true,
+      draftJobId: job.id,
+      requestId: requestRow.id,
+      requestNumber: requestRow.request_number,
+      status: "checking",
+      checkStatus: "pending",
+      readiness: "checking",
+      message: "",
+    });
+  }
 
   const checkingJob = (async () => {
   const modelInputMeta = {
@@ -4758,7 +4831,7 @@ Deno.serve(async (request) => {
     });
     await supabase.from("integration_events").insert({
       adapter: adapterId,
-      action: "primary_agent_failed_local_draft_used",
+      action: "primary_agent_failed_draft_pending",
       target_type: "request",
       target_id: requestRow.id,
       detail: message,
@@ -4768,73 +4841,28 @@ Deno.serve(async (request) => {
       },
     });
 
-    const checkedAt = new Date().toISOString();
-    const draft = buildLocalDraftFromRequest(
+    await keepRequestPendingAfterModelFailure(
+      supabase,
       requestRow,
-      messages || [],
-      attachmentsWithStorage,
       payload.trigger || "manual",
       message,
+      modelInputMeta,
     );
-    const nextStatus = requestStatusFor(draft);
-    const customerMessage = buildCustomerMessage(draft);
-    const messageBlocks = buildMessageBlocks(draft, customerMessage, requestRow);
-    const checkResult = buildCheckResult(draft, {
-      model: "local-draft-builder",
-      provider: "easy_harness",
-      reasoning_effort: "fallback",
-      usage: null,
-      reason: checkReasonFor(draft),
-      checkedAt,
-      trigger: payload.trigger || "manual",
-      version: 2,
-      source: {
-        request_id: requestRow.id,
-        request_number: requestRow.request_number,
-        message_count: messages?.length || 0,
-        attachment_count: attachments?.length || 0,
-        ...modelInputMeta.visionDiagnostics,
-        qwen_file_extract_enabled: modelInputMeta.qwenFileExtractEnabled,
-        image_count_sent_to_model: modelInputMeta.visualImages.length,
-        image_files_sent_to_model: modelInputMeta.visualImages.map(
-          (image) => image.filename,
-        ),
-        attachment_observation_count:
-          modelInputMeta.attachmentObservations.length,
-        parsed_attachment_count: parsedAttachmentObservationCount(
-          modelInputMeta.attachmentObservations,
-        ),
-        qwen_file_extract_count: qwenFileExtractObservationCount(
-          modelInputMeta.attachmentObservations,
-        ),
-        cad_metadata_count: cadMetadataObservationCount(
-          modelInputMeta.attachmentObservations,
-        ),
-        parser_needed_count: parserNeededObservationCount(
-          modelInputMeta.attachmentObservations,
-        ),
-      },
-      attachment_observations: modelInputMeta.attachmentObservations,
-      agent_runtime: {
-        primary_agent_completed: false,
-        local_draft_builder_used: true,
-      },
-    });
 
-    const latestBeforeFallbackSave = await latestThreadMessage(
+    const latestBeforePendingReply = await latestThreadMessage(
       supabase,
       requestRow.id,
     );
     if (
       !latestMessageCanReceiveAgentReply(
-        latestBeforeFallbackSave,
+        latestBeforePendingReply,
         queuedCustomerMessageId,
       )
     ) {
       logCheckingEvent("superseded", {
         request_number: requestRow.request_number,
-        reason: "newer_thread_message_before_fallback_save",
-        latest_role: latestBeforeFallbackSave?.author_role || "",
+        reason: "newer_thread_message_before_pending_notice",
+        latest_role: latestBeforePendingReply?.author_role || "",
       });
       return jsonResponse({
         ok: true,
@@ -4846,71 +4874,42 @@ Deno.serve(async (request) => {
       });
     }
 
-    const { data: latestRows } = await supabase
+    const pendingMessage =
+      "Easy Harness is still organizing your request and files. The Draft will appear here when the full intake result is ready.";
+    const { error: messageInsertError } = await supabase
       .from("request_messages")
-      .select("id,author_role,body,created_at")
-      .eq("request_id", requestRow.id)
-      .order("created_at", { ascending: false })
-      .limit(1);
-    const latestMessageBeforeReply = latestRows?.[0];
-    let insertedMessage = false;
-    if (
-      latestMessageCanReceiveAgentReply(
-        latestMessageBeforeReply,
-        queuedCustomerMessageId,
-      )
-    ) {
-      const { error: messageInsertError } = await supabase
-        .from("request_messages")
-        .insert({
-          request_id: requestRow.id,
-          author_id: null,
-          author_role: "easy_harness",
-          body: customerMessage,
-          blocks: messageBlocks,
-          visibility: "thread",
-        });
+      .insert({
+        request_id: requestRow.id,
+        author_id: null,
+        author_role: "easy_harness",
+        body: pendingMessage,
+        blocks: [{ type: "text", text: pendingMessage }],
+        visibility: "thread",
+      });
 
-      insertedMessage = !messageInsertError;
-      if (messageInsertError) {
-        await supabase.from("integration_events").insert({
-          adapter: adapterId,
-          action: "local_draft_message_insert_failed",
-          target_type: "request",
-          target_id: requestRow.id,
-          detail: messageInsertError.message,
-          payload: {
-            requestNumber: requestRow.request_number,
-            trigger: payload.trigger || "manual",
-          },
-        });
-      }
+    if (messageInsertError) {
+      await supabase.from("integration_events").insert({
+        adapter: adapterId,
+        action: "pending_notice_insert_failed",
+        target_type: "request",
+        target_id: requestRow.id,
+        detail: messageInsertError.message,
+        payload: {
+          requestNumber: requestRow.request_number,
+          trigger: payload.trigger || "manual",
+        },
+      });
     }
-
-    await supabase
-      .from("requests")
-      .update({
-        status: nextStatus,
-        check_status: legacyStatusFor(draft),
-        check_result: checkResult,
-        customer_summary:
-          draft.ai_interpretation.short_understanding ||
-          draft.user_facing_summary.request_line ||
-          requestRow.customer_summary ||
-          "",
-      })
-      .eq("id", requestRow.id);
 
     return jsonResponse({
       ok: true,
       requestId: requestRow.id,
       requestNumber: requestRow.request_number,
-      status: nextStatus,
-      checkStatus: legacyStatusFor(draft),
-      readiness: legacyReadinessFor(draft),
-      draftStatus: draft.draft_meta.draft_status,
-      checkResult,
-      message: insertedMessage ? customerMessage : "",
+      status: "checking",
+      checkStatus: "pending",
+      readiness: "checking",
+      draftStatus: "pending",
+      message: messageInsertError ? "" : pendingMessage,
     });
   }
   })();

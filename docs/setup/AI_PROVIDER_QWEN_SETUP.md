@@ -1,7 +1,9 @@
 # Qwen AI Provider Setup
 
-Easy Harness runs the Draft Agent in the Supabase Edge Function
-`run-checking`. The browser frontend must not store or expose the Qwen API key.
+Easy Harness queues Draft Agent work from the Supabase Edge Function
+`run-checking`, then a separate worker runs the Qwen Draft Agent and writes the
+result back to Supabase. The browser frontend must not store or expose the Qwen
+API key.
 
 ## Supabase Secrets
 
@@ -25,6 +27,9 @@ AI_DRAFT_FIRST_PASS_TIMEOUT_MS=100000
 AI_DRAFT_AUDIT_PASS_TIMEOUT_MS=20000
 AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=110000
 AI_DRAFT_PROVIDER_STATUS_TIMEOUT_MS=15000
+AI_DRAFT_USE_EXTERNAL_WORKER=true
+AI_DRAFT_WORKER_QWEN_TIMEOUT_MS=900000
+AI_DRAFT_WORKER_POLL_MS=5000
 AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=false
 AI_DRAFT_MAX_VISION_IMAGES=4
@@ -55,30 +60,39 @@ availability becomes unacceptable.
 ## Runtime Behavior
 
 `run-checking` returns quickly after it validates access, marks the request as
-organizing, and saves a short Easy Harness progress message in the customer
-thread. The deeper Draft generation, attachment observations, and evidence audit
-continue in the Edge Function background path and write the final Draft/message
-when complete.
+organizing, saves a short Easy Harness progress message, and creates a durable
+`draft_jobs` row. The deeper Draft generation must be performed by
+`scripts/qwen-draft-worker.mjs` or an equivalent hosted worker. This is the
+supported path for real Qwen processing because it is not constrained by the
+Supabase Edge Function wall-clock limit.
 
-This is deliberate: cost and model thinking time are less important than giving
-the Agent enough room to understand the uploaded evidence. The frontend keeps
-polling the request while it is organizing so the customer does not need to
-manually refresh to see the finished Draft.
+Run one local job with:
 
-Provider HTTP calls have hard timeouts, and each Draft model run has an overall
-time budget. The default values are safe for the Supabase Free Edge Function
-wall-clock cap: the first Draft pass gets up to 100 seconds, Evidence Audit gets
-up to 20 seconds, and the overall Draft model budget is 125 seconds. If the
-audit pass cannot finish inside the budget, `run-checking` saves the normalized
-first Draft instead of leaving the request in `checking` indefinitely. If the
-first provider pass stalls, it falls back to the bounded local Draft response.
+```powershell
+npm.cmd run draft:worker:once
+```
+
+Run continuously with:
+
+```powershell
+npm.cmd run draft:worker
+```
+
+The worker needs `SUPABASE_URL` or `VITE_SUPABASE_URL`,
+`SUPABASE_SERVICE_ROLE_KEY`, `QWEN_API_KEY`, `QWEN_BASE_URL`, and `QWEN_MODEL`.
+Do not put the service role key in the browser or any `VITE_` variable except
+the public Supabase URL.
+
+Provider HTTP calls inside the Edge Function still have hard timeouts, but this
+path is now a compatibility fallback. If Qwen does not finish inside the Edge
+budget, `run-checking` must keep the request in `checking/pending`; it must not
+save a local Draft that looks like Qwen understood the request.
 
 Supabase hosted Edge Functions still have a wall-clock cap even when
 `EdgeRuntime.waitUntil` is used for background work. Keep
-`AI_DRAFT_PLATFORM_WALL_CLOCK_MS` below the actual platform cap. On a paid
-project with a longer wall-clock limit, the timeout secrets can be raised. If
-Easy Harness needs reliable processing beyond a few minutes, move the Draft run
-into a durable job/worker design instead of one long Edge Function invocation.
+`AI_DRAFT_PLATFORM_WALL_CLOCK_MS` below the actual platform cap. Raising Edge
+timeouts is not the primary reliability path; durable `draft_jobs` plus a worker
+is the reliability path for complete Qwen Draft results.
 
 ## Attachment Observations
 

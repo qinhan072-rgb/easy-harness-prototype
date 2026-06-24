@@ -42,6 +42,8 @@ const uploadDesignPath = resolve(root, "src", "UploadDesignRequest.jsx");
 const canvasCatalogSchemaPath = resolve(root, "supabase", "migrations", "202606220001_canvas_catalog_schema.sql");
 const canvasDirectPricingPath = resolve(root, "supabase", "migrations", "202606220002_canvas_direct_pricing.sql");
 const makerCatalogPriceBookPath = resolve(root, "supabase", "migrations", "202606230001_maker_robotics_catalog_price_book.sql");
+const draftJobsPath = resolve(root, "supabase", "migrations", "202606240001_draft_jobs.sql");
+const qwenDraftWorkerPath = resolve(root, "scripts", "qwen-draft-worker.mjs");
 
 function readIfExists(path) {
   return existsSync(path) ? readFileSync(path, "utf8") : "";
@@ -87,6 +89,8 @@ const uploadDesign = readIfExists(uploadDesignPath);
 const canvasCatalogSql = readIfExists(canvasCatalogSchemaPath);
 const canvasDirectPricingSql = readIfExists(canvasDirectPricingPath);
 const makerCatalogPriceBookSql = readIfExists(makerCatalogPriceBookPath);
+const draftJobsSql = readIfExists(draftJobsPath);
+const qwenDraftWorker = readIfExists(qwenDraftWorkerPath);
 let visualDraftEvalCases = [];
 try {
   const parsed = JSON.parse(visualDraftAgentEval);
@@ -510,37 +514,28 @@ const checks = [
       app.includes("stale_check_recovery")
   },
   {
-    name: "checking requests queue long draft work instead of blocking the UI",
+    name: "checking requests create durable qwen jobs instead of blocking the UI",
     pass: checkingFunction.includes("checkingProgressMessageText") &&
       checkingFunction.includes("Easy Harness is carefully organizing your request and files") &&
       checkingFunction.includes("draft_check_queued") &&
       checkingFunction.includes("checking_already_queued") &&
-      checkingFunction.includes("runCheckingJobInBackground") &&
-      checkingFunction.includes("EdgeRuntime") &&
-      checkingFunction.includes("waitUntil") &&
-      checkingFunction.includes("background_registered") &&
+      checkingFunction.includes("externalDraftJobsEnabled") &&
+      checkingFunction.includes("enqueueExternalDraftJob") &&
+      checkingFunction.includes("markRequestQueuedForExternalWorker") &&
+      checkingFunction.includes("draft_job_queued") &&
       checkingFunction.includes("latestMessageCanReceiveAgentReply") &&
       checkingFunction.includes("queuedCustomerMessageId") &&
       checkingFunction.includes("superseded") &&
-      checkingFunction.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS") &&
-      checkingFunction.includes("AI_DRAFT_PLATFORM_WALL_CLOCK_MS") &&
-      checkingFunction.includes("draft_model_started") &&
-      checkingFunction.includes("AI_DRAFT_JOB_BUDGET_MS") &&
-      checkingFunction.includes("AI_DRAFT_FIRST_PASS_TIMEOUT_MS") &&
-      checkingFunction.includes("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS") &&
-      checkingFunction.includes("evidence_audit_completed") &&
-      checkingFunction.includes("evidence_audit_skipped") &&
-      checkingFunction.includes("fetchWithTimeout") &&
+      draftJobsSql.includes("status in ('queued', 'running', 'completed', 'failed', 'retry_needed', 'superseded', 'canceled')") &&
+      qwenDraftWorker.includes("AI_DRAFT_WORKER_QWEN_TIMEOUT_MS") &&
+      qwenDraftWorker.includes("primary_agent_completed: true") &&
       checkingFunction.includes("queued: true") &&
       app.includes('status: "queued"') &&
       app.includes("This page will keep checking for the result") &&
-      envExample.includes("AI_DRAFT_PLATFORM_WALL_CLOCK_MS=140000") &&
-      envExample.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=110000") &&
-      envExample.includes("AI_DRAFT_JOB_BUDGET_MS=125000") &&
-      envExample.includes("AI_DRAFT_FIRST_PASS_TIMEOUT_MS=100000") &&
-      envExample.includes("AI_DRAFT_AUDIT_PASS_TIMEOUT_MS=20000") &&
-      aiProviderDoc.includes("AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS") &&
-      aiProviderDoc.includes("overall Draft model budget is 125 seconds")
+      envExample.includes("AI_DRAFT_USE_EXTERNAL_WORKER=true") &&
+      envExample.includes("AI_DRAFT_WORKER_QWEN_TIMEOUT_MS=900000") &&
+      aiProviderDoc.includes("scripts/qwen-draft-worker.mjs") &&
+      aiProviderDoc.includes("durable `draft_jobs` plus a worker")
   },
   {
     name: "conversation attachments can render inline visuals",
@@ -898,11 +893,20 @@ const checks = [
       checkingFunction.includes("needed_next: questions")
   },
   {
-    name: "fallback intake acknowledges evidence without imitating semantic understanding",
-    pass: checkingFunction.includes("buildLocalDraftFromRequest") &&
-      checkingFunction.includes("I received the uploaded files and will use the supported observations as request evidence.") &&
-      checkingFunction.includes("Review the supplied files and supported observations before relying on file details.") &&
-      checkingFunction.includes("What should this harness or cable connect, copy, or replace?")
+    name: "qwen draft uses durable jobs instead of edge fallback drafts",
+    pass: draftJobsSql.includes("create table if not exists public.draft_jobs") &&
+      draftJobsSql.includes("draft_jobs_one_active_per_request_idx") &&
+      checkingFunction.includes("externalDraftJobsEnabled") &&
+      checkingFunction.includes("enqueueExternalDraftJob") &&
+      checkingFunction.includes("draft_job_queued") &&
+      checkingFunction.includes("primary_agent_failed_draft_pending") &&
+      !checkingFunction.includes("primary_agent_failed_local_draft_used") &&
+      !checkingFunction.includes('model: "local-draft-builder"') &&
+      packageJson.includes("\"draft:worker\"") &&
+      packageJson.includes("\"xlsx\"") &&
+      qwenDraftWorker.includes("qwenJsonCompletion") &&
+      qwenDraftWorker.includes("xlsx_sheet_probe") &&
+      qwenDraftWorker.includes("draft_worker_completed")
   },
   {
     name: "repository boundary ignores generated local artifacts",
