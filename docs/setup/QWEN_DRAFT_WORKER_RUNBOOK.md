@@ -3,6 +3,16 @@
 This runbook is for the production path where Easy Harness must receive real
 Qwen Draft results instead of local fallback Drafts.
 
+Important boundary:
+
+- Running `npm.cmd run draft:worker:once` on a developer machine is only a
+  staging/proof check.
+- A real customer-facing platform needs `scripts/qwen-draft-worker.mjs` running
+  continuously in a hosted environment such as a small server or managed worker
+  runtime.
+- Supabase Edge Function `run-checking` only queues work. It is intentionally
+  not the long-running Qwen executor.
+
 ## Goal
 
 ```text
@@ -135,6 +145,10 @@ AI_DRAFT_WORKER_QWEN_TIMEOUT_MS=900000
 Never expose `SUPABASE_SERVICE_ROLE_KEY` in browser code or any `VITE_`
 variable.
 
+`AI_DRAFT_WORKER_QWEN_TIMEOUT_MS` belongs to the worker runtime. Adding it only
+to Supabase Edge Function secrets does not change the timeout of a locally or
+externally hosted worker process.
+
 The current worker evidence layer sends these attachment signals into Qwen:
 
 - image attachments as short-lived signed `image_url` inputs,
@@ -151,11 +165,21 @@ For one job:
 npm.cmd run draft:worker:once
 ```
 
+This is not a production operating mode. It is only used to prove that one queued
+job can be claimed, sent to Qwen, parsed, and written back.
+
 For continuous processing:
 
 ```powershell
 npm.cmd run draft:worker
 ```
+
+In production, run the continuous worker command from a hosted environment with
+process supervision/restart. Do not rely on a user or developer PC being online.
+
+If Qwen returns malformed JSON, the worker makes one generic JSON-repair pass
+with Qwen and records `source.qwen_json_repaired = true` when that repair was
+used. This is syntax repair only; it must not reinterpret the request.
 
 ## 5. Verify
 

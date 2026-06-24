@@ -386,27 +386,33 @@ function userContentForProvider(prompt, images) {
   ];
 }
 
-function parseJsonObject(text) {
+function cleanJsonCandidate(text) {
   const cleaned = String(text || "")
     .replace(/^```(?:json)?/i, "")
     .replace(/```$/i, "")
     .trim();
+  return cleaned;
+}
+
+function parseJsonObject(text) {
+  const cleaned = cleanJsonCandidate(text);
   try {
     return JSON.parse(cleaned);
-  } catch {
+  } catch (directError) {
     const start = cleaned.indexOf("{");
     const end = cleaned.lastIndexOf("}");
-    if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
-    throw new Error("Qwen response did not contain valid JSON.");
+    if (start >= 0 && end > start) {
+      try {
+        return JSON.parse(cleaned.slice(start, end + 1));
+      } catch (sliceError) {
+        throw new Error(`Qwen response JSON parse failed: ${sliceError.message}`);
+      }
+    }
+    throw new Error(`Qwen response did not contain valid JSON: ${directError.message}`);
   }
 }
 
-async function qwenJsonCompletion({ prompt, images }) {
-  const apiKey = requireEnv("QWEN_API_KEY");
-  const baseUrl = env("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1").replace(/\/$/, "");
-  const model = env("QWEN_MODEL", "qwen3.6-plus");
-  const maxTokens = envNumber("QWEN_MAX_TOKENS", 12000, 1000, 64000);
-  const timeoutMs = envNumber("AI_DRAFT_WORKER_QWEN_TIMEOUT_MS", 900000, 60000, 3600000);
+async function postQwenChat({ apiKey, baseUrl, model, messages, maxTokens, timeoutMs }) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -419,17 +425,8 @@ async function qwenJsonCompletion({ prompt, images }) {
       signal: controller.signal,
       body: JSON.stringify({
         model,
-        messages: [
-          { role: "system", content: draftSystemPrompt() },
-          {
-            role: "user",
-            content: userContentForProvider(
-              `Analyze this Easy Harness request and return Easy Harness Draft v0.1 JSON only.\n\n${prompt}`,
-              images,
-            ),
-          },
-        ],
-        temperature: 0.2,
+        messages,
+        temperature: 0,
         max_tokens: maxTokens,
         response_format: { type: "json_object" },
       }),
@@ -438,16 +435,93 @@ async function qwenJsonCompletion({ prompt, images }) {
     if (!response.ok) {
       throw new Error(`Qwen API ${response.status}: ${JSON.stringify(data).slice(0, 1000)}`);
     }
-    const content = data?.choices?.[0]?.message?.content || "";
-    return {
-      draft: parseJsonObject(content),
-      usage: data?.usage || null,
-      model,
-      provider: "qwen",
-    };
+    return data;
   } finally {
     clearTimeout(timer);
   }
+}
+
+async function repairJsonWithQwen({ apiKey, baseUrl, model, content, parseError, maxTokens, timeoutMs }) {
+  const repairPrompt = [
+    "Repair the malformed JSON below.",
+    "Return valid JSON only. Do not add markdown, comments, explanation, or new fields.",
+    "Preserve the original semantics and values as much as possible.",
+    `Parser error: ${parseError.message}`,
+    "",
+    "Malformed JSON:",
+    cleanJsonCandidate(content).slice(0, 50000),
+  ].join("\n");
+  const data = await postQwenChat({
+    apiKey,
+    baseUrl,
+    model,
+    maxTokens,
+    timeoutMs,
+    messages: [
+      {
+        role: "system",
+        content:
+          "You are a strict JSON repair tool. You only repair syntax so the JSON can be parsed. You do not reinterpret the request.",
+      },
+      { role: "user", content: repairPrompt },
+    ],
+  });
+  return data?.choices?.[0]?.message?.content || "";
+}
+
+async function qwenJsonCompletion({ prompt, images }) {
+  const apiKey = requireEnv("QWEN_API_KEY");
+  const baseUrl = env("QWEN_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1").replace(/\/$/, "");
+  const model = env("QWEN_MODEL", "qwen3.6-plus");
+  const maxTokens = envNumber("QWEN_MAX_TOKENS", 12000, 1000, 64000);
+  const timeoutMs = envNumber("AI_DRAFT_WORKER_QWEN_TIMEOUT_MS", 900000, 60000, 3600000);
+  const data = await postQwenChat({
+    apiKey,
+    baseUrl,
+    model,
+    maxTokens,
+    timeoutMs,
+    messages: [
+      { role: "system", content: draftSystemPrompt() },
+      {
+        role: "user",
+        content: userContentForProvider(
+          [
+            "Analyze this Easy Harness request and return Easy Harness Draft v0.1 JSON only.",
+            "Use valid JSON syntax: double-quoted keys and strings, no trailing commas, no comments, no markdown.",
+            "",
+            prompt,
+          ].join("\n"),
+          images,
+        ),
+      },
+    ],
+  });
+  const content = data?.choices?.[0]?.message?.content || "";
+  let draft;
+  let jsonRepaired = false;
+  try {
+    draft = parseJsonObject(content);
+  } catch (parseError) {
+    const repaired = await repairJsonWithQwen({
+      apiKey,
+      baseUrl,
+      model,
+      content,
+      parseError,
+      maxTokens,
+      timeoutMs,
+    });
+    draft = parseJsonObject(repaired);
+    jsonRepaired = true;
+  }
+    return {
+      draft,
+      usage: data?.usage || null,
+      model,
+      provider: "qwen",
+      jsonRepaired,
+    };
 }
 
 function array(value) {
@@ -772,6 +846,7 @@ async function processJob(supabase, job) {
     qwen_file_extract_count: 0,
     cad_metadata_count: observations.filter((item) => item.parser === "cad_metadata_probe").length,
     parser_needed_count: observations.filter((item) => item.status === "parser_needed").length,
+    qwen_json_repaired: Boolean(generated.jsonRepaired),
   };
   const checkResult = buildCheckResult(draft, {
     model: generated.model,
@@ -817,6 +892,7 @@ async function processJob(supabase, job) {
         check_status: nextCheckStatus,
         provider: generated.provider,
         model: generated.model,
+        qwen_json_repaired: Boolean(generated.jsonRepaired),
         source,
       },
     })
@@ -835,6 +911,7 @@ async function processJob(supabase, job) {
       checkStatus: nextCheckStatus,
       provider: generated.provider,
       model: generated.model,
+      qwenJsonRepaired: Boolean(generated.jsonRepaired),
     },
   });
 }
