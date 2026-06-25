@@ -1161,14 +1161,12 @@ export default function CanvasConfigurator({
 
         <TopologyDetailPanel
           selectedConnector={selectedConnector}
-          nodes={connectorNodes}
           wires={wires}
           pendingEndpoint={pendingEndpoint}
           selectedWireId={selectedWireId}
           selectedSegment={selectedSegment}
           selectedSegmentWires={selectedSegmentWires}
           topology={topology}
-          onSelectConnector={setSelectedConnectorId}
           onSelectWire={(wireId) => {
             setSelectedWireId(wireId);
             setSelectedSegmentId("");
@@ -1343,14 +1341,12 @@ function TopologyConnectorCard({ node, selected, connectedCount, onSelect, onMov
 
 function TopologyDetailPanel({
   selectedConnector,
-  nodes,
   wires,
   pendingEndpoint,
   selectedWireId,
   selectedSegment,
   selectedSegmentWires,
   topology,
-  onSelectConnector,
   onSelectWire,
   onSelectSegment,
   onPinClick,
@@ -1394,25 +1390,6 @@ function TopologyDetailPanel({
           onSelectWire={onSelectWire}
           onOpenWire={onOpenWire}
         />
-        <section className="topology-panel-card compact">
-          <div className="topology-panel-title">
-            <span>Connector list</span>
-            <strong>{nodes.length}</strong>
-          </div>
-          <div className="topology-connector-list">
-            {nodes.map((node) => (
-              <button
-                key={node.id}
-                type="button"
-                className={node.id === selectedConnector.id ? "active" : ""}
-                onClick={() => onSelectConnector(node.id)}
-              >
-                <strong>{connectorDisplayName(node)}</strong>
-                <span>{node.pinCount} pins</span>
-              </button>
-            ))}
-          </div>
-        </section>
       </aside>
     );
   }
@@ -1475,28 +1452,6 @@ function TopologyDetailPanel({
           </button>
         </div>
       </section>
-
-      {nodes.length > 1 && (
-        <section className="topology-panel-card compact">
-          <div className="topology-panel-title">
-            <span>Connector list</span>
-            <strong>{nodes.length}</strong>
-          </div>
-          <div className="topology-connector-list">
-            {nodes.map((node) => (
-              <button
-                key={node.id}
-                type="button"
-                className={node.id === selectedConnector.id ? "active" : ""}
-                onClick={() => onSelectConnector(node.id)}
-              >
-                <strong>{connectorDisplayName(node)}</strong>
-                <span>{node.pinCount} pins</span>
-              </button>
-            ))}
-          </div>
-        </section>
-      )}
 
       <section className="topology-panel-card pin-card">
         <div className="topology-panel-title">
