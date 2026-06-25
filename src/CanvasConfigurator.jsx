@@ -50,8 +50,8 @@ const MID_SLOT_TOP = 58;
 const MID_SLOT_STEP = 164;
 const MID_EMPTY_ADD_Y = 312;
 
-const TOPOLOGY_CANVAS_WIDTH = 900;
-const TOPOLOGY_CANVAS_HEIGHT = 560;
+const TOPOLOGY_CANVAS_WIDTH = 1280;
+const TOPOLOGY_CANVAS_HEIGHT = 640;
 const TOPOLOGY_CONNECTOR_WIDTH = 174;
 const TOPOLOGY_CONNECTOR_HEIGHT = 116;
 const TOPOLOGY_JUNCTION_RADIUS = 12;
@@ -117,21 +117,21 @@ function connectorSlotIndex(nodes, side) {
 
 function connectorPosition(side, slotIndex = 0) {
   const leftSlots = [
-    { x: 58, y: 218 },
-    { x: 202, y: 62 },
-    { x: 210, y: 378 },
-    { x: 58, y: 62 },
+    { x: 72, y: 252 },
+    { x: 280, y: 64 },
+    { x: 268, y: 448 },
+    { x: 72, y: 78 },
   ];
   const rightSlots = [
-    { x: 674, y: 218 },
-    { x: 602, y: 62 },
-    { x: 612, y: 378 },
-    { x: 690, y: 62 },
+    { x: 1000, y: 252 },
+    { x: 940, y: 72 },
+    { x: 926, y: 448 },
+    { x: 1030, y: 78 },
   ];
   const slots = side === "right" ? rightSlots : leftSlots;
   if (slotIndex < slots.length) return slots[slotIndex];
   return {
-    x: side === "right" ? 674 : 58,
+    x: side === "right" ? 1000 : 72,
     y: CONNECTOR_TOP + slotIndex * CONNECTOR_SLOT_STEP,
   };
 }
@@ -686,6 +686,20 @@ export default function CanvasConfigurator({
     );
   };
 
+  const moveConnector = (nodeId, x, y) => {
+    setNodes((current) =>
+      current.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              x: clamp(Math.round(x), 24, TOPOLOGY_CANVAS_WIDTH - TOPOLOGY_CONNECTOR_WIDTH - 24),
+              y: clamp(Math.round(y), 24, TOPOLOGY_CANVAS_HEIGHT - TOPOLOGY_CONNECTOR_HEIGHT - 24),
+            }
+          : node,
+      ),
+    );
+  };
+
   const changeConnectorFamily = (nodeId, familyId) => {
     const family = connectorFamilyById(familyId);
     const part = connectorPartById(family.defaultPartId);
@@ -1105,8 +1119,11 @@ export default function CanvasConfigurator({
                   onSelect={() => {
                     setSelectedConnectorId(node.id);
                     setSelectedSegmentId("");
+                    setSelectedWireId("");
                   }}
+                  onMove={(nextX, nextY) => moveConnector(node.id, nextX, nextY)}
                   onDelete={() => deleteNode(node.id)}
+                  canvasRef={canvasRef}
                 />
               ))}
 
@@ -1236,19 +1253,62 @@ export default function CanvasConfigurator({
   );
 }
 
-function TopologyConnectorCard({ node, selected, connectedCount, onSelect, onDelete }) {
+function TopologyConnectorCard({ node, selected, connectedCount, onSelect, onMove, onDelete, canvasRef }) {
   const savedPart = connectorPartById(node.partId);
   const part = savedPart.pinCounts.includes(Number(node.pinCount))
     ? savedPart
     : partForFamilyPinCount(savedPart.familyId, node.pinCount);
   const portSide = topologyPinSide(node);
+  const dragRef = useRef(null);
+
+  const startDrag = (event) => {
+    if (event.button !== 0 || event.target.closest("button")) return;
+    const board = canvasRef.current;
+    if (!board) return;
+    const boardRect = board.getBoundingClientRect();
+    dragRef.current = {
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      startX: Number(node.x) || 0,
+      startY: Number(node.y) || 0,
+      scaleX: TOPOLOGY_CANVAS_WIDTH / boardRect.width,
+      scaleY: TOPOLOGY_CANVAS_HEIGHT / boardRect.height,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    onSelect();
+  };
+
+  const drag = (event) => {
+    const dragState = dragRef.current;
+    if (!dragState) return;
+    const nextX = dragState.startX + (event.clientX - dragState.startClientX) * dragState.scaleX;
+    const nextY = dragState.startY + (event.clientY - dragState.startClientY) * dragState.scaleY;
+    if (Math.abs(event.clientX - dragState.startClientX) > 2 || Math.abs(event.clientY - dragState.startClientY) > 2) {
+      dragState.moved = true;
+    }
+    onMove(nextX, nextY);
+  };
+
+  const endDrag = (event) => {
+    const moved = dragRef.current?.moved;
+    dragRef.current = null;
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (!moved) onSelect();
+  };
+
   return (
     <article
       className={`topology-connector-card ${selected ? "selected" : ""}`}
       style={{ left: node.x, top: node.y }}
       role="button"
       tabIndex={0}
-      onClick={onSelect}
+      onPointerDown={startDrag}
+      onPointerMove={drag}
+      onPointerUp={endDrag}
+      onPointerCancel={() => {
+        dragRef.current = null;
+      }}
       onKeyDown={(event) => {
         if (event.key !== "Enter" && event.key !== " ") return;
         event.preventDefault();
@@ -1321,6 +1381,41 @@ function TopologyDetailPanel({
   const pins = pinList(selectedConnector.pinCount);
   const assignedCount = pins.filter((pinId) => wireForConnectorPin(wires, selectedConnector.id, pinId)).length;
   const selectedWire = wires.find((wire) => wire.id === selectedWireId);
+  const segmentOnly = selectedSegment && !selectedWire;
+
+  if (segmentOnly) {
+    return (
+      <aside className="topology-detail-panel">
+        <TopologySelectionSummary
+          selectedWire={null}
+          selectedSegment={selectedSegment}
+          selectedSegmentWires={selectedSegmentWires}
+          topology={topology}
+          onSelectWire={onSelectWire}
+          onOpenWire={onOpenWire}
+        />
+        <section className="topology-panel-card compact">
+          <div className="topology-panel-title">
+            <span>Connector list</span>
+            <strong>{nodes.length}</strong>
+          </div>
+          <div className="topology-connector-list">
+            {nodes.map((node) => (
+              <button
+                key={node.id}
+                type="button"
+                className={node.id === selectedConnector.id ? "active" : ""}
+                onClick={() => onSelectConnector(node.id)}
+              >
+                <strong>{connectorDisplayName(node)}</strong>
+                <span>{node.pinCount} pins</span>
+              </button>
+            ))}
+          </div>
+        </section>
+      </aside>
+    );
+  }
 
   return (
     <aside className="topology-detail-panel">

@@ -6511,15 +6511,22 @@ button:disabled {
 
 .canvas-topology-workspace {
   display: grid;
-  grid-template-columns: minmax(760px, 1fr) 430px;
-  min-height: 0;
+  grid-template-columns: minmax(900px, 1fr) 430px;
+  height: calc(100vh - 254px);
+  min-height: 620px;
+  overflow: hidden;
   border-top: 1px solid #c9d2d6;
   border-bottom: 1px solid #c9d2d6;
   background: #dde3e7;
 }
 
 .topology-canvas-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100%;
   min-width: 0;
+  min-height: 0;
+  overflow: hidden;
   border-right: 1px solid #c9d2d6;
 }
 
@@ -6569,15 +6576,15 @@ button:disabled {
 
 .topology-canvas-scroll {
   overflow: auto;
-  height: min(580px, calc(100vh - 292px));
-  min-height: 520px;
+  height: 100%;
+  min-height: 0;
   padding: 18px;
 }
 
 .topology-board {
   position: relative;
-  width: 900px;
-  height: 560px;
+  width: 1280px;
+  height: 640px;
   border: 1px solid #b9c8c5;
   background:
     radial-gradient(circle at 1px 1px, rgba(55, 75, 72, 0.14) 1px, transparent 0) 0 0 / 18px 18px,
@@ -6674,7 +6681,13 @@ button:disabled {
   border-radius: 7px;
   background: #fff;
   box-shadow: 0 16px 32px rgba(25, 32, 38, 0.12);
-  cursor: pointer;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+
+.topology-connector-card:active {
+  cursor: grabbing;
 }
 
 .topology-connector-card.selected {
@@ -6794,13 +6807,16 @@ button:disabled {
   display: grid;
   align-content: start;
   gap: 14px;
-  max-height: min(620px, calc(100vh - 300px));
-  overflow: auto;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
+  overflow-y: auto;
   padding: 16px;
   background: #f7faf9;
 }
 
 .topology-panel-card {
+  min-height: 0;
   overflow: hidden;
   border: 1px solid #c5d2cf;
   border-radius: 8px;
@@ -6851,13 +6867,13 @@ button:disabled {
 .topology-connector-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
-  padding: 12px 14px;
+  gap: 7px;
+  padding: 10px 14px;
 }
 
 .topology-form-field {
   display: grid;
-  gap: 5px;
+  gap: 3px;
   min-width: 0;
 }
 
@@ -6875,7 +6891,7 @@ button:disabled {
 .topology-form-field input,
 .topology-form-field select {
   min-width: 0;
-  height: 34px;
+  height: 32px;
   padding: 0 9px;
   border: 1px solid #c6d2cf;
   border-radius: 6px;
@@ -6887,9 +6903,9 @@ button:disabled {
 
 .topology-meta-pill {
   display: grid;
-  gap: 4px;
+  gap: 3px;
   min-width: 0;
-  padding: 8px;
+  padding: 7px;
   border: 1px solid #d8e3e0;
   border-radius: 7px;
   background: #fbfdfd;
@@ -6906,7 +6922,7 @@ button:disabled {
 .topology-panel-actions {
   display: flex;
   justify-content: flex-end;
-  padding: 0 14px 12px;
+  padding: 0 14px 10px;
 }
 
 .topology-panel-actions button,
@@ -6930,7 +6946,7 @@ button:disabled {
 .topology-connector-list {
   display: grid;
   gap: 6px;
-  max-height: 116px;
+  max-height: 260px;
   overflow: auto;
   padding: 10px;
 }
@@ -6982,7 +6998,7 @@ button:disabled {
 }
 
 .topology-pin-table-wrap {
-  max-height: 318px;
+  max-height: 360px;
   overflow: auto;
 }
 
