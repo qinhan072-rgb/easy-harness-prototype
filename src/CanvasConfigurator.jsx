@@ -200,6 +200,11 @@ function endpointLabel(endpoint) {
   return `${endpoint.pinId} of ${endpoint.nodeId}`;
 }
 
+function endpointDisplayLabel(endpoint, nodeMap) {
+  const node = nodeMap?.get?.(endpoint?.nodeId);
+  return `${connectorDisplayName(node) || endpoint?.nodeId}:${endpoint?.pinId}`;
+}
+
 function nodeAwgRange(node) {
   if (!node) return [10, 32];
   if (node.type === "connector") {
@@ -351,7 +356,7 @@ function pointBetween(start, end, ratio = 0.5) {
   };
 }
 
-function buildTopology(layoutNodes, wires) {
+function buildTopology(layoutNodes, wires, segmentLengths = {}) {
   const connectors = layoutNodes.filter((node) => node.type === "connector");
   const connectorById = new Map(connectors.map((node) => [node.id, node]));
   const usableWires = wires.filter((wire) => connectorById.has(wire.from?.nodeId) && connectorById.has(wire.to?.nodeId));
@@ -416,7 +421,7 @@ function buildTopology(layoutNodes, wires) {
         key,
         fromNodeId: startNode.id,
         toNodeId: endNode.id,
-        lengthMm: Math.max(...group.map((wire) => Number(wire.lengthMm) || distanceLength(start, end))),
+        lengthMm: Number(segmentLengths[key]) || Math.max(...group.map((wire) => Number(wire.lengthMm) || distanceLength(start, end))),
         path: cubicPath(start, end),
         label: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 - 28 },
       });
@@ -438,11 +443,15 @@ function buildTopology(layoutNodes, wires) {
     junctions.push(junction);
 
     const fullLength = Math.max(...group.map((wire) => Number(wire.lengthMm) || distanceLength(start, end)));
-    const firstLength = Math.max(40, Math.round(fullLength * ratio));
-    const secondLength = Math.max(40, fullLength - firstLength);
+    const firstKey = `${key}:start`;
+    const secondKey = `${key}:end`;
+    const firstDefaultLength = Math.max(40, Math.round(fullLength * ratio));
+    const secondDefaultLength = Math.max(40, fullLength - firstDefaultLength);
+    const firstLength = Number(segmentLengths[firstKey]) || firstDefaultLength;
+    const secondLength = Number(segmentLengths[secondKey]) || secondDefaultLength;
     const firstSegment = addSegment({
       id: `B${segmentIndex++}`,
-      key: `${key}:start`,
+      key: firstKey,
       baseKey: key,
       fromNodeId: startNode.id,
       toNodeId: junction.id,
@@ -452,7 +461,7 @@ function buildTopology(layoutNodes, wires) {
     });
     const secondSegment = addSegment({
       id: `B${segmentIndex++}`,
-      key: `${key}:end`,
+      key: secondKey,
       baseKey: key,
       fromNodeId: junction.id,
       toNodeId: endNode.id,
@@ -474,10 +483,11 @@ function buildTopology(layoutNodes, wires) {
       if (!branchNode) return;
       const branchPoint = topologyPortPoint(branchNode);
       const sharedSegment = sharedNodeId === endNode.id ? secondSegment : firstSegment;
-      const branchLength = Math.max(40, Number(wire.branchLengthMm) || distanceLength(junction, branchPoint));
+      const branchKey = `branch:${wire.id}`;
+      const branchLength = Math.max(40, Number(segmentLengths[branchKey]) || Number(wire.branchLengthMm) || distanceLength(junction, branchPoint));
       const branchSegment = addSegment({
         id: `B${segmentIndex++}`,
-        key: `branch:${wire.id}`,
+        key: branchKey,
         baseKey: key,
         fromNodeId: junction.id,
         toNodeId: branchNode.id,
@@ -506,7 +516,7 @@ function buildTopology(layoutNodes, wires) {
       key: segmentKeyForNodes(startNode.id, endNode.id),
       fromNodeId: startNode.id,
       toNodeId: endNode.id,
-      lengthMm: Number(wire.lengthMm) || distanceLength(start, end),
+      lengthMm: Number(segmentLengths[segmentKeyForNodes(startNode.id, endNode.id)]) || Number(wire.lengthMm) || distanceLength(start, end),
       path: cubicPath(start, end),
       label: { x: (start.x + end.x) / 2, y: (start.y + end.y) / 2 - 28 },
     });
@@ -515,6 +525,59 @@ function buildTopology(layoutNodes, wires) {
   });
 
   return { segments, junctions, wireRoutes, segmentWires, rootId: connectors[0]?.id || "" };
+}
+
+function conductorRouteLength(wire, topology) {
+  const routeIds = topology.wireRoutes.get(wire.id) || [];
+  const total = routeIds.reduce((sum, segmentId) => {
+    const segment = topology.segments.find((item) => item.id === segmentId);
+    return sum + (Number(segment?.lengthMm) || 0);
+  }, 0);
+  return total || Number(wire.lengthMm) || 100;
+}
+
+function routeDisplayLabel(routeIds, topology) {
+  const segments = routeIds
+    .map((segmentId) => topology.segments.find((segment) => segment.id === segmentId))
+    .filter(Boolean);
+  if (!segments.length) return "";
+
+  return segments.reduce((parts, segment, index) => {
+    if (index > 0) {
+      const previous = segments[index - 1];
+      const sharedJunction = [previous.fromNodeId, previous.toNodeId].find(
+        (nodeId) =>
+          typeof nodeId === "string" &&
+          nodeId.startsWith("N") &&
+          (segment.fromNodeId === nodeId || segment.toNodeId === nodeId),
+      );
+      if (sharedJunction) parts.push(sharedJunction);
+    }
+    parts.push(segment.id);
+    return parts;
+  }, []).join(" / ");
+}
+
+function isBranchOnlySegment(segment) {
+  return typeof segment?.key === "string" && segment.key.startsWith("branch:");
+}
+
+function segmentTouchesWireEndpoint(segment, wire) {
+  if (!segment || !wire) return false;
+  const endpointNodeIds = new Set([wire.from?.nodeId, wire.to?.nodeId]);
+  return endpointNodeIds.has(segment.fromNodeId) || endpointNodeIds.has(segment.toNodeId);
+}
+
+function routeCandidateSegmentsForWire(topology, routeDecisionWire) {
+  if (!routeDecisionWire) return [];
+  return topology.segments.filter((segment) => {
+    const segmentWireIds = new Set((topology.segmentWires.get(segment.id) || []).map((wire) => wire.id));
+    return (
+      !segmentWireIds.has(routeDecisionWire.id) &&
+      !isBranchOnlySegment(segment) &&
+      segmentTouchesWireEndpoint(segment, routeDecisionWire)
+    );
+  });
 }
 
 export default function CanvasConfigurator({
@@ -531,6 +594,7 @@ export default function CanvasConfigurator({
   const [quantity, setQuantity] = useState(initialDraft?.quantity || 10);
   const [nodes, setNodes] = useState(initialDraft?.nodes || defaultNodes);
   const [wires, setWires] = useState(initialDraft?.wires || defaultWires);
+  const [segmentLengths, setSegmentLengths] = useState(initialDraft?.segmentLengths || {});
   const [pendingEndpoint, setPendingEndpoint] = useState(null);
   const [connectorPicker, setConnectorPicker] = useState(null);
   const [wireGeometry, setWireGeometry] = useState({});
@@ -542,7 +606,6 @@ export default function CanvasConfigurator({
   const [selectedWireId, setSelectedWireId] = useState("");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
   const [routeDecisionWireId, setRouteDecisionWireId] = useState("");
-  const [preferredRouteSegmentKey, setPreferredRouteSegmentKey] = useState("");
   const canvasRef = useRef(null);
   const pinRefs = useRef(new Map());
 
@@ -553,7 +616,7 @@ export default function CanvasConfigurator({
     [layoutNodes],
   );
 
-  const topology = useMemo(() => buildTopology(layoutNodes, wires), [layoutNodes, wires]);
+  const topology = useMemo(() => buildTopology(layoutNodes, wires, segmentLengths), [layoutNodes, segmentLengths, wires]);
 
   const connectorNodes = layoutNodes.filter((node) => node.type === "connector");
   const selectedConnector =
@@ -570,12 +633,7 @@ export default function CanvasConfigurator({
     ? topology.segmentWires.get(selectedSegment.id) || []
     : [];
   const routeDecisionWire = wires.find((wire) => wire.id === routeDecisionWireId) || null;
-  const routeCandidateSegments = routeDecisionWire
-    ? topology.segments.filter((segment) => {
-        const segmentWireIds = new Set((topology.segmentWires.get(segment.id) || []).map((wire) => wire.id));
-        return !segmentWireIds.has(routeDecisionWire.id);
-      })
-    : [];
+  const routeCandidateSegments = routeCandidateSegmentsForWire(topology, routeDecisionWire);
 
   const midColumnStates = useMemo(
     () =>
@@ -703,13 +761,14 @@ export default function CanvasConfigurator({
           quantity,
           nodes,
           wires,
+          segmentLengths,
           updatedAt: new Date().toISOString(),
         }),
       );
     } catch {
       // Draft restore is a convenience; checkout should not depend on browser storage.
     }
-  }, [configurationName, draftStorageKey, nodes, quantity, wires]);
+  }, [configurationName, draftStorageKey, nodes, quantity, segmentLengths, wires]);
 
   const registerPin = (endpoint) => (element) => {
     const key = endpointKey(endpoint);
@@ -881,26 +940,20 @@ export default function CanvasConfigurator({
     if (!duplicate) {
       const defaultGauge = defaultGaugeForEndpoints(nodes, pendingEndpoint, endpoint);
       const nextWireId = createWireId(wires);
-      setWires((current) => [
-        ...current,
-        {
-          id: nextWireId,
-          from: pendingEndpoint,
-          to: endpoint,
-          lengthMm: 100,
-          wireType: defaultWireTypeId,
-          gauge: defaultGauge,
-          color: "Black",
-          route: preferredRouteSegmentKey
-            ? { type: "branch", segmentKey: preferredRouteSegmentKey, ratio: 0.52 }
-            : { type: "direct" },
-        },
-      ]);
+      const nextWire = {
+        id: nextWireId,
+        from: pendingEndpoint,
+        to: endpoint,
+        lengthMm: 100,
+        wireType: defaultWireTypeId,
+        gauge: defaultGauge,
+        color: "Black",
+        route: { type: "direct" },
+      };
+      setWires((current) => [...current, nextWire]);
       setSelectedWireId(nextWireId);
       setSelectedSegmentId("");
-      if (preferredRouteSegmentKey) {
-        setPreferredRouteSegmentKey("");
-      } else if (topology.segments.length) {
+      if (routeCandidateSegmentsForWire(topology, nextWire).length) {
         setRouteDecisionWireId(nextWireId);
       }
     }
@@ -929,30 +982,24 @@ export default function CanvasConfigurator({
     setSelectedSegmentId("");
   };
 
-  const updateSegmentLength = (segmentId, lengthMm) => {
-    const nextLength = clamp(Math.round(Number(lengthMm) || 100), 25, 2500);
-    const segmentWires = topology.segmentWires.get(segmentId) || [];
-    const segmentWireIds = new Set(segmentWires.map((wire) => wire.id));
-    if (!segmentWireIds.size) return;
-    setWires((current) =>
-      current.map((wire) =>
-        segmentWireIds.has(wire.id) ? { ...wire, lengthMm: nextLength } : wire,
-      ),
-    );
+  const requestRouteDecision = (wireId) => {
+    setRouteDecisionWireId(wireId);
+    setSelectedWireId(wireId);
+    setSelectedSegmentId("");
   };
 
-  const requestBranchPoint = (segmentId) => {
+  const updateSegmentLength = (segmentId, lengthMm) => {
+    const nextLength = clamp(Math.round(Number(lengthMm) || 100), 25, 2500);
     const segment = topology.segments.find((item) => item.id === segmentId);
-    if (!segment) return;
-    if (selectedWireId) {
-      setWireBranchRoute(selectedWireId, segment);
-      setSubmitError("");
-      return;
-    }
-    setPreferredRouteSegmentKey(segment.baseKey || segment.key || "");
-    setSelectedSegmentId(segmentId);
-    setSelectedWireId("");
-    setSubmitError("This bundle is selected as the route for the next new conductor. Start a connector pin, then choose the destination pin.");
+    if (!segment?.key) return;
+    setSegmentLengths((current) => ({ ...current, [segment.key]: nextLength }));
+  };
+
+  const deleteWire = (wireId) => {
+    setWires((current) => current.filter((wire) => wire.id !== wireId));
+    if (selectedWireId === wireId) setSelectedWireId("");
+    if (wireModalId === wireId) setWireModalId("");
+    if (routeDecisionWireId === wireId) setRouteDecisionWireId("");
   };
 
   const updateMidElement = (nodeId, patch) => {
@@ -968,13 +1015,14 @@ export default function CanvasConfigurator({
         id: wire.id,
         start: wire.from,
         end: wire.to,
-        startLabel: endpointLabel(wire.from),
-        endLabel: endpointLabel(wire.to),
-        lengthMm: Number(wire.lengthMm),
+        startLabel: endpointDisplayLabel(wire.from, nodeById),
+        endLabel: endpointDisplayLabel(wire.to, nodeById),
+        lengthMm: conductorRouteLength(wire, topology),
         wireType: type.label,
         wireTypeId: type.id,
         wireGaugeAwg: Number(wire.gauge),
         wireColor: wire.color,
+        route: wire.route || { type: "direct" },
       };
     });
 
@@ -1026,13 +1074,14 @@ export default function CanvasConfigurator({
         id: wire.id,
         start: wire.from,
         end: wire.to,
-        startLabel: endpointLabel(wire.from),
-        endLabel: endpointLabel(wire.to),
-        lengthMm: Number(wire.lengthMm),
+        startLabel: endpointDisplayLabel(wire.from, nodeById),
+        endLabel: endpointDisplayLabel(wire.to, nodeById),
+        lengthMm: conductorRouteLength(wire, topology),
         wireType: type.label,
         wireTypeId: type.id,
         wireGaugeAwg: Number(wire.gauge),
         wireColor: wire.color,
+        route: wire.route || { type: "direct" },
       };
     }),
   });
@@ -1268,6 +1317,7 @@ export default function CanvasConfigurator({
           routeDecisionWire={routeDecisionWire}
           routeCandidateSegments={routeCandidateSegments}
           topology={topology}
+          nodeById={nodeById}
           onSelectWire={(wireId) => {
             setSelectedWireId(wireId);
             setSelectedSegmentId("");
@@ -1276,9 +1326,10 @@ export default function CanvasConfigurator({
           onPinClick={handlePinClick}
           onOpenWire={setWireModalId}
           onUpdateSegmentLength={updateSegmentLength}
-          onRequestBranchPoint={requestBranchPoint}
           onKeepDirectRoute={setWireDirectRoute}
           onJoinSegmentRoute={setWireBranchRoute}
+          onRequestRouteDecision={requestRouteDecision}
+          onDeleteWire={deleteWire}
           onDeleteConnector={deleteNode}
           onUpdateConnector={updateConnector}
           onFamilyChange={changeConnectorFamily}
@@ -1326,6 +1377,7 @@ export default function CanvasConfigurator({
       {selectedWire && (
         <WireConfigurationModal
           wire={selectedWire}
+          nodeById={nodeById}
           onClose={() => setWireModalId("")}
           onSave={(patch) => {
             updateWire(selectedWire.id, patch);
@@ -1454,14 +1506,16 @@ function TopologyDetailPanel({
   routeDecisionWire,
   routeCandidateSegments,
   topology,
+  nodeById,
   onSelectWire,
   onSelectSegment,
   onPinClick,
   onOpenWire,
   onUpdateSegmentLength,
-  onRequestBranchPoint,
   onKeepDirectRoute,
   onJoinSegmentRoute,
+  onRequestRouteDecision,
+  onDeleteWire,
   onDeleteConnector,
   onUpdateConnector,
   onFamilyChange,
@@ -1501,7 +1555,7 @@ function TopologyDetailPanel({
           onSelectWire={onSelectWire}
           onOpenWire={onOpenWire}
           onUpdateSegmentLength={onUpdateSegmentLength}
-          onRequestBranchPoint={onRequestBranchPoint}
+          nodeById={nodeById}
         />
       </aside>
     );
@@ -1572,7 +1626,7 @@ function TopologyDetailPanel({
         {pendingEndpoint && (
           <div className="topology-pending-note">
             <GitBranch size={14} />
-            Start pin selected: {endpointLabel(pendingEndpoint)}. Choose another pin row to connect.
+            Start pin selected: {endpointDisplayLabel(pendingEndpoint, nodeById)}. Choose another pin row to connect.
           </div>
         )}
         <div className="topology-pin-table-wrap">
@@ -1603,7 +1657,7 @@ function TopologyDetailPanel({
                     <td>
                       {wire ? (
                         <button type="button" onClick={() => onSelectWire(wire.id)}>
-                          <strong>{other?.nodeId}:{other?.pinId}</strong>
+                          <strong>{endpointDisplayLabel(other, nodeById)}</strong>
                           <span>{wire.signal || wire.id}</span>
                         </button>
                       ) : (
@@ -1629,7 +1683,7 @@ function TopologyDetailPanel({
                             onSelectSegment("");
                           }}
                         >
-                          {routeIds.join(" / ")}
+                          {routeDisplayLabel(routeIds, topology)}
                         </button>
                       ) : "-"}
                     </td>
@@ -1656,27 +1710,32 @@ function TopologyDetailPanel({
         </div>
       </section>
 
-      {routeDecisionWire && routeCandidateSegments.length > 0 && (
+      {routeDecisionWire && (
         <section className="topology-panel-card route-choice-card">
           <div className="topology-panel-title">
-            <span>Route this conductor</span>
-            <strong>{routeDecisionWire.from.nodeId}:{routeDecisionWire.from.pinId} - {routeDecisionWire.to.nodeId}:{routeDecisionWire.to.pinId}</strong>
+            <span>Choose physical route</span>
+            <strong>{endpointDisplayLabel(routeDecisionWire.from, nodeById)} - {endpointDisplayLabel(routeDecisionWire.to, nodeById)}</strong>
           </div>
           <div className="topology-route-choice">
-            <p>Choose whether this new conductor is an independent bundle or branches into an existing physical bundle.</p>
+            <p>This pin-to-pin connection is already created. Now choose whether it stays as a separate bundle, or shares a related existing physical path and branches at the split point.</p>
             <button type="button" onClick={() => onKeepDirectRoute(routeDecisionWire.id)}>
-              Keep as independent bundle
+              <strong>Keep independent</strong>
+              <span>Draw as its own bundle</span>
             </button>
             <div className="topology-route-choice-list">
-              {routeCandidateSegments.map((segment) => {
+              {routeCandidateSegments.length ? routeCandidateSegments.map((segment) => {
                 const count = topology.segmentWires.get(segment.id)?.length || 0;
                 return (
                   <button key={segment.id} type="button" onClick={() => onJoinSegmentRoute(routeDecisionWire.id, segment)}>
-                    <strong>Join {segment.id}</strong>
+                    <strong>Share path through {segment.id}</strong>
                     <span>{segment.lengthMm}mm / {count} wire{count === 1 ? "" : "s"}</span>
                   </button>
                 );
-              })}
+              }) : (
+                <div className="topology-route-choice-empty">
+                  No related existing bundle path touches this conductor endpoint.
+                </div>
+              )}
             </div>
           </div>
         </section>
@@ -1687,10 +1746,12 @@ function TopologyDetailPanel({
         selectedSegment={selectedSegment}
         selectedSegmentWires={selectedSegmentWires}
         topology={topology}
+        nodeById={nodeById}
         onSelectWire={onSelectWire}
         onOpenWire={onOpenWire}
         onUpdateSegmentLength={onUpdateSegmentLength}
-        onRequestBranchPoint={onRequestBranchPoint}
+        onRequestRouteDecision={onRequestRouteDecision}
+        onDeleteWire={onDeleteWire}
       />
     </aside>
   );
@@ -1715,25 +1776,36 @@ function TopologySelectionSummary({
   selectedSegment,
   selectedSegmentWires,
   topology,
+  nodeById,
   onSelectWire,
   onOpenWire,
   onUpdateSegmentLength,
-  onRequestBranchPoint,
+  onRequestRouteDecision,
+  onDeleteWire,
 }) {
   if (selectedWire) {
     const routeIds = topology.wireRoutes.get(selectedWire.id) || [];
     const routeSegments = routeIds
       .map((segmentId) => topology.segments.find((segment) => segment.id === segmentId))
       .filter(Boolean);
+    const canChangeRoute =
+      selectedWire.route?.type === "branch" ||
+      routeCandidateSegmentsForWire(topology, selectedWire).length > 0;
     return (
       <section className="topology-panel-card">
         <div className="topology-panel-title">
           <span>Selected conductor route</span>
-          <strong>{selectedWire.from.nodeId}:{selectedWire.from.pinId} - {selectedWire.to.nodeId}:{selectedWire.to.pinId}</strong>
+          <strong>{endpointDisplayLabel(selectedWire.from, nodeById)} - {endpointDisplayLabel(selectedWire.to, nodeById)}</strong>
         </div>
         <div className="topology-route-detail">
           <strong>{selectedWire.signal || selectedWire.id}</strong>
-          <p>{selectedWire.color} {selectedWire.gauge} AWG conductor, configured length {selectedWire.lengthMm}mm.</p>
+          <p>{selectedWire.color} {selectedWire.gauge} AWG conductor, routed length {conductorRouteLength(selectedWire, topology)}mm.</p>
+          {routeIds.length > 0 && (
+            <div className="topology-route-label">
+              <span>Physical route</span>
+              <strong>{routeDisplayLabel(routeIds, topology)}</strong>
+            </div>
+          )}
           <div className="topology-segment-list">
             {routeSegments.map((segment) => {
               const count = topology.segmentWires.get(segment.id)?.length || 0;
@@ -1748,6 +1820,14 @@ function TopologySelectionSummary({
           </div>
           <button className="topology-edit-wide" type="button" onClick={() => onOpenWire(selectedWire.id)}>
             Edit conductor details
+          </button>
+          {canChangeRoute && (
+            <button className="topology-edit-wide" type="button" onClick={() => onRequestRouteDecision?.(selectedWire.id)}>
+              Change physical route
+            </button>
+          )}
+          <button className="topology-danger-wide" type="button" onClick={() => onDeleteWire?.(selectedWire.id)}>
+            Remove this conductor
           </button>
         </div>
       </section>
@@ -1798,17 +1878,13 @@ function TopologySelectionSummary({
               <strong>Optional</strong>
             </div>
           </div>
-          <button className="topology-edit-wide" type="button" onClick={() => onRequestBranchPoint?.(selectedSegment.id)}>
-            <GitBranch size={14} />
-            Use this bundle for next conductor
-          </button>
           <p>This drawing segment contains the conductors listed below. Process fields are placeholders for sleeve, tape, clips, and branch manufacturing details.</p>
           <div className="topology-wire-list">
             {selectedSegmentWires.length ? selectedSegmentWires.map((wire) => (
               <button key={wire.id} type="button" onClick={() => onSelectWire(wire.id)}>
                 <strong>{wire.id}</strong>
-                <span>{wire.from.nodeId}:{wire.from.pinId} - {wire.to.nodeId}:{wire.to.pinId}</span>
-                <small>{wire.gauge} AWG / {wire.color}</small>
+                <span>{endpointDisplayLabel(wire.from, nodeById)} - {endpointDisplayLabel(wire.to, nodeById)}</span>
+                <small>{wire.gauge} AWG / {wire.color} / open route</small>
               </button>
             )) : <span className="topology-muted">No conductors assigned to this segment.</span>}
           </div>
@@ -2161,7 +2237,7 @@ function CanvasCheckoutConfirmationModal({
   );
 }
 
-function WireConfigurationModal({ wire, onClose, onSave }) {
+function WireConfigurationModal({ wire, nodeById, onClose, onSave }) {
   const [draft, setDraft] = useState(wire);
   const wireType = wireTypeById(draft.wireType);
 
@@ -2169,33 +2245,13 @@ function WireConfigurationModal({ wire, onClose, onSave }) {
 
   return (
     <ModalShell title={`Wire ${wire.id} Configuration`} onClose={onClose}>
-      <p>Configure wire length and gauge. Only supported catalog options are shown.</p>
+      <p>Configure conductor type, gauge, and color. Physical length is controlled by the bundle segments on the drawing.</p>
       <div className="modal-pin-row">
         <strong>Start Pin:</strong>
-        <span>{endpointLabel(wire.from)}</span>
+        <span>{endpointDisplayLabel(wire.from, nodeById)}</span>
         <strong>End Pin:</strong>
-        <span>{endpointLabel(wire.to)}</span>
+        <span>{endpointDisplayLabel(wire.to, nodeById)}</span>
       </div>
-      <label className="modal-field length-field">
-        <span>Wire length</span>
-        <div>
-          <input
-            type="number"
-            min="25"
-            max="2500"
-            value={draft.lengthMm}
-            onChange={(event) => setDraft({ ...draft, lengthMm: event.target.value })}
-          />
-          <small>mm</small>
-        </div>
-        <input
-          type="range"
-          min="25"
-          max="1000"
-          value={clamp(Number(draft.lengthMm) || 100, 25, 1000)}
-          onChange={(event) => setDraft({ ...draft, lengthMm: Number(event.target.value) })}
-        />
-      </label>
       <label className="modal-field">
         <span>Wire type</span>
         <select
