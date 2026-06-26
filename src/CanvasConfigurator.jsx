@@ -50,8 +50,8 @@ const MID_SLOT_TOP = 58;
 const MID_SLOT_STEP = 164;
 const MID_EMPTY_ADD_Y = 312;
 
-const TOPOLOGY_CANVAS_WIDTH = 1280;
-const TOPOLOGY_CANVAS_HEIGHT = 640;
+const TOPOLOGY_CANVAS_WIDTH = 2200;
+const TOPOLOGY_CANVAS_HEIGHT = 1200;
 const TOPOLOGY_CONNECTOR_WIDTH = 174;
 const TOPOLOGY_CONNECTOR_HEIGHT = 116;
 const TOPOLOGY_JUNCTION_RADIUS = 12;
@@ -865,6 +865,24 @@ export default function CanvasConfigurator({
     );
   };
 
+  const updateSegmentLength = (segmentId, lengthMm) => {
+    const nextLength = clamp(Math.round(Number(lengthMm) || 100), 25, 2500);
+    const segmentWires = topology.segmentWires.get(segmentId) || [];
+    const segmentWireIds = new Set(segmentWires.map((wire) => wire.id));
+    if (!segmentWireIds.size) return;
+    setWires((current) =>
+      current.map((wire) =>
+        segmentWireIds.has(wire.id) ? { ...wire, lengthMm: nextLength } : wire,
+      ),
+    );
+  };
+
+  const requestBranchPoint = (segmentId) => {
+    setSelectedSegmentId(segmentId);
+    setSelectedWireId("");
+    setSubmitError("Branch point placement is reserved here: next step is selecting which conductor(s) continue through the branch and the new connector pin.");
+  };
+
   const updateMidElement = (nodeId, patch) => {
     setNodes((current) =>
       current.map((node) => (node.id === nodeId ? { ...node, ...patch } : node)),
@@ -1115,6 +1133,7 @@ export default function CanvasConfigurator({
                   key={node.id}
                   node={node}
                   selected={selectedConnector?.id === node.id}
+                  pendingTarget={Boolean(pendingEndpoint && pendingEndpoint.nodeId !== node.id)}
                   connectedCount={wires.filter((wire) => wire.from.nodeId === node.id || wire.to.nodeId === node.id).length}
                   onSelect={() => {
                     setSelectedConnectorId(node.id);
@@ -1126,6 +1145,14 @@ export default function CanvasConfigurator({
                   canvasRef={canvasRef}
                 />
               ))}
+
+              {pendingEndpoint && (
+                <div className="topology-pending-banner">
+                  <GitBranch size={15} />
+                  <span>Connecting from {pendingEndpoint.nodeId}:{pendingEndpoint.pinId}. Click another connector, then choose an open pin row.</span>
+                  <button type="button" onClick={() => setPendingEndpoint(null)}>Cancel</button>
+                </div>
+              )}
 
               {!connectorNodes.length && (
                 <button
@@ -1174,6 +1201,8 @@ export default function CanvasConfigurator({
           onSelectSegment={setSelectedSegmentId}
           onPinClick={handlePinClick}
           onOpenWire={setWireModalId}
+          onUpdateSegmentLength={updateSegmentLength}
+          onRequestBranchPoint={requestBranchPoint}
           onDeleteConnector={deleteNode}
           onUpdateConnector={updateConnector}
           onFamilyChange={changeConnectorFamily}
@@ -1251,7 +1280,7 @@ export default function CanvasConfigurator({
   );
 }
 
-function TopologyConnectorCard({ node, selected, connectedCount, onSelect, onMove, onDelete, canvasRef }) {
+function TopologyConnectorCard({ node, selected, pendingTarget, connectedCount, onSelect, onMove, onDelete, canvasRef }) {
   const savedPart = connectorPartById(node.partId);
   const part = savedPart.pinCounts.includes(Number(node.pinCount))
     ? savedPart
@@ -1297,7 +1326,7 @@ function TopologyConnectorCard({ node, selected, connectedCount, onSelect, onMov
 
   return (
     <article
-      className={`topology-connector-card ${selected ? "selected" : ""}`}
+      className={`topology-connector-card ${selected ? "selected" : ""} ${pendingTarget ? "pending-target" : ""}`}
       style={{ left: node.x, top: node.y }}
       role="button"
       tabIndex={0}
@@ -1351,6 +1380,8 @@ function TopologyDetailPanel({
   onSelectSegment,
   onPinClick,
   onOpenWire,
+  onUpdateSegmentLength,
+  onRequestBranchPoint,
   onDeleteConnector,
   onUpdateConnector,
   onFamilyChange,
@@ -1389,6 +1420,8 @@ function TopologyDetailPanel({
           topology={topology}
           onSelectWire={onSelectWire}
           onOpenWire={onOpenWire}
+          onUpdateSegmentLength={onUpdateSegmentLength}
+          onRequestBranchPoint={onRequestBranchPoint}
         />
       </aside>
     );
@@ -1396,7 +1429,7 @@ function TopologyDetailPanel({
 
   return (
     <aside className="topology-detail-panel">
-      <section className="topology-panel-card">
+      <section className="topology-panel-card connector-detail-card">
         <div className="topology-panel-title">
           <span>Selected connector</span>
           <strong>{selectedConnector.id}</strong>
@@ -1451,10 +1484,8 @@ function TopologyDetailPanel({
             Delete connector
           </button>
         </div>
-      </section>
 
-      <section className="topology-panel-card pin-card">
-        <div className="topology-panel-title">
+        <div className="topology-panel-title topology-panel-subtitle">
           <span>Pin connection table</span>
           <strong>{assignedCount} assigned</strong>
         </div>
@@ -1552,6 +1583,8 @@ function TopologyDetailPanel({
         topology={topology}
         onSelectWire={onSelectWire}
         onOpenWire={onOpenWire}
+        onUpdateSegmentLength={onUpdateSegmentLength}
+        onRequestBranchPoint={onRequestBranchPoint}
       />
     </aside>
   );
@@ -1578,6 +1611,8 @@ function TopologySelectionSummary({
   topology,
   onSelectWire,
   onOpenWire,
+  onUpdateSegmentLength,
+  onRequestBranchPoint,
 }) {
   if (selectedWire) {
     const routeIds = topology.wireRoutes.get(selectedWire.id) || [];
@@ -1614,6 +1649,7 @@ function TopologySelectionSummary({
   }
 
   if (selectedSegment) {
+    const selectedLength = Number(selectedSegment.lengthMm) || 100;
     return (
       <section className="topology-panel-card">
         <div className="topology-panel-title">
@@ -1622,7 +1658,45 @@ function TopologySelectionSummary({
         </div>
         <div className="topology-route-detail">
           <strong>{selectedSegment.lengthMm}mm physical bundle section</strong>
-          <p>This drawing segment contains the conductors listed below. Sleeve, tape, clips, and branch process details belong here.</p>
+          <label className="topology-segment-length-control">
+            <span>Bundle segment length</span>
+            <div>
+              <input
+                type="number"
+                min="25"
+                max="2500"
+                value={selectedLength}
+                onChange={(event) => onUpdateSegmentLength?.(selectedSegment.id, event.target.value)}
+              />
+              <small>mm</small>
+            </div>
+            <input
+              type="range"
+              min="25"
+              max="1200"
+              value={clamp(selectedLength, 25, 1200)}
+              onChange={(event) => onUpdateSegmentLength?.(selectedSegment.id, Number(event.target.value))}
+            />
+          </label>
+          <div className="topology-process-grid">
+            <div>
+              <span>Covering</span>
+              <strong>Sleeve / tape</strong>
+            </div>
+            <div>
+              <span>Fixing</span>
+              <strong>Clip / tie</strong>
+            </div>
+            <div>
+              <span>Branch</span>
+              <strong>Optional</strong>
+            </div>
+          </div>
+          <button className="topology-edit-wide" type="button" onClick={() => onRequestBranchPoint?.(selectedSegment.id)}>
+            <GitBranch size={14} />
+            Add branch point from this segment
+          </button>
+          <p>This drawing segment contains the conductors listed below. Process fields are placeholders for sleeve, tape, clips, and branch manufacturing details.</p>
           <div className="topology-wire-list">
             {selectedSegmentWires.length ? selectedSegmentWires.map((wire) => (
               <button key={wire.id} type="button" onClick={() => onSelectWire(wire.id)}>
