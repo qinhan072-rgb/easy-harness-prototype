@@ -340,6 +340,17 @@ function sameConnectorPairKey(a, b) {
   return [a, b].sort().join("::");
 }
 
+function segmentKeyForNodes(a, b) {
+  return `pair:${sameConnectorPairKey(a, b)}`;
+}
+
+function pointBetween(start, end, ratio = 0.5) {
+  return {
+    x: start.x + (end.x - start.x) * ratio,
+    y: start.y + (end.y - start.y) * ratio,
+  };
+}
+
 function buildTopology(layoutNodes, wires) {
   const connectors = layoutNodes.filter((node) => node.type === "connector");
   const connectorById = new Map(connectors.map((node) => [node.id, node]));
@@ -351,26 +362,12 @@ function buildTopology(layoutNodes, wires) {
     return { segments: [], junctions: [], wireRoutes: new Map(), segmentWires: new Map(), rootId: connectors[0]?.id || "" };
   }
 
-  const degree = new Map(connectors.map((node) => [node.id, 0]));
-  usableWires.forEach((wire) => {
-    degree.set(wire.from.nodeId, (degree.get(wire.from.nodeId) || 0) + 1);
-    degree.set(wire.to.nodeId, (degree.get(wire.to.nodeId) || 0) + 1);
-  });
-  const root = [...connectors].sort((a, b) => {
-    const degreeDiff = (degree.get(b.id) || 0) - (degree.get(a.id) || 0);
-    if (degreeDiff) return degreeDiff;
-    return Number(a.x) - Number(b.x);
-  })[0];
-
-  const rootWires = usableWires.filter((wire) => wire.from.nodeId === root.id || wire.to.nodeId === root.id);
-  const directWires = usableWires.filter((wire) => wire.from.nodeId !== root.id && wire.to.nodeId !== root.id);
-  const targetIds = [...new Set(rootWires.map((wire) => (wire.from.nodeId === root.id ? wire.to.nodeId : wire.from.nodeId)))];
-  const rootPoint = topologyPortPoint(root);
   const segments = [];
   const junctions = [];
   const wireRoutes = new Map();
   const segmentWires = new Map();
   let segmentIndex = 1;
+  let junctionIndex = 1;
 
   const addSegment = (segment) => {
     segments.push(segment);
@@ -384,22 +381,39 @@ function buildTopology(layoutNodes, wires) {
     segmentWires.set(segmentId, current);
   };
 
-  if (targetIds.length <= 1) {
-    const pairGroups = new Map();
-    usableWires.forEach((wire) => {
-      const key = sameConnectorPairKey(wire.from.nodeId, wire.to.nodeId);
-      if (!pairGroups.has(key)) pairGroups.set(key, []);
-      pairGroups.get(key).push(wire);
-    });
+  const directGroups = new Map();
+  const branchWires = [];
+  usableWires.forEach((wire) => {
+    if (wire.route?.type === "branch" && wire.route.segmentKey) {
+      branchWires.push(wire);
+      return;
+    }
+    const key = segmentKeyForNodes(wire.from.nodeId, wire.to.nodeId);
+    if (!directGroups.has(key)) directGroups.set(key, []);
+    directGroups.get(key).push(wire);
+  });
 
-    pairGroups.forEach((group) => {
-      const firstWire = group[0];
-      const startNode = connectorById.get(firstWire.from.nodeId);
-      const endNode = connectorById.get(firstWire.to.nodeId);
-      const start = topologyPortPoint(startNode);
-      const end = topologyPortPoint(endNode);
+  branchWires.forEach((wire) => {
+    if (!directGroups.has(wire.route.segmentKey)) {
+      const key = segmentKeyForNodes(wire.from.nodeId, wire.to.nodeId);
+      if (!directGroups.has(key)) directGroups.set(key, []);
+      directGroups.get(key).push({ ...wire, route: { type: "direct" } });
+    }
+  });
+
+  directGroups.forEach((group, key) => {
+    const firstWire = group[0];
+    const startNode = connectorById.get(firstWire.from.nodeId);
+    const endNode = connectorById.get(firstWire.to.nodeId);
+    if (!startNode || !endNode) return;
+    const start = topologyPortPoint(startNode);
+    const end = topologyPortPoint(endNode);
+    const branches = branchWires.filter((wire) => wire.route?.segmentKey === key);
+
+    if (!branches.length) {
       const segment = addSegment({
         id: `B${segmentIndex++}`,
+        key,
         fromNodeId: startNode.id,
         toNodeId: endNode.id,
         lengthMm: Math.max(...group.map((wire) => Number(wire.lengthMm) || distanceLength(start, end))),
@@ -410,65 +424,78 @@ function buildTopology(layoutNodes, wires) {
         wireRoutes.set(wire.id, [segment.id]);
         attachWireToSegment(wire, segment.id);
       });
-    });
-    return { segments, junctions, wireRoutes, segmentWires, rootId: root.id };
-  }
+      return;
+    }
 
-  const targetPoints = targetIds
-    .map((id) => connectorById.get(id))
-    .filter(Boolean)
-    .map((node) => topologyPortPoint(node));
-  const avgTargetX = targetPoints.reduce((sum, point) => sum + point.x, 0) / targetPoints.length;
-  const avgTargetY = targetPoints.reduce((sum, point) => sum + point.y, 0) / targetPoints.length;
-  const junction = {
-    id: "N1",
-    x: clamp(rootPoint.x + (avgTargetX - rootPoint.x) * 0.44, 260, TOPOLOGY_CANVAS_WIDTH - 260),
-    y: clamp(rootPoint.y + (avgTargetY - rootPoint.y) * 0.18, 145, TOPOLOGY_CANVAS_HEIGHT - 145),
-  };
-  junctions.push(junction);
+    const ratio = clamp(Number(branches[0]?.route?.ratio) || 0.52, 0.2, 0.8);
+    const junctionPoint = pointBetween(start, end, ratio);
+    const junction = {
+      id: `N${junctionIndex++}`,
+      key: `${key}:junction`,
+      x: junctionPoint.x,
+      y: junctionPoint.y,
+    };
+    junctions.push(junction);
 
-  const trunkLength = Math.max(100, Math.round(distanceLength(rootPoint, junction) / 10) * 10);
-  const trunk = addSegment({
-    id: `B${segmentIndex++}`,
-    fromNodeId: root.id,
-    toNodeId: junction.id,
-    lengthMm: trunkLength,
-    path: cubicPath(rootPoint, junction),
-    label: { x: (rootPoint.x + junction.x) / 2, y: Math.min(rootPoint.y, junction.y) - 34 },
-  });
-
-  const groupedByTarget = new Map(targetIds.map((id) => [id, []]));
-  rootWires.forEach((wire) => {
-    const targetId = wire.from.nodeId === root.id ? wire.to.nodeId : wire.from.nodeId;
-    groupedByTarget.get(targetId)?.push(wire);
-    attachWireToSegment(wire, trunk.id);
-  });
-
-  groupedByTarget.forEach((group, targetId) => {
-    const targetNode = connectorById.get(targetId);
-    if (!targetNode || !group.length) return;
-    const target = topologyPortPoint(targetNode);
-    const bend = target.y < junction.y ? -18 : 18;
-    const routeLength = Math.max(...group.map((wire) => Number(wire.lengthMm) || distanceLength(rootPoint, target)));
-    const branchLength = Math.max(60, routeLength - trunkLength);
-    const branch = addSegment({
+    const fullLength = Math.max(...group.map((wire) => Number(wire.lengthMm) || distanceLength(start, end)));
+    const firstLength = Math.max(40, Math.round(fullLength * ratio));
+    const secondLength = Math.max(40, fullLength - firstLength);
+    const firstSegment = addSegment({
       id: `B${segmentIndex++}`,
-      fromNodeId: junction.id,
-      toNodeId: targetId,
-      lengthMm: branchLength,
-      path: cubicPath(junction, target, bend),
-      label: {
-        x: (junction.x + target.x) / 2,
-        y: (junction.y + target.y) / 2 + (target.y < junction.y ? -24 : 34),
-      },
+      key: `${key}:start`,
+      baseKey: key,
+      fromNodeId: startNode.id,
+      toNodeId: junction.id,
+      lengthMm: firstLength,
+      path: cubicPath(start, junction),
+      label: { x: (start.x + junction.x) / 2, y: (start.y + junction.y) / 2 - 28 },
     });
+    const secondSegment = addSegment({
+      id: `B${segmentIndex++}`,
+      key: `${key}:end`,
+      baseKey: key,
+      fromNodeId: junction.id,
+      toNodeId: endNode.id,
+      lengthMm: secondLength,
+      path: cubicPath(junction, end),
+      label: { x: (junction.x + end.x) / 2, y: (junction.y + end.y) / 2 - 28 },
+    });
+
     group.forEach((wire) => {
-      wireRoutes.set(wire.id, [trunk.id, branch.id]);
-      attachWireToSegment(wire, branch.id);
+      wireRoutes.set(wire.id, [firstSegment.id, secondSegment.id]);
+      attachWireToSegment(wire, firstSegment.id);
+      attachWireToSegment(wire, secondSegment.id);
+    });
+
+    branches.forEach((wire) => {
+      const sharedNodeId = [wire.from.nodeId, wire.to.nodeId].find((nodeId) => nodeId === startNode.id || nodeId === endNode.id);
+      const branchEndpoint = [wire.from, wire.to].find((endpoint) => endpoint.nodeId !== sharedNodeId) || wire.to;
+      const branchNode = connectorById.get(branchEndpoint.nodeId);
+      if (!branchNode) return;
+      const branchPoint = topologyPortPoint(branchNode);
+      const sharedSegment = sharedNodeId === endNode.id ? secondSegment : firstSegment;
+      const branchLength = Math.max(40, Number(wire.branchLengthMm) || distanceLength(junction, branchPoint));
+      const branchSegment = addSegment({
+        id: `B${segmentIndex++}`,
+        key: `branch:${wire.id}`,
+        baseKey: key,
+        fromNodeId: junction.id,
+        toNodeId: branchNode.id,
+        lengthMm: branchLength,
+        path: cubicPath(junction, branchPoint, branchPoint.y < junction.y ? -18 : 18),
+        label: {
+          x: (junction.x + branchPoint.x) / 2,
+          y: (junction.y + branchPoint.y) / 2 + (branchPoint.y < junction.y ? -28 : 34),
+        },
+      });
+      wireRoutes.set(wire.id, [sharedSegment.id, branchSegment.id]);
+      attachWireToSegment(wire, sharedSegment.id);
+      attachWireToSegment(wire, branchSegment.id);
     });
   });
 
-  directWires.forEach((wire) => {
+  branchWires.forEach((wire) => {
+    if (wireRoutes.has(wire.id)) return;
     const startNode = connectorById.get(wire.from.nodeId);
     const endNode = connectorById.get(wire.to.nodeId);
     if (!startNode || !endNode) return;
@@ -476,6 +503,7 @@ function buildTopology(layoutNodes, wires) {
     const end = topologyPortPoint(endNode);
     const segment = addSegment({
       id: `B${segmentIndex++}`,
+      key: segmentKeyForNodes(startNode.id, endNode.id),
       fromNodeId: startNode.id,
       toNodeId: endNode.id,
       lengthMm: Number(wire.lengthMm) || distanceLength(start, end),
@@ -486,7 +514,7 @@ function buildTopology(layoutNodes, wires) {
     attachWireToSegment(wire, segment.id);
   });
 
-  return { segments, junctions, wireRoutes, segmentWires, rootId: root.id };
+  return { segments, junctions, wireRoutes, segmentWires, rootId: connectors[0]?.id || "" };
 }
 
 export default function CanvasConfigurator({
@@ -513,6 +541,8 @@ export default function CanvasConfigurator({
   const [selectedConnectorId, setSelectedConnectorId] = useState("");
   const [selectedWireId, setSelectedWireId] = useState("");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
+  const [routeDecisionWireId, setRouteDecisionWireId] = useState("");
+  const [preferredRouteSegmentKey, setPreferredRouteSegmentKey] = useState("");
   const canvasRef = useRef(null);
   const pinRefs = useRef(new Map());
 
@@ -538,6 +568,13 @@ export default function CanvasConfigurator({
       : null);
   const selectedSegmentWires = selectedSegment
     ? topology.segmentWires.get(selectedSegment.id) || []
+    : [];
+  const routeDecisionWire = wires.find((wire) => wire.id === routeDecisionWireId) || null;
+  const routeCandidateSegments = routeDecisionWire
+    ? topology.segments.filter((segment) => {
+        const segmentWireIds = new Set((topology.segmentWires.get(segment.id) || []).map((wire) => wire.id));
+        return !segmentWireIds.has(routeDecisionWire.id);
+      })
     : [];
 
   const midColumnStates = useMemo(
@@ -595,10 +632,13 @@ export default function CanvasConfigurator({
     if (selectedWireId && !wires.some((wire) => wire.id === selectedWireId)) {
       setSelectedWireId("");
     }
+    if (routeDecisionWireId && !wires.some((wire) => wire.id === routeDecisionWireId)) {
+      setRouteDecisionWireId("");
+    }
     if (selectedSegmentId && !topology.segments.some((segment) => segment.id === selectedSegmentId)) {
       setSelectedSegmentId("");
     }
-  }, [selectedSegmentId, selectedWireId, topology.segments, wires]);
+  }, [routeDecisionWireId, selectedSegmentId, selectedWireId, topology.segments, wires]);
 
   useEffect(() => {
     const updateGeometry = () => {
@@ -851,10 +891,18 @@ export default function CanvasConfigurator({
           wireType: defaultWireTypeId,
           gauge: defaultGauge,
           color: "Black",
+          route: preferredRouteSegmentKey
+            ? { type: "branch", segmentKey: preferredRouteSegmentKey, ratio: 0.52 }
+            : { type: "direct" },
         },
       ]);
       setSelectedWireId(nextWireId);
       setSelectedSegmentId("");
+      if (preferredRouteSegmentKey) {
+        setPreferredRouteSegmentKey("");
+      } else if (topology.segments.length) {
+        setRouteDecisionWireId(nextWireId);
+      }
     }
     setPendingEndpoint(null);
   };
@@ -863,6 +911,22 @@ export default function CanvasConfigurator({
     setWires((current) =>
       current.map((wire) => (wire.id === wireId ? { ...wire, ...patch } : wire)),
     );
+  };
+
+  const setWireDirectRoute = (wireId) => {
+    updateWire(wireId, { route: { type: "direct" } });
+    setRouteDecisionWireId("");
+  };
+
+  const setWireBranchRoute = (wireId, segment) => {
+    const segmentKey = segment?.baseKey || segment?.key;
+    if (!segmentKey) return;
+    updateWire(wireId, {
+      route: { type: "branch", segmentKey, ratio: 0.52 },
+    });
+    setRouteDecisionWireId("");
+    setSelectedWireId(wireId);
+    setSelectedSegmentId("");
   };
 
   const updateSegmentLength = (segmentId, lengthMm) => {
@@ -878,9 +942,17 @@ export default function CanvasConfigurator({
   };
 
   const requestBranchPoint = (segmentId) => {
+    const segment = topology.segments.find((item) => item.id === segmentId);
+    if (!segment) return;
+    if (selectedWireId) {
+      setWireBranchRoute(selectedWireId, segment);
+      setSubmitError("");
+      return;
+    }
+    setPreferredRouteSegmentKey(segment.baseKey || segment.key || "");
     setSelectedSegmentId(segmentId);
     setSelectedWireId("");
-    setSubmitError("Branch point placement is reserved here: next step is selecting which conductor(s) continue through the branch and the new connector pin.");
+    setSubmitError("This bundle is selected as the route for the next new conductor. Start a connector pin, then choose the destination pin.");
   };
 
   const updateMidElement = (nodeId, patch) => {
@@ -1193,6 +1265,8 @@ export default function CanvasConfigurator({
           selectedWireId={selectedWireId}
           selectedSegment={selectedSegment}
           selectedSegmentWires={selectedSegmentWires}
+          routeDecisionWire={routeDecisionWire}
+          routeCandidateSegments={routeCandidateSegments}
           topology={topology}
           onSelectWire={(wireId) => {
             setSelectedWireId(wireId);
@@ -1203,6 +1277,8 @@ export default function CanvasConfigurator({
           onOpenWire={setWireModalId}
           onUpdateSegmentLength={updateSegmentLength}
           onRequestBranchPoint={requestBranchPoint}
+          onKeepDirectRoute={setWireDirectRoute}
+          onJoinSegmentRoute={setWireBranchRoute}
           onDeleteConnector={deleteNode}
           onUpdateConnector={updateConnector}
           onFamilyChange={changeConnectorFamily}
@@ -1375,6 +1451,8 @@ function TopologyDetailPanel({
   selectedWireId,
   selectedSegment,
   selectedSegmentWires,
+  routeDecisionWire,
+  routeCandidateSegments,
   topology,
   onSelectWire,
   onSelectSegment,
@@ -1382,6 +1460,8 @@ function TopologyDetailPanel({
   onOpenWire,
   onUpdateSegmentLength,
   onRequestBranchPoint,
+  onKeepDirectRoute,
+  onJoinSegmentRoute,
   onDeleteConnector,
   onUpdateConnector,
   onFamilyChange,
@@ -1432,7 +1512,7 @@ function TopologyDetailPanel({
       <section className="topology-panel-card connector-detail-card">
         <div className="topology-panel-title">
           <span>Selected connector</span>
-          <strong>{selectedConnector.id}</strong>
+          <strong>{connectorDisplayName(selectedConnector)}</strong>
         </div>
         <div className="topology-connector-form">
           <label className="topology-form-field span-2">
@@ -1576,6 +1656,32 @@ function TopologyDetailPanel({
         </div>
       </section>
 
+      {routeDecisionWire && routeCandidateSegments.length > 0 && (
+        <section className="topology-panel-card route-choice-card">
+          <div className="topology-panel-title">
+            <span>Route this conductor</span>
+            <strong>{routeDecisionWire.from.nodeId}:{routeDecisionWire.from.pinId} - {routeDecisionWire.to.nodeId}:{routeDecisionWire.to.pinId}</strong>
+          </div>
+          <div className="topology-route-choice">
+            <p>Choose whether this new conductor is an independent bundle or branches into an existing physical bundle.</p>
+            <button type="button" onClick={() => onKeepDirectRoute(routeDecisionWire.id)}>
+              Keep as independent bundle
+            </button>
+            <div className="topology-route-choice-list">
+              {routeCandidateSegments.map((segment) => {
+                const count = topology.segmentWires.get(segment.id)?.length || 0;
+                return (
+                  <button key={segment.id} type="button" onClick={() => onJoinSegmentRoute(routeDecisionWire.id, segment)}>
+                    <strong>Join {segment.id}</strong>
+                    <span>{segment.lengthMm}mm / {count} wire{count === 1 ? "" : "s"}</span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        </section>
+      )}
+
       <TopologySelectionSummary
         selectedWire={selectedWire}
         selectedSegment={selectedSegment}
@@ -1694,7 +1800,7 @@ function TopologySelectionSummary({
           </div>
           <button className="topology-edit-wide" type="button" onClick={() => onRequestBranchPoint?.(selectedSegment.id)}>
             <GitBranch size={14} />
-            Add branch point from this segment
+            Use this bundle for next conductor
           </button>
           <p>This drawing segment contains the conductors listed below. Process fields are placeholders for sleeve, tape, clips, and branch manufacturing details.</p>
           <div className="topology-wire-list">
@@ -1712,10 +1818,7 @@ function TopologySelectionSummary({
   }
 
   return (
-    <section className="topology-panel-card empty">
-      <strong>Select a pin row or bundle segment</strong>
-      <span>Pin rows show conductor routes. Bundle segments show physical harness sections.</span>
-    </section>
+    null
   );
 }
 

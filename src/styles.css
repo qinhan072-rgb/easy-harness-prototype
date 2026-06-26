@@ -6512,8 +6512,8 @@ button:disabled {
 .canvas-topology-workspace {
   display: grid;
   grid-template-columns: minmax(860px, 1fr) minmax(420px, 440px);
-  height: calc(100vh - 305px);
-  min-height: 420px;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   border-top: 1px solid #c9d2d6;
   border-bottom: 1px solid #c9d2d6;
@@ -7136,6 +7136,53 @@ button:disabled {
   display: grid;
   gap: 10px;
   padding: 12px 14px 14px;
+}
+
+.topology-route-choice {
+  display: grid;
+  gap: 9px;
+  padding: 12px 14px 14px;
+}
+
+.topology-route-choice p {
+  margin: 0;
+  color: #60716e;
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.topology-route-choice > button,
+.topology-route-choice-list button {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 9px;
+  border: 1px solid #d8e3e0;
+  border-radius: 7px;
+  background: #fbfdfd;
+  color: #071110;
+  font-size: 12px;
+  font-weight: 760;
+  text-align: left;
+}
+
+.topology-route-choice > button {
+  border-color: #9fd5ce;
+  background: #e8f8f5;
+  color: #087a6e;
+}
+
+.topology-route-choice-list {
+  display: grid;
+  gap: 7px;
+}
+
+.topology-route-choice-list span {
+  color: #60716e;
+  font-weight: 650;
+  white-space: nowrap;
 }
 
 .topology-route-detail > strong {
