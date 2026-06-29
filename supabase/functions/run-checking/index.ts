@@ -59,16 +59,6 @@ type StorageRow = {
   size_bytes: number | null;
 };
 
-type DraftJobRow = {
-  id: string;
-  request_id: string;
-  request_number: string;
-  trigger: string;
-  status: string;
-  provider: string;
-  model: string;
-};
-
 type DraftVisionImage = {
   filename: string;
   mime_type: string;
@@ -390,11 +380,14 @@ function draftAuditPassTimeoutMs() {
   );
 }
 
-function externalDraftJobsEnabled() {
-  const raw = (Deno.env.get("AI_DRAFT_USE_EXTERNAL_WORKER") || "true")
-    .trim()
-    .toLowerCase();
-  return !["0", "false", "no", "off", "edge"].includes(raw);
+function edgeFastResponseMs() {
+  const maxSafeMs = Math.max(0, platformWallClockMs() - 30000);
+  return envNumber(
+    "AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS",
+    Math.min(45000, maxSafeMs),
+    0,
+    maxSafeMs,
+  );
 }
 
 async function fetchWithTimeout(
@@ -3092,7 +3085,7 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
     if (evidenceIntro) {
       return [
         evidenceIntro,
-        "Before Easy Harness can prepare the Draft, please add:",
+        "Before Easy Harness can prepare the request basis, please add:",
         ...questions.map((question, index) => `${index + 1}. ${question}`),
         "Approximate answers are fine. If one item is uncertain, say so.",
       ]
@@ -3108,7 +3101,7 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
 
   if (messageType === "ready_for_review") {
     return [
-      "Easy Harness Draft is ready.",
+      "Your upload package is organized for Easy Harness review.",
       header || "Harness request",
       "Easy Harness will review the remaining selection, file details, and feasibility from here.",
     ]
@@ -3118,7 +3111,7 @@ function buildCustomerMessage(draft: EasyHarnessDraft) {
 
   return [
     header || "Harness request",
-    "To move this forward:",
+    "To make the uploaded package easier to review:",
     ...questions
       .slice(0, 3)
       .map((question, index) => `${index + 1}. ${question}`),
@@ -3832,18 +3825,18 @@ async function callDraftModel(
     : "Evidence boundary: this intake run receives conversation text, attachment metadata, and any parser-produced attachment_observations. Do not claim to visually identify connector models, pinouts, wire colors, labels, drawings, CAD geometry, or document contents from attachments unless those details are explicitly present in text or attachment_observations.";
 
   const system = [
-    "You are Easy Harness Intake Agent.",
-    "Your job is to translate a user's own words, files, photos, sketches, old samples, pinouts, or partial notes into Easy Harness Draft v0.1.",
-    "You are not a general chatbot, not a sales assistant, and not a traditional factory questionnaire.",
-    "The draft closes at Ready for Easy Harness Review. This means a user-side and platform-side requirement object is clear enough for Easy Harness review, quote-path evaluation, and supplier/manufacturing follow-up. It does NOT mean final BOM, supplier RFQ, automatic quote, material confirmation, or production readiness.",
-    "Core promise: Upload what you have. We'll build the harness you need. This means accept user-native expression and structure it. It does not mean fake certainty.",
-    "The user should feel that Easy Harness organized their real need, not that they were forced to fill a factory questionnaire.",
+    "You are Easy Harness Upload Assistant.",
+    "Your job is to help a professional customer upload the right harness materials and turn the supplied package into a concise request basis for Easy Harness review.",
+    "You are a small assistant inside the upload flow, not the main product, not a general chatbot, not a sales assistant, and not a traditional factory questionnaire.",
+    "The request basis closes at Ready for Easy Harness Review. This means the uploaded materials and customer notes are clear enough for Easy Harness review, quote-path evaluation, and supplier/manufacturing follow-up. It does NOT mean final BOM, supplier RFQ, automatic quote, material confirmation, or production readiness.",
+    "Core promise: Upload what you have. We'll build the harness you need. This means accept useful drawings, CAD, pinouts, spreadsheets, PDFs, photos, quote packages, and customer notes, then structure them without fake certainty.",
+    "The customer may already be a professional with complete drawings. If the uploaded package is coherent, do not slow them down with unnecessary questions.",
     "First decide what the user already provided, what the user likely knows and must answer now, what Easy Harness can evaluate from files/photos/samples later, what supplier/manufacturing should confirm later, and what is not applicable.",
     "Do not rename the request based on a single keyword. The request line should come from the customer's actual connection goal and confirmed constraints. If a word like battery appears only in a negative constraint such as 'no battery power', do not turn the draft into a battery harness.",
     "Do not use keyword workflows or case-specific scripts. Words like old harness, battery, sensor, pinout, photo, sample, CAN, or connector are evidence only. They are not instructions to enter a fixed questionnaire or fixed reply path.",
     "Use the whole conversation to judge intent, evidence, missing blockers, and next action. A keyword may support the judgment, but it must not determine the workflow by itself.",
     "Capture all explicit details. If the user provides connector model, connector type, terminal, wire gauge, length, quantity, voltage, current, pinout, material, shielding, environment, IP rating, test requirement, BOM, drawing, or compliance detail, preserve it in known_requirements and/or captured_professional_details.",
-    "Before writing the customer summary, organize your understanding into requirement_map. This is the semantic connection plan that will drive the customer-facing visual Draft; it is not a manufacturing drawing and not a free-form image prompt.",
+    "Before writing the customer summary, organize your understanding into requirement_map. This is the semantic connection plan that can support a customer-facing connection summary; it is not a manufacturing drawing and not a free-form image prompt.",
     "In requirement_map.endpoints, represent distinct devices, boards, connectors, bare-wire ends, samples, or other explicitly supported endpoints separately. Do not create placeholder unknown endpoints, and do not collapse several supported target devices into one generic target.",
     "In requirement_map.connection_groups, describe the meaningful harness branches or functional wire groups between those endpoints. Associate signals only when customer text or attachment_observations supports the association; otherwise keep the group partial or incomplete.",
     "In requirement_map.harness_sections, include route or length sections only when supplied or reasonably organized from evidence. Mark uncertain endpoints, groups, routes, and options as unknown or partial instead of inventing precision.",
@@ -3867,7 +3860,7 @@ async function callDraftModel(
     "Include every supplied file as received evidence, but only claim internal content that is present in customer text, model-visible images, or attachment_observations.",
     "If a draft is ready, user_facing_summary.needed_next must be empty. Put Easy Harness-owned work in easy_harness_review, later production details in later_supplier_or_engineering_confirmation, and irrelevant/not-needed items in not_applicable.",
     "Unknowns must be separated into: ask_user_now, ask_user_if_likely_known, easy_harness_review, later_supplier_or_engineering_confirmation, and not_applicable. Never output vague placeholders like unknown_item or Needs later confirmation.",
-    "For ready_for_review, customer-facing content should be a compact Easy Harness Draft summary: request line, key details, files received, remaining Easy Harness review items, and clear next step. Do not claim price, material, supplier, or production readiness.",
+    "For ready_for_review, customer-facing content should be a compact Easy Harness request basis: request line, key details, files received, remaining Easy Harness review items, and clear next step. Do not claim price, material, supplier, or production readiness.",
     "Do not mention manual review, human review, or manual processing. Say Easy Harness review or Easy Harness will continue from here.",
     "Show understanding through structure, not repeated claims that you understand. Keep customer-facing output concise and in English.",
     "Return only valid JSON. Do not include Markdown, comments, explanation text, or code fences.",
@@ -3880,7 +3873,7 @@ async function callDraftModel(
     system,
     draftModelUserContent(
       provider,
-      `Analyze this Easy Harness request and return Easy Harness Draft v0.1 as JSON only.\n\n${inputText}`,
+      `Analyze this Easy Harness upload package and return the request-basis JSON only.\n\n${inputText}`,
       visualImages,
     ),
     Math.min(draftFirstPassTimeoutMs(), remainingBudgetMs()),
@@ -3971,7 +3964,7 @@ function parserNeededObservationCount(observations: AttachmentObservation[]) {
 }
 
 const checkingProgressMessageText =
-  "Easy Harness is carefully organizing your request and files. This can take a few minutes when files need careful organization.";
+  "Easy Harness is checking the uploaded package and organizing the request basis. This usually takes less than a minute.";
 
 function isCheckingProgressMessage(body = "") {
   return body.trim() === checkingProgressMessageText;
@@ -4098,9 +4091,9 @@ async function markCheckingStillQueued(
         status: "needs_info",
         adapter: adapterId,
         reason:
-          "Easy Harness received the request, but this organizing step did not finish. Please add any short reply to continue.",
+          "Easy Harness received the upload package, but the online organizing step did not finish. Please try again in a moment.",
         missing: ["continue request"],
-        questions: ["Please send any short reply to continue this request."],
+        questions: ["Please send any short update when you are ready to continue."],
         checkedAt: new Date().toISOString(),
         source: {
           request_id: requestRow.id,
@@ -4118,111 +4111,16 @@ async function markCheckingStillQueued(
     author_id: null,
     author_role: "easy_harness",
     body:
-      "Easy Harness received the request, but this organizing step did not finish. Please send any short reply and Easy Harness will continue.",
+      "Easy Harness received the upload package, but the organizing step did not finish. Please send a short update and Easy Harness will continue.",
     blocks: [
       {
         type: "text",
         text:
-          "Easy Harness received the request, but this organizing step did not finish. Please send any short reply and Easy Harness will continue.",
+          "Easy Harness received the upload package, but the organizing step did not finish. Please send a short update and Easy Harness will continue.",
       },
     ],
     visibility: "thread",
   });
-}
-
-async function findActiveDraftJob(
-  supabase: ReturnType<typeof createClient>,
-  requestId: string,
-) {
-  const { data, error } = await supabase
-    .from("draft_jobs")
-    .select("id,request_id,request_number,trigger,status,provider,model")
-    .eq("request_id", requestId)
-    .in("status", ["queued", "running", "retry_needed"])
-    .order("created_at", { ascending: false })
-    .limit(1);
-
-  if (error) throw new Error(`Could not read draft_jobs: ${error.message}`);
-  return (data?.[0] || null) as DraftJobRow | null;
-}
-
-async function enqueueExternalDraftJob(
-  supabase: ReturnType<typeof createClient>,
-  requestRow: RequestRow,
-  trigger: string,
-  attachmentsWithStorage: Array<AttachmentRow & { storage?: StorageRow }>,
-) {
-  const existing = await findActiveDraftJob(supabase, requestRow.id);
-  if (existing) return existing;
-
-  const modelConfig = draftModelConfig();
-  const { data, error } = await supabase
-    .from("draft_jobs")
-    .insert({
-      request_id: requestRow.id,
-      request_number: requestRow.request_number,
-      trigger,
-      status: "queued",
-      provider: modelConfig.provider,
-      model: modelConfig.model,
-      input_snapshot: {
-        request_id: requestRow.id,
-        request_number: requestRow.request_number,
-        title: requestRow.title,
-        trigger,
-        attachment_count: attachmentsWithStorage.length,
-        attachment_names: attachmentsWithStorage.map((item) => item.name),
-        queued_at: new Date().toISOString(),
-      },
-    })
-    .select("id,request_id,request_number,trigger,status,provider,model")
-    .single();
-
-  if (error) throw new Error(`Could not enqueue draft job: ${error.message}`);
-  return data as DraftJobRow;
-}
-
-async function markRequestQueuedForExternalWorker(
-  supabase: ReturnType<typeof createClient>,
-  requestRow: RequestRow,
-  job: DraftJobRow,
-  trigger: string,
-) {
-  const checkedAt = new Date().toISOString();
-  const checkResult = {
-    status: "queued",
-    adapter: adapterId,
-    model: job.model,
-    provider: job.provider,
-    reason:
-      "Easy Harness is organizing the request with the Qwen intake worker.",
-    checkedAt,
-    source: {
-      request_id: requestRow.id,
-      request_number: requestRow.request_number,
-      draft_job_id: job.id,
-      trigger,
-      runtime: "external_worker",
-    },
-    agent_runtime: {
-      primary_agent_completed: false,
-      local_draft_builder_used: false,
-      external_worker_queued: true,
-    },
-  };
-
-  const { error } = await supabase
-    .from("requests")
-    .update({
-      status: "checking",
-      check_status: "pending",
-      check_result: checkResult,
-      updated_at: checkedAt,
-    })
-    .eq("id", requestRow.id);
-
-  if (error)
-    throw new Error(`Could not mark request queued for worker: ${error.message}`);
 }
 
 async function keepRequestPendingAfterModelFailure(
@@ -4244,7 +4142,7 @@ async function keepRequestPendingAfterModelFailure(
     model: draftModelConfig().model,
     provider: selectedDraftProvider(),
     reason:
-      "Easy Harness is still organizing the request and files. A full Draft has not been saved yet.",
+      "Easy Harness is still organizing the uploaded package and request basis.",
     checkedAt,
     source: {
       request_id: requestRow.id,
@@ -4276,7 +4174,7 @@ async function keepRequestPendingAfterModelFailure(
     agent_runtime: {
       primary_agent_completed: false,
       local_draft_builder_used: false,
-      external_worker_queued: false,
+      supabase_edge_background_queued: true,
     },
   };
 
@@ -4511,54 +4409,16 @@ Deno.serve(async (request) => {
 
   await supabase.from("integration_events").insert({
     adapter: adapterId,
-    action: "draft_check_queued",
+    action: "upload_intake_started",
     target_type: "request",
     target_id: requestRow.id,
-    detail: "Easy Harness request checking queued for background processing.",
+    detail: "Easy Harness upload assistant started organizing the request basis.",
     payload: {
       requestNumber: requestRow.request_number,
       trigger,
-      async: true,
+      runtime: "supabase_edge_function",
     },
   });
-
-  if (externalDraftJobsEnabled()) {
-    const job = await enqueueExternalDraftJob(
-      supabase,
-      requestRow,
-      trigger,
-      attachmentsWithStorage,
-    );
-    await markRequestQueuedForExternalWorker(supabase, requestRow, job, trigger);
-    await supabase.from("integration_events").insert({
-      adapter: adapterId,
-      action: "draft_job_queued",
-      target_type: "request",
-      target_id: requestRow.id,
-      detail: "Easy Harness Qwen draft job queued for external worker.",
-      payload: {
-        requestNumber: requestRow.request_number,
-        trigger,
-        draftJobId: job.id,
-        provider: job.provider,
-        model: job.model,
-      },
-    });
-
-    return jsonResponse({
-      ok: true,
-      queued: true,
-      async: true,
-      externalWorker: true,
-      draftJobId: job.id,
-      requestId: requestRow.id,
-      requestNumber: requestRow.request_number,
-      status: "checking",
-      checkStatus: "pending",
-      readiness: "checking",
-      message: "",
-    });
-  }
 
   const checkingJob = (async () => {
   const modelInputMeta = {
@@ -4875,7 +4735,7 @@ Deno.serve(async (request) => {
     }
 
     const pendingMessage =
-      "Easy Harness is still organizing your request and files. The Draft will appear here when the full intake result is ready.";
+      "Easy Harness is still organizing your upload package. The request basis will appear here when it is ready.";
     const { error: messageInsertError } = await supabase
       .from("request_messages")
       .insert({
@@ -4914,9 +4774,29 @@ Deno.serve(async (request) => {
   }
   })();
 
+  const fastResponseMs = edgeFastResponseMs();
+  if (fastResponseMs > 0) {
+    const timedOut = Symbol("edge_fast_response_timed_out");
+    const fastResult = await Promise.race([
+      checkingJob,
+      sleep(fastResponseMs).then(() => timedOut),
+    ]);
+
+    if (fastResult !== timedOut) {
+      return fastResult as Response;
+    }
+
+    logCheckingEvent("fast_response_timeout", {
+      request_number: requestRow.request_number,
+      trigger,
+      fast_response_ms: fastResponseMs,
+    });
+  }
+
   const backgroundRegistered = runCheckingJobInBackground(checkingJob, {
     request_number: requestRow.request_number,
     trigger,
+    runtime: "supabase_edge_function",
   });
 
   if (!backgroundRegistered) {
@@ -4931,7 +4811,7 @@ Deno.serve(async (request) => {
       checkStatus: "needs_info",
       readiness: "needs_user_reply",
       message:
-        "Easy Harness received the request, but this organizing step did not finish. Please send any short reply and Easy Harness will continue.",
+        "Easy Harness received the upload package, but the organizing step did not finish. Please send a short update and Easy Harness will continue.",
     });
   }
 
@@ -4944,6 +4824,6 @@ Deno.serve(async (request) => {
     status: "checking",
     checkStatus: "pending",
     readiness: "checking",
-    message: "",
+    message: checkingProgressMessageText,
   });
 });

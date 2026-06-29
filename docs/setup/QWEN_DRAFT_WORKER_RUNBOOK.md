@@ -1,124 +1,50 @@
-# Qwen Draft Worker Runbook
+# Qwen Upload Assistant Edge Runbook
 
-This runbook is for the production path where Easy Harness must receive real
-Qwen Draft results instead of local fallback Drafts.
+Last updated: 2026-06-29
 
-Important boundary:
-
-- Running `npm.cmd run draft:worker:once` on a developer machine is only a
-  staging/proof check.
-- A real customer-facing platform needs `scripts/qwen-draft-worker.mjs` running
-  continuously in a hosted environment such as a small server or managed worker
-  runtime.
-- Supabase Edge Function `run-checking` only queues work. It is intentionally
-  not the long-running Qwen executor.
-
-## Goal
+This file keeps the historical name so older handoffs still resolve, but the
+production direction has changed:
 
 ```text
-Customer request + attachments
--> run-checking queues draft_jobs
--> external Qwen worker reads request/messages/files
--> Qwen returns Easy Harness Draft JSON
--> worker writes requests.check_result and request_messages
+Easy Harness no longer depends on a local qwen-draft-worker process.
 ```
 
-`run-checking` must not save a local Draft when Qwen times out.
+The customer-facing upload assistant now runs through the Supabase Edge
+Function `run-checking`.
 
-## 1. Apply Database Migration
+The old local script `scripts/qwen-draft-worker.mjs` has been removed from the
+repo. Do not restore it as a production dependency.
 
-In Supabase Dashboard:
+## Product Boundary
+
+The AI is a small assistant inside the professional upload flow. It helps a
+customer upload useful harness materials and prepares a concise request basis
+for Easy Harness review.
+
+It does not generate:
+
+- final factory drawings,
+- BOM or cut list,
+- production work orders,
+- supplier RFQ packages,
+- automatic pricing.
+
+## Runtime Path
 
 ```text
-SQL Editor -> New query
+Customer uploads drawings / CAD / pinout / photos / PDFs / spreadsheets
+-> browser saves files to Supabase Storage
+-> request, request_messages, attachments, storage_objects are saved
+-> run-checking calls Qwen from Supabase Edge Function
+-> if Qwen finishes inside the fast-response window, the result returns directly
+-> otherwise EdgeRuntime.waitUntil keeps the same Supabase Edge run writing back
+-> requests.check_result and request_messages receive the request basis
 ```
 
-Run:
+There is no production `draft_jobs` handoff and no external worker requirement
+for this upload assistant path.
 
-```sql
-create table if not exists public.draft_jobs (
-  id uuid primary key default gen_random_uuid(),
-  request_id uuid not null references public.requests(id) on delete cascade,
-  request_number text not null,
-  trigger text not null default 'manual',
-  status text not null default 'queued' check (
-    status in ('queued', 'running', 'completed', 'failed', 'retry_needed', 'superseded', 'canceled')
-  ),
-  provider text not null default 'qwen',
-  model text not null default '',
-  attempt_count integer not null default 0 check (attempt_count >= 0),
-  max_attempts integer not null default 3 check (max_attempts > 0),
-  locked_by text,
-  locked_at timestamptz,
-  started_at timestamptz,
-  finished_at timestamptz,
-  last_error text,
-  input_snapshot jsonb not null default '{}'::jsonb,
-  result_summary jsonb not null default '{}'::jsonb,
-  created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
-);
-
-create index if not exists draft_jobs_status_created_idx
-on public.draft_jobs(status, created_at);
-
-create index if not exists draft_jobs_request_created_idx
-on public.draft_jobs(request_id, created_at desc);
-
-create unique index if not exists draft_jobs_one_active_per_request_idx
-on public.draft_jobs(request_id)
-where status in ('queued', 'running', 'retry_needed');
-
-alter table public.draft_jobs enable row level security;
-
-drop policy if exists draft_jobs_select_owner_or_staff on public.draft_jobs;
-create policy draft_jobs_select_owner_or_staff
-on public.draft_jobs for select
-to authenticated
-using (
-  exists (
-    select 1
-    from public.requests r
-    where r.id = draft_jobs.request_id
-      and (r.customer_id = auth.uid() or public.is_staff_or_admin())
-  )
-);
-
-drop policy if exists draft_jobs_staff_all on public.draft_jobs;
-create policy draft_jobs_staff_all
-on public.draft_jobs for all
-to authenticated
-using (public.is_staff_or_admin())
-with check (public.is_staff_or_admin());
-```
-
-## 2. Deploy run-checking
-
-Deploy the current local file:
-
-```text
-D:\Harness\easy-harness-prototype\supabase\functions\run-checking\index.ts
-```
-
-The deployed function must contain:
-
-```text
-externalDraftJobsEnabled
-enqueueExternalDraftJob
-draft_job_queued
-primary_agent_failed_draft_pending
-```
-
-It must not contain:
-
-```text
-primary_agent_failed_local_draft_used
-local-draft-builder
-```
-
-## 3. Configure Secrets
-
-In Supabase Edge Function secrets:
+## Required Supabase Edge Secrets
 
 ```text
 AI_DRAFT_PROVIDER=qwen
@@ -126,107 +52,75 @@ QWEN_API_KEY=<secret>
 QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
-AI_DRAFT_USE_EXTERNAL_WORKER=true
+AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
+AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=true
 AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=false
 ```
 
-The worker environment also needs:
+`AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS` controls how long the Edge Function waits
+before returning a quick "organizing" response. If the result is not ready in
+that window, the same Edge Function run continues through `EdgeRuntime.waitUntil`.
 
-```text
-SUPABASE_URL=<project url>
-SUPABASE_SERVICE_ROLE_KEY=<secret service role key>
-QWEN_API_KEY=<secret>
-QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
-QWEN_MODEL=qwen3.6-plus
-AI_DRAFT_WORKER_QWEN_TIMEOUT_MS=900000
-```
+## Attachment Evidence Boundary
 
-Never expose `SUPABASE_SERVICE_ROLE_KEY` in browser code or any `VITE_`
-variable.
+The assistant may use only evidence that is actually available to the current
+run:
 
-`AI_DRAFT_WORKER_QWEN_TIMEOUT_MS` belongs to the worker runtime. Adding it only
-to Supabase Edge Function secrets does not change the timeout of a locally or
-externally hosted worker process.
-
-The current worker evidence layer sends these attachment signals into Qwen:
-
-- image attachments as short-lived signed `image_url` inputs,
-- text/CSV/JSON/MD excerpts and CSV table samples,
-- XLSX/XLSM/XLS sheet samples,
+- customer text and request messages,
+- attachment metadata,
+- image inputs sent to Qwen through signed Supabase URLs,
+- parsed CSV/text excerpts,
 - lightweight PDF text probes,
-- CAD/3D filename/type metadata for context boundaries.
+- spreadsheet sheet samples,
+- CAD metadata probes,
+- optional Qwen file-extract observations.
 
-## 4. Run Worker
+If a file is only metadata or marked `parser_needed`, the assistant may say the
+file was received for Easy Harness review, but it must not claim to understand
+the hidden contents.
 
-For one job:
+## Deploy
 
-```powershell
-npm.cmd run draft:worker:once
-```
+When this file changes only documentation, deploy docs normally.
 
-This is not a production operating mode. It is only used to prove that one queued
-job can be claimed, sent to Qwen, parsed, and written back.
-
-For continuous processing:
-
-```powershell
-npm.cmd run draft:worker
-```
-
-In production, run the continuous worker command from a hosted environment with
-process supervision/restart. Do not rely on a user or developer PC being online.
-
-If Qwen returns malformed JSON, the worker makes one generic JSON-repair pass
-with Qwen and records `source.qwen_json_repaired = true` when that repair was
-used. This is syntax repair only; it must not reinterpret the request.
-
-## 5. Verify
-
-After submitting a request, run:
-
-```sql
-select
-  r.request_number,
-  r.status,
-  r.check_status,
-  r.check_result->>'model' as model,
-  r.check_result->>'provider' as provider,
-  r.check_result#>>'{agent_runtime,primary_agent_completed}' as primary_agent_completed,
-  r.check_result#>>'{agent_runtime,local_draft_builder_used}' as local_draft_builder_used,
-  r.check_result#>>'{agent_runtime,external_worker_completed}' as external_worker_completed,
-  r.check_result#>>'{source,draft_job_id}' as draft_job_id,
-  r.check_result#>>'{source,attachment_observation_count}' as attachment_observation_count,
-  r.check_result#>>'{source,image_count_sent_to_model}' as image_count_sent_to_model
-from requests r
-order by r.created_at desc
-limit 10;
-```
-
-Expected real Qwen result:
+When this file's runtime assumptions are implemented in:
 
 ```text
-provider = qwen
-primary_agent_completed = true
-local_draft_builder_used = false
-external_worker_completed = true
-draft_job_id is not null
+supabase/functions/run-checking/index.ts
 ```
 
-Check job status:
+deploy the Supabase Edge Function too. A Vercel redeploy updates only the
+frontend and does not update `run-checking`.
+
+## Verify
+
+Submit a request with one or more uploaded files, then inspect recent requests:
 
 ```sql
 select
   request_number,
   status,
-  provider,
-  model,
-  attempt_count,
-  locked_by,
-  started_at,
-  finished_at,
-  left(coalesce(last_error, ''), 500) as last_error
-from draft_jobs
+  check_status,
+  check_result->>'provider' as provider,
+  check_result->>'model' as model,
+  check_result#>>'{source,runtime}' as runtime,
+  check_result#>>'{source,attachment_observation_count}' as attachment_observation_count,
+  check_result#>>'{source,image_count_sent_to_model}' as image_count_sent_to_model,
+  check_result#>>'{agent_runtime,primary_agent_completed}' as primary_agent_completed
+from requests
 order by created_at desc
-limit 20;
+limit 10;
 ```
+
+Expected successful Qwen result:
+
+```text
+provider = qwen
+runtime = supabase_edge_function
+primary_agent_completed = true
+status in ('needs_info', 'in_review')
+```
+
+If Qwen is slow but the Edge background path continues, the request may first
+show `checking/pending` and update shortly after.

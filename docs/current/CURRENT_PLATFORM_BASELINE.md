@@ -1,6 +1,6 @@
 # Current Platform Baseline
 
-Last reviewed: 2026-05-18
+Last reviewed: 2026-06-29
 
 ## Stage
 
@@ -28,7 +28,7 @@ platform yet.
 - Real browser files upload to Supabase Storage bucket `request-attachments`.
 - Attachment and storage metadata write to Supabase.
 - Staff replies and released harness quotes write to Supabase.
-- Staff Draft/quote preview blocks should carry forward explicit customer
+- Staff request-basis/quote preview blocks should carry forward explicit customer
   details from the full request thread, such as quantity, length, and voltage,
   while avoiding production-stage labels like BOM unless a real production
   package exists.
@@ -56,20 +56,20 @@ platform yet.
 - Registration, upload, quote confirmation, order payment preparation, DAP
   shipping, and after-sales support now link to those policies with lightweight
   customer-facing copy.
-- `run-checking` Edge Function exists for AI intake and Easy Harness Draft
-  generation. It can run through Qwen or DeepSeek; Qwen is the recommended
-  first live provider for the next deployment pass.
+- `run-checking` Edge Function exists for AI intake and Easy Harness upload
+  assistant behavior. It can run through Qwen or DeepSeek; Qwen is the
+  recommended first live provider for the next deployment pass.
 - AI intake receives customer text, conversation history, attachment metadata,
   and an internal `attachment_observations` layer.
-- `run-checking` now performs a two-pass Draft generation by default. The first
-  pass organizes the Draft; the second evidence-audit pass checks the Draft
+- `run-checking` now performs a two-pass request-basis organization by default.
+  The first pass organizes the request basis; the second evidence-audit pass checks it
   against the supplied text, attachment observations, and any model-visible
   images before saving. This increases latency, but reduces unsupported
-  topology, premature Draft closure, and repeated customer questions.
-- `run-checking` queues long Draft work in the Edge Function background path.
-  The customer thread gets a short "organizing" Easy Harness message first, then
-  the deeper model run writes the final Draft/message when it finishes. This
-  keeps the page responsive without reducing the Agent's evidence review.
+  topology, premature closure, and repeated customer questions.
+- `run-checking` first tries to return a quick upload-assistant result from the
+  Supabase Edge Function. If Qwen needs more time, the customer thread gets a
+  short "organizing" Easy Harness message and `EdgeRuntime.waitUntil` continues
+  the same online run while staying inside Supabase Edge limits.
 - `run-checking` also has bounded provider budgets. A stalled provider call must
   time out and fall back or save the normalized first Draft; the request should
   not remain in `checking` indefinitely.
@@ -77,7 +77,7 @@ platform yet.
   `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`, it can send selected uploaded image
   attachments to Qwen through short-lived Supabase signed URLs and records how
   many images were sent.
-- `run-checking` also probes common non-image files for Draft evidence: text and
+- `run-checking` also probes common non-image files for request-basis evidence: text and
   CSV files become excerpts/table samples/structured facts, small XLSX/XLSM
   workbooks become sheet table observations, and PDFs get a lightweight text
   probe when readable text is present.
@@ -85,7 +85,7 @@ platform yet.
   `AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=true`, PDF, DOCX, XLSX/XLSM, CSV, JSON,
   TXT/MD, EPUB/MOBI, and common image files that were not already sent as
   `image_url` inputs can be uploaded to Qwen's file-extract path and returned as
-  model-produced attachment observations for the Draft Agent.
+  model-produced attachment observations for the upload assistant.
 - `run-checking` now has a lightweight CAD metadata probe for STEP/STP, DXF,
   OBJ, STL, and limited IGES. It can extract file type, header/product hints,
   layer/entity counts, vertex/face/triangle counts, sampled bounding boxes, and
@@ -126,11 +126,12 @@ platform yet.
 - Full AI engineering pipeline for file parsing, vision extraction, Harness
   JSON, catalog matching, rule validation, and production package generation.
 
-## AI Intake Boundary
+## AI Upload Assistant Boundary
 
-The current AI goal is Easy Harness Draft closure, not final production output.
+The current AI goal is upload guidance and request-basis organization, not final
+production output.
 
-Draft closure means:
+Request-basis readiness means:
 
 ```text
 The customer's connection need is clear enough to enter Easy Harness review,
@@ -147,12 +148,12 @@ or automatic price.
 Current Agent rules:
 
 - Keywords are evidence, not workflow triggers.
-- The Agent should not become a fixed questionnaire.
-- The Agent may refuse to close Draft when the connection goal is not clear.
-- The Agent must not claim to visually inspect or parse files unless Qwen image
+- The assistant should not become a fixed questionnaire.
+- The assistant may ask for the connection goal when it is not clear.
+- The assistant must not claim to visually inspect or parse files unless Qwen image
   input or `attachment_observations` provides that evidence for the current run.
-- Model provider is an adapter choice. The platform contract stays the Easy
-  Harness Draft, whether the runtime model is Qwen, DeepSeek, or another
+- Model provider is an adapter choice. The platform contract stays an Easy
+  Harness request basis, whether the runtime model is Qwen, DeepSeek, or another
   compatible provider.
 
 ## Main Product Rules
@@ -190,7 +191,7 @@ Before starting another feature line, keep this state stable and verify with
 real user testing:
 
 1. Customer creates request with a real uploaded file.
-2. AI intake creates either a clear Draft or a concise missing-info prompt.
+2. AI intake creates either a clear request basis or a concise missing-info prompt.
 3. Staff sees the request and can reply/release price.
 4. Customer confirms quote and opens order.
 5. Checkout and payment-state recording behave consistently.

@@ -207,10 +207,10 @@ export default function RequirementMapVisual({ map, fallback = {} }) {
     <section className="requirement-map-visual">
       <div className="requirement-map-visual-head">
         <div>
-          <span>Visual draft</span>
+          <span>Connection summary</span>
           <strong>{visual.goal}</strong>
         </div>
-        <div className="requirement-map-legend" aria-label="Visual draft legend">
+        <div className="requirement-map-legend" aria-label="Connection summary legend">
           <span className="known">Known</span>
           <span className="unknown">To confirm</span>
         </div>
@@ -221,7 +221,7 @@ export default function RequirementMapVisual({ map, fallback = {} }) {
           <svg
             viewBox={`0 0 960 ${height}`}
             role="img"
-            aria-label={`Visual draft for ${visual.goal}`}
+            aria-label={`Connection summary for ${visual.goal}`}
           >
             <rect className="canvas-bg" x="1" y="1" width="958" height={height - 2} rx="8" />
             {visual.groups.map((group, index) => (

@@ -1,9 +1,24 @@
-# Qwen AI Provider Setup
+# Qwen Upload Assistant Setup
 
-Easy Harness queues Draft Agent work from the Supabase Edge Function
-`run-checking`, then a separate worker runs the Qwen Draft Agent and writes the
-result back to Supabase. The browser frontend must not store or expose the Qwen
-API key.
+Easy Harness uses Qwen as a lightweight upload assistant inside the Supabase
+Edge Function `run-checking`. The assistant helps organize the uploaded package,
+summarize the request basis, and ask only a small number of useful clarification
+questions.
+
+The browser frontend must not store or expose the Qwen API key.
+
+## Product Boundary
+
+The upload assistant is not a factory drawing generator. It must not promise:
+
+- final harness drawings,
+- BOM or cut list,
+- manufacturing package,
+- confirmed connector/terminal sourcing,
+- production test plans.
+
+The expected customer-facing result is a clearer request basis for Easy Harness
+review.
 
 ## Supabase Secrets
 
@@ -21,15 +36,13 @@ QWEN_API_KEY=<your Qwen/DashScope API key>
 QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
+AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
 AI_DRAFT_PLATFORM_WALL_CLOCK_MS=140000
 AI_DRAFT_JOB_BUDGET_MS=125000
 AI_DRAFT_FIRST_PASS_TIMEOUT_MS=100000
 AI_DRAFT_AUDIT_PASS_TIMEOUT_MS=20000
 AI_DRAFT_PROVIDER_REQUEST_TIMEOUT_MS=110000
 AI_DRAFT_PROVIDER_STATUS_TIMEOUT_MS=15000
-AI_DRAFT_USE_EXTERNAL_WORKER=true
-AI_DRAFT_WORKER_QWEN_TIMEOUT_MS=900000
-AI_DRAFT_WORKER_POLL_MS=5000
 AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=false
 AI_DRAFT_MAX_VISION_IMAGES=4
@@ -46,110 +59,67 @@ AI_DRAFT_QWEN_FILE_EXTRACT_POLL_INTERVAL_MS=750
 AI_DRAFT_CAD_METADATA_MAX_BYTES=10000000
 ```
 
-`QWEN_MODEL` can be changed later without changing frontend code. Keep the
-Draft Agent contract stable even when testing another model.
+`AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS` controls how long `run-checking` waits
+for a quick Qwen result before returning the page to the customer. If Qwen needs
+more time, the same Supabase Edge Function run registers background work with
+`EdgeRuntime.waitUntil` and writes the result back when it finishes.
 
-`AI_DRAFT_ENABLE_EVIDENCE_AUDIT` defaults to enabled in code. The second pass
-audits the first Draft against the original customer text, attachment
-observations, and any model-visible image inputs. It should remove unsupported
-topology, avoid repeated questions, and keep supplier/manufacturing work under
-Easy Harness review instead of forcing the customer to answer factory details.
-Set it to `false` only as an operational fallback if provider latency or
-availability becomes unacceptable.
+Do not configure the old local `qwen-draft-worker` as a production dependency.
 
 ## Runtime Behavior
 
-`run-checking` returns quickly after it validates access, marks the request as
-organizing, saves a short Easy Harness progress message, and creates a durable
-`draft_jobs` row. The deeper Draft generation must be performed by
-`scripts/qwen-draft-worker.mjs` or an equivalent hosted worker. This is the
-supported path for real Qwen processing because it is not constrained by the
-Supabase Edge Function wall-clock limit.
+The intended online path is:
 
-Run one local job with:
-
-```powershell
-npm.cmd run draft:worker:once
+```text
+Browser upload/chat
+-> Supabase Storage saves attachments
+-> requests/request_messages/attachments/storage_objects are written
+-> run-checking calls Qwen from Supabase Edge Function
+-> fast result returns immediately when available
+-> otherwise EdgeRuntime.waitUntil continues the same lightweight assistant run
+-> request basis and customer message are saved back to Supabase
 ```
 
-Run continuously with:
-
-```powershell
-npm.cmd run draft:worker
-```
-
-The worker needs `SUPABASE_URL` or `VITE_SUPABASE_URL`,
-`SUPABASE_SERVICE_ROLE_KEY`, `QWEN_API_KEY`, `QWEN_BASE_URL`, and `QWEN_MODEL`.
-Do not put the service role key in the browser or any `VITE_` variable except
-the public Supabase URL.
-
-Provider HTTP calls inside the Edge Function still have hard timeouts, but this
-path is now a compatibility fallback. If Qwen does not finish inside the Edge
-budget, `run-checking` must keep the request in `checking/pending`; it must not
-save a local Draft that looks like Qwen understood the request.
-
-Supabase hosted Edge Functions still have a wall-clock cap even when
-`EdgeRuntime.waitUntil` is used for background work. Keep
-`AI_DRAFT_PLATFORM_WALL_CLOCK_MS` below the actual platform cap. Raising Edge
-timeouts is not the primary reliability path; durable `draft_jobs` plus a worker
-is the reliability path for complete Qwen Draft results.
+This keeps the customer upload flow fast while avoiding a local machine worker.
+Supabase hosted Edge Functions still have idle and wall-clock limits, so prompts
+and file analysis must remain bounded. For heavier OCR, CAD rendering, drawing
+normalization, or manufacturing-package generation, add a separate production
+worker/service later instead of stretching `run-checking`.
 
 ## Attachment Observations
 
-Qwen 3.6 can accept image input through DashScope's OpenAI-compatible chat API,
-but Easy Harness only gets that benefit if the Edge Function explicitly sends
-the uploaded image files to the model.
-
-`run-checking` now builds an internal `attachment_observations` layer before
-calling the Draft Agent:
+`run-checking` builds an internal `attachment_observations` layer before calling
+the assistant:
 
 - Image files can be sent to Qwen as `image_url` inputs when vision is enabled.
-- CSV and text files can be downloaded from Supabase Storage and converted into
-  text excerpts, table samples, and structured facts.
+- CSV and text files can become excerpts, table samples, and structured facts.
 - Small XLSX/XLSM files can be probed for sheet rows and table-like evidence.
 - PDF files get a lightweight text probe when readable text is present.
-- When `AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=true`, PDF, DOCX, XLSX/XLSM, CSV,
-  JSON, TXT/MD, EPUB/MOBI, and common image files that were not already sent as
-  `image_url` inputs can be uploaded to Qwen's file-extract path. The returned
-  document observations are then passed to the Draft Agent.
-- STEP/STP, DXF, OBJ, STL, and limited IGES files can get a lightweight CAD
-  metadata probe: file type, product/header hints, layers, entity counts,
-  sampled points, triangle/face counts, and bounding boxes when available.
-- DWG, 3MF, FCStd, unsupported, encrypted, or oversized files are classified as
-  `parser_needed`; the Agent may treat them as received files but must not claim
-  their geometry was visually inspected.
+- STEP/STP, DXF, OBJ, STL, and limited IGES files can get lightweight CAD
+  metadata such as file type, header hints, entity counts, and bounding boxes.
+- DWG, 3MF, FCStd, unsupported, encrypted, or oversized files are marked
+  `parser_needed`; the assistant may treat them as received files but must not
+  claim their geometry was visually inspected.
 
-To enable image attachment understanding for `run-checking`, set:
+Enable image attachment understanding only after confirming provider terms,
+privacy/upload authorization language, and customer-file handling policy:
 
 ```text
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=true
 ```
 
-When enabled, `run-checking` creates short-lived Supabase signed URLs for up to
-`AI_DRAFT_MAX_VISION_IMAGES` image attachments and includes them as Qwen
-`image_url` inputs. Text/CSV/PDF/XLSX observations are controlled by:
+The Qwen file-extract bridge can reduce cases where a customer uploads a useful
+PDF, spreadsheet, or document and the assistant only sees a filename:
 
 ```text
-AI_DRAFT_TEXT_ATTACHMENT_MAX_BYTES=200000
-AI_DRAFT_STRUCTURED_ATTACHMENT_MAX_BYTES=2000000
 AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=true
 QWEN_FILE_EXTRACT_MODEL=qwen-long
 AI_DRAFT_QWEN_FILE_EXTRACT_MAX_FILES=4
 AI_DRAFT_QWEN_FILE_EXTRACT_MAX_BYTES=10000000
-AI_DRAFT_CAD_METADATA_MAX_BYTES=10000000
 ```
 
-Before enabling image vision in production, internally confirm provider terms,
-privacy/upload authorization language, and customer-file handling policy. This
-is an internal deployment check; do not expose implementation details in the
-customer conversation.
-
-The Qwen file-extract bridge is meant to reduce the chance that a customer
-uploads a useful PDF, spreadsheet, or document and the Draft Agent only sees a
-filename. The CAD metadata probe reduces the same risk for common neutral CAD
-files, but it is still not a visual CAD renderer or manufacturing parser. DWG,
-3MF, FCStd, and production-grade CAD geometry review need a separate converter
-or preview service before the Agent can inspect those files visually.
+Keep these limits conservative. The upload assistant should help the customer
+submit better material; it should not become a long-running engineering parser.
 
 Use the base URL that matches the Qwen API key region:
 

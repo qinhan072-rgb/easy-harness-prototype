@@ -961,6 +961,62 @@ button:disabled {
   font-size: 11px;
 }
 
+.upload-assistant-guide {
+  width: min(780px, 88vw);
+  margin-top: 18px;
+  padding: 16px 18px;
+  border: 1px solid rgba(19, 116, 110, 0.16);
+  border-radius: var(--radius);
+  background: rgba(248, 253, 252, 0.86);
+  color: #3f4c49;
+}
+
+.upload-assistant-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 14px;
+  margin-bottom: 10px;
+}
+
+.upload-assistant-head span {
+  color: var(--teal);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.upload-assistant-head strong {
+  color: var(--text);
+  font-size: 14px;
+}
+
+.upload-material-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.upload-material-kinds span {
+  padding: 5px 9px;
+  border-radius: 999px;
+  background: #fff;
+  color: #51615d;
+  font-size: 12px;
+}
+
+.upload-assistant-guide ul {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .start-screen.drop-active::after,
 .composer-shell.drop-active::after,
 .staff-composer-shell.drop-active::after {

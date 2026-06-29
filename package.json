@@ -7,8 +7,6 @@
     "dev": "vite --host 127.0.0.1",
     "agent:lab-api": "node scripts/agent-draft-lab-api.mjs",
     "agent:eval": "node scripts/agent-draft-lab-eval.mjs",
-    "draft:worker": "node scripts/qwen-draft-worker.mjs",
-    "draft:worker:once": "node scripts/qwen-draft-worker.mjs --once",
     "build": "vite build",
     "preview": "vite preview --host 127.0.0.1",
     "test": "node scripts/smoke-test.mjs"

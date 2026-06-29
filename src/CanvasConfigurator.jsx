@@ -1126,7 +1126,7 @@ export default function CanvasConfigurator({
             className={activeMode === "agent" ? "active" : ""}
             onClick={() => onSwitchMode?.("agent")}
           >
-            Chat with AI
+            Upload assistant
           </button>
           <button
             className={activeMode === "canvas" ? "active" : ""}
@@ -1138,7 +1138,7 @@ export default function CanvasConfigurator({
             className={activeMode === "upload" ? "active" : ""}
             onClick={() => onSwitchMode?.("upload")}
           >
-            Upload design
+            Prepared package
           </button>
         </div>
       </header>

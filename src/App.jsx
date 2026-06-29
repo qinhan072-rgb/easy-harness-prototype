@@ -75,7 +75,7 @@ const statusRank = {
   paid: 5,
 };
 
-const workflowSteps = ["Received", "Draft", "Review", "Quote"];
+const workflowSteps = ["Received", "Basis", "Review", "Quote"];
 
 const intakeOutcomeCopy = {
   needs_info: "More details needed",
@@ -954,7 +954,7 @@ const seedRequests = [
         "Approximate length is 1 meter. Operating voltage is 12V. Quantity is 5 pieces.",
       ),
       easyMessage(
-        "Check complete. We have enough information to create a preliminary harness draft.",
+        "Upload package organized. Easy Harness has enough information to prepare a request basis.",
       ),
       draftMessage(
         "HD-2026-1046-A",
@@ -962,7 +962,7 @@ const seedRequests = [
       ),
       eventMessage(
         "In review",
-        "The generated draft is being reviewed before it is released for confirmation.",
+        "The request basis is being reviewed before a quote is released.",
       ),
     ],
   },
@@ -984,14 +984,14 @@ const seedRequests = [
         "Approximate length is 1 meter. Operating voltage is 12V. Quantity is 5 pieces.",
       ),
       easyMessage(
-        "Check complete. We have enough information to create a preliminary harness draft.",
+        "Upload package organized. Easy Harness has enough information to prepare a request basis.",
       ),
       draftMessage(
         "HD-2026-1042-A",
         "Controller-to-Dual-Sensor Harness Assembly",
       ),
       easyMessage(
-        "Here is the Easy Harness Draft basis and layout preview. Please review the connection direction and confirm whether this layout works for your device.",
+        "Here is the Easy Harness request basis and connection summary. Please review the connection direction and confirm whether this matches your device.",
         [],
         [
           { type: "table" },
@@ -1033,7 +1033,7 @@ const seedRequests = [
         ["old-harness-remake.png", "machine-label.jpg"],
       ),
       easyMessage(
-        "Check complete. The request is in review and the draft will be prepared in this thread.",
+        "Upload package organized. The request is in review and the basis will stay in this thread.",
       ),
       draftMessage("HD-2026-1027-C", "Old Harness Remake for Field Equipment"),
     ],
@@ -1618,7 +1618,7 @@ function requestBodyFromBlocks(blocks = []) {
   if (canvasBlock?.configuration?.title)
     return `Canvas configuration: ${canvasBlock.configuration.title}`;
   if (uploadDesignBlock?.uploadDesign?.title)
-    return `Upload design package: ${uploadDesignBlock.uploadDesign.title}`;
+    return `Prepared harness package: ${uploadDesignBlock.uploadDesign.title}`;
   if (eventBlock?.body) return eventBlock.body;
   if (priceBlock?.amount)
     return `Harness price released: $${priceBlock.amount}`;
@@ -1757,7 +1757,7 @@ function isUploadDesignRequest(request = {}) {
 
 function requestSourceLabel(request = {}) {
   if (isUploadDesignRequest(request) || request.source === "upload_design") {
-    return "Upload design";
+    return "Prepared package";
   }
   if (
     isCanvasConfigurationRequest(request) ||
@@ -1765,7 +1765,7 @@ function requestSourceLabel(request = {}) {
   ) {
     return "Canvas configuration";
   }
-  return "AI Agent request";
+  return "Upload assistant request";
 }
 
 function uploadDesignSummaryText(uploadDesign = {}) {
@@ -1773,7 +1773,7 @@ function uploadDesignSummaryText(uploadDesign = {}) {
   const files = uploadDesign.files || [];
   const contact = uploadDesign.contact || {};
   const lines = [
-    `Upload design package submitted for Easy Harness quote review: ${uploadDesign.title || "Uploaded harness design"}.`,
+    `Prepared harness package submitted for Easy Harness quote review: ${uploadDesign.title || "Uploaded harness design"}.`,
     `Contact: ${contact.name || "Not provided"}${contact.email ? `, ${contact.email}` : ""}${contact.company ? `, ${contact.company}` : ""}`,
     `Harnesses: ${harnesses.length || 0}`,
     `Files: ${files.length || 0} total, ${uploadDesign.qualityGate?.engineeringFileCount || 0} engineering source file(s)`,
@@ -5286,8 +5286,8 @@ function App() {
       "request",
       request.id,
       activityMode === "initial"
-        ? "Easy Harness intake agent is analyzing the new request."
-        : "Easy Harness intake agent is thinking through the latest customer input.",
+        ? "Easy Harness upload assistant is organizing the new package."
+        : "Easy Harness upload assistant is reviewing the latest customer input.",
     );
 
     try {
@@ -5299,7 +5299,7 @@ function App() {
           },
         }),
         checkingInvokeTimeoutMs,
-        "Easy Harness intake is taking longer than expected.",
+        "Easy Harness upload assistant is taking longer than expected.",
       );
 
       if (error || !data?.ok) {
@@ -5307,7 +5307,7 @@ function App() {
           error?.message ||
           data?.message ||
           data?.code ||
-          "Easy Harness intake agent did not finish.";
+          "Easy Harness upload assistant did not finish.";
         recordServiceEvent(
           platformAdapters.checking.id,
           "remote_check_failed",
@@ -5322,7 +5322,7 @@ function App() {
           blocks: [
             {
               type: "text",
-              text: "Easy Harness is carefully organizing your request and files. This can take a few minutes when files need careful organization.",
+              text: "Easy Harness is organizing your upload package and request basis. This can take a little longer when files need careful review.",
             },
           ],
         };
@@ -5330,7 +5330,7 @@ function App() {
           status: "queued",
           adapter: platformAdapters.checking.id,
           reason:
-            "The request is still queued for Easy Harness organization. This page will keep checking for the result.",
+            "The upload package is still being organized by Easy Harness.",
           missing: [],
           checkedAt: new Date().toISOString(),
           error: failureMessage,
@@ -5359,7 +5359,7 @@ function App() {
         "request",
         request.id,
         data.readiness ||
-          "Easy Harness intake agent updated the request draft.",
+          "Easy Harness upload assistant updated the request basis.",
       );
 
       const aiMessage = data.message
@@ -5983,7 +5983,9 @@ function App() {
   function startRequest() {
     if (submittingRequestRef.current || submittingRequest) return;
     if (!uploadFiles.length) {
-      setFileError("Please upload at least one design file before submitting.");
+      setFileError(
+        "Please upload at least one drawing, pinout, CAD file, spreadsheet, PDF, photo, or quote package before submitting.",
+      );
       return;
     }
     if (!currentUser) {
@@ -6022,7 +6024,7 @@ function App() {
     try {
       if (!uploadFiles.length) {
         setFileError(
-          "Please upload at least one design file before submitting.",
+          "Please upload at least one drawing, pinout, CAD file, spreadsheet, PDF, photo, or quote package before submitting.",
         );
         return;
       }
@@ -6048,7 +6050,7 @@ function App() {
       }
       const text =
         description.trim() ||
-        "I need a harness made from the uploaded design files.";
+        "Please review this uploaded harness package and prepare the request basis.";
       const uploadDrafts = [...uploadFiles];
       const files = uploadDrafts.map(fileName);
       const fileBlocks = uploadDrafts.map((file) => attachmentBlockFile(file, true));
@@ -6431,7 +6433,7 @@ function App() {
     }
     if (!engineeringSourceCount) {
       throw new Error(
-        "Upload design needs at least one engineering source file such as PDF, CAD, STEP, spreadsheet, CSV, TSV, or ZIP. Use the AI Agent for rough ideas, photos, or informal sketches.",
+        "Prepared package upload needs at least one drawing, CAD, STEP, spreadsheet, CSV, TSV, PDF, or archive. Photos and notes can support the package.",
       );
     }
 
@@ -8281,7 +8283,7 @@ function StartScreen({
   const phaseCopy = {
     creating: "Creating your request...",
     uploading: "Uploading files...",
-    checking: "Easy Harness is checking your request...",
+    checking: "Easy Harness is organizing your upload package...",
   };
   const [dragActive, setDragActive] = useState(false);
 
@@ -8339,7 +8341,7 @@ function StartScreen({
           className={requestEntryMode === "agent" ? "active" : ""}
           onClick={() => setRequestEntryMode?.("agent")}
         >
-          Chat with AI
+          Upload assistant
         </button>
         <button
           className={requestEntryMode === "canvas" ? "active" : ""}
@@ -8351,13 +8353,16 @@ function StartScreen({
           className={requestEntryMode === "upload" ? "active" : ""}
           onClick={() => setRequestEntryMode?.("upload")}
         >
-          Upload design
+          Prepared package
         </button>
       </div>
 
       <div className="start-copy clean">
         <h1>Upload what you have. We'll build the harness you need.</h1>
-        <p>Tell us what should connect. Upload any files you already have.</p>
+        <p>
+          Upload drawings, CAD, pinouts, spreadsheets, PDFs, or photos. Easy
+          Harness will help organize the package and suggest only useful additions.
+        </p>
       </div>
 
       <div className="upload-composer">
@@ -8371,7 +8376,8 @@ function StartScreen({
         <textarea
           value={description}
           onChange={(event) => setDescription(event.target.value)}
-          placeholder="Describe the harness you need..."
+          placeholder="Add the connection goal, quantity, length, or any note for this package..."
+          aria-label="Describe the uploaded harness package"
           rows={1}
           disabled={submittingRequest}
         />
@@ -8399,7 +8405,7 @@ function StartScreen({
           disabled={submittingRequest}
         >
           <Upload size={16} />
-          Upload files
+          Upload materials
         </button>
         <span className="file-count">
           {files.length
@@ -8419,6 +8425,8 @@ function StartScreen({
           ))}
         </div>
       )}
+
+      <UploadAssistantGuide files={files} />
 
       {submittingRequest && (
         <div className="submission-progress-card">
@@ -8450,6 +8458,98 @@ function StartScreen({
       )}
       {termsError && <div className="form-error">{termsError}</div>}
     </section>
+  );
+}
+
+function uploadAssistantFileKind(file = {}) {
+  const name = fileName(file).toLowerCase();
+  const type = String(file.type || file.mimeType || "").toLowerCase();
+  if (type.startsWith("image/") || /\.(png|jpe?g|webp|heic|bmp)$/i.test(name))
+    return "Photos";
+  if (type.includes("spreadsheet") || /\.(xlsx|xlsm|xls|csv|tsv)$/i.test(name))
+    return "Pinout / tables";
+  if (type.includes("pdf") || /\.pdf$/i.test(name)) return "Drawings / PDFs";
+  if (/\.(step|stp|dxf|dwg|igs|iges|stl|obj|3mf|fcstd)$/i.test(name))
+    return "CAD / mechanical";
+  if (/\.(zip|7z|rar)$/i.test(name)) return "Archive";
+  if (/\.(txt|md|doc|docx)$/i.test(name)) return "Notes / documents";
+  return "Reference files";
+}
+
+function uploadAssistantMaterialStats(files = []) {
+  return files.reduce((stats, file) => {
+    const kind = uploadAssistantFileKind(file);
+    stats[kind] = (stats[kind] || 0) + 1;
+    return stats;
+  }, {});
+}
+
+function UploadAssistantGuide({ files = [] }) {
+  const stats = uploadAssistantMaterialStats(files);
+  const kinds = Object.entries(stats);
+  const hasPhotos = Boolean(stats["Photos"]);
+  const hasTables = Boolean(stats["Pinout / tables"]);
+  const hasCad = Boolean(stats["CAD / mechanical"]);
+  const hasPdf = Boolean(stats["Drawings / PDFs"]);
+  const hasAny = files.length > 0;
+  const suggestions = [];
+
+  if (!hasAny) {
+    suggestions.push(
+      "Start with the best material you already have: drawing, pinout, CAD, PDF, connector photos, old harness photos, or a quote package.",
+    );
+  }
+  if (hasPhotos) {
+    suggestions.push(
+      "For harness photos, pin face, rear wire exit, labels, and a ruler or caliper photo make the package easier to review.",
+    );
+  }
+  if (hasTables) {
+    suggestions.push(
+      "For pinout tables, pin number, signal/function, wire color, gauge, other end, length, and quantity are the most useful columns.",
+    );
+  }
+  if (hasCad) {
+    suggestions.push(
+      "CAD helps with mechanical fit and installation space; it still needs a connection goal, endpoints, quantity, and electrical intent.",
+    );
+  }
+  if (hasPdf) {
+    suggestions.push(
+      "For drawings or PDFs, note the page, revision, and which connector or harness the request should follow.",
+    );
+  }
+  if (hasAny && suggestions.length < 2) {
+    suggestions.push(
+      "If the package is already complete, submit it now. Easy Harness will not ask for factory-only details at this step.",
+    );
+  }
+
+  return (
+    <div className="upload-assistant-guide">
+      <div className="upload-assistant-head">
+        <span>Upload assistant</span>
+        <strong>
+          {hasAny
+            ? "Materials received"
+            : "What helps Easy Harness review faster"}
+        </strong>
+      </div>
+      {hasAny && (
+        <div className="upload-material-kinds" aria-label="Uploaded material types">
+          {kinds.map(([kind, count]) => (
+            <span key={kind}>
+              {kind}: {count}
+            </span>
+          ))}
+        </div>
+      )}
+      <ul>
+        {suggestions.slice(0, 3).map((item) => (
+          <li key={item}>{item}</li>
+        ))}
+      </ul>
+    </div>
   );
 }
 
@@ -8516,8 +8616,8 @@ function RequestsList({ requests, orders = [], openRequest, startNewRequest }) {
         <span className="eyebrow">Requests</span>
         <h1>Your harness requests</h1>
         <p>
-          Continue AI Agent requests, review canvas configurations or uploaded
-          design packages, and confirm quotes when they are ready.
+          Continue upload assistant requests, review canvas configurations or
+          prepared packages, and confirm quotes when they are ready.
         </p>
       </div>
 
@@ -9012,17 +9112,17 @@ function AgentActivityCard({ mode, startedAt }) {
         <div className="agent-thinking">
           <strong>
             {isQueued
-              ? "Easy Harness is still organizing your request..."
+              ? "Easy Harness is still organizing your upload package..."
               : isInitial
-                ? "Easy Harness is analyzing your request..."
-                : "Easy Harness is thinking through your update..."}
+                ? "Easy Harness is checking your uploaded materials..."
+                : "Easy Harness is updating the request basis..."}
           </strong>
           <p>
             {isQueued
-              ? "Reading the thread and uploaded files. The Draft will appear here when the intake result is ready."
+              ? "Reading the thread and uploaded files. The request basis will appear here when it is ready."
               : isInitial
-                ? "Reading your description and uploaded files, then preparing the next intake result."
-                : "Reviewing the new details and updating the intake draft."}
+                ? "Reading your description and uploaded files, then preparing a concise upload summary."
+                : "Reviewing the new details and updating the request basis."}
           </p>
           <div className="thinking-dots" aria-label="Agent is working">
             <span></span>
@@ -9030,7 +9130,7 @@ function AgentActivityCard({ mode, startedAt }) {
             <span></span>
           </div>
           <small>
-            This can take a few minutes when files need careful organization. You can keep this page open while the Draft updates.
+            This can take a little longer when files need careful organization. You can keep this page open while Easy Harness updates.
           </small>
         </div>
       </div>
@@ -9081,7 +9181,7 @@ function ThreadHeader({ request }) {
               ? "Review the uploaded design package, then continue when Easy Harness releases the quote."
               : canvasRequest
                 ? "Review the selected canvas configuration, then continue when Easy Harness releases the price."
-                : "Continue the thread, review the Draft, or confirm the price when it is ready."}
+                : "Continue the thread, review the request basis, or confirm the price when it is ready."}
           </p>
         </div>
         <StatusBadge status={request.status} />
@@ -9245,15 +9345,15 @@ function ContentBlock({ block, request }) {
       <div className="draft-record">
         <div className="draft-record-top">
           <div>
-            <span className="eyebrow">Draft generated</span>
+            <span className="eyebrow">Request basis prepared</span>
             <h2>{block.id}</h2>
             <p>{block.title}</p>
           </div>
           <span className="draft-state">{statusCopy[request.status]}</span>
         </div>
         <p>
-          Easy Harness has organized your request into a preliminary draft. It
-          is now in review before release.
+          Easy Harness has organized your uploaded materials into a review
+          basis. It is now in review before quote release.
         </p>
       </div>
     );
@@ -9381,7 +9481,7 @@ function UploadDesignThreadBlock({ uploadDesign = {} }) {
     <div className="upload-design-thread-card">
       <div className="upload-design-thread-head">
         <div>
-          <span className="eyebrow">Upload design package</span>
+          <span className="eyebrow">Prepared harness package</span>
           <h2>{uploadDesign.title || "Uploaded harness design"}</h2>
           <p>
             {contact.name || "Contact pending"}
@@ -9459,7 +9559,7 @@ function ThreadDraftSummary({ block, request }) {
     <div className="thread-draft-summary">
       <div className="draft-record-top">
         <div>
-          <span className="eyebrow">Easy Harness draft</span>
+          <span className="eyebrow">Request basis</span>
           <h2>{block.draftId || `${request.id}-D1`}</h2>
           <p>{block.title || request.title}</p>
         </div>
@@ -9935,7 +10035,7 @@ function IntakeDraftCard({ checkResult, request }) {
         <h2>{statusCopy[request.status] || "Request received"}</h2>
         <p>
           {isOrganizing
-            ? "Easy Harness is organizing the thread and uploaded files. This page will update when the Draft is ready."
+            ? "Easy Harness is organizing the thread and uploaded files. This page will update when the request basis is ready."
             : "Easy Harness will show the next step here after the intake check finishes."}
         </p>
         {isOrganizing && (
@@ -9965,7 +10065,7 @@ function IntakeDraftCard({ checkResult, request }) {
     ? "Please reply with the key detail below so Easy Harness can continue."
     : isReadyDraftStatus(status)
       ? "No action needed right now. You can still add corrections in the thread."
-      : "Easy Harness is organizing the request. Add any missing connection details if you have them.";
+      : "Easy Harness is organizing the upload package. Add any missing connection details if you have them.";
 
   return (
     <div
@@ -12280,7 +12380,7 @@ function staffRequestBuckets(requests) {
     },
     {
       title: "Needs quote",
-      description: "Draft is ready enough for Easy Harness to prepare a quote.",
+      description: "Request basis is ready enough for Easy Harness to prepare a quote.",
       requests: requests.filter(
         (request) => request.status === "in_review" && !request.price,
       ),
@@ -12340,7 +12440,7 @@ function requestNextAction(request) {
   if (request.status === "in_review" && request.price)
     return "Send final confirmation note";
   if (request.status === "in_review")
-    return "Review files, prepare draft, and set harness price";
+    return "Review files, confirm request basis, and set harness price";
   if (request.status === "ready_to_confirm")
     return "Wait for customer confirmation";
   if (request.status === "confirmed") return "Watch checkout and payment";
@@ -13231,7 +13331,7 @@ function StaffDetail({
               />
             </label>
             <p>
-              Release a customer-visible price when the Draft is clear enough. Leaving it empty sends only the message content.
+              Release a customer-visible price when the request basis is clear enough. Leaving it empty sends only the message content.
             </p>
             <button className="secondary-action" onClick={sendStaffUpdate}>
               Release price or send update
@@ -13601,7 +13701,7 @@ function HarnessPreview({ request }) {
         <span>
           {dualBranch
             ? "Controller lead with two branches"
-            : "Single harness layout draft"}
+            : "Single harness connection summary"}
         </span>
       </div>
       <svg viewBox="0 0 520 180" aria-hidden="true">
@@ -13645,7 +13745,7 @@ function BomTable({ request }) {
     <table className="bom-table">
       <thead>
         <tr>
-          <th>Draft basis item</th>
+          <th>Request basis item</th>
           <th>Current order basis</th>
           <th>State</th>
         </tr>

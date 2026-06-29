@@ -42,7 +42,6 @@ const uploadDesignPath = resolve(root, "src", "UploadDesignRequest.jsx");
 const canvasCatalogSchemaPath = resolve(root, "supabase", "migrations", "202606220001_canvas_catalog_schema.sql");
 const canvasDirectPricingPath = resolve(root, "supabase", "migrations", "202606220002_canvas_direct_pricing.sql");
 const makerCatalogPriceBookPath = resolve(root, "supabase", "migrations", "202606230001_maker_robotics_catalog_price_book.sql");
-const draftJobsPath = resolve(root, "supabase", "migrations", "202606240001_draft_jobs.sql");
 const qwenDraftWorkerPath = resolve(root, "scripts", "qwen-draft-worker.mjs");
 
 function readIfExists(path) {
@@ -89,8 +88,6 @@ const uploadDesign = readIfExists(uploadDesignPath);
 const canvasCatalogSql = readIfExists(canvasCatalogSchemaPath);
 const canvasDirectPricingSql = readIfExists(canvasDirectPricingPath);
 const makerCatalogPriceBookSql = readIfExists(makerCatalogPriceBookPath);
-const draftJobsSql = readIfExists(draftJobsPath);
-const qwenDraftWorker = readIfExists(qwenDraftWorkerPath);
 let visualDraftEvalCases = [];
 try {
   const parsed = JSON.parse(visualDraftAgentEval);
@@ -372,7 +369,7 @@ const checks = [
   },
   {
     name: "request submission requires a file",
-    pass: app.includes("Please upload at least one design file before submitting.")
+    pass: app.includes("Please upload at least one drawing, pinout, CAD file, spreadsheet, PDF, photo, or quote package before submitting.")
   },
   {
     name: "visitor can enter customer workspace before login",
@@ -382,23 +379,24 @@ const checks = [
       app.includes("openAuthModal")
   },
   {
-    name: "home screen keeps ai-first intake concise",
-    pass: app.includes("Tell us what should connect. Upload any files you already have.") &&
-      app.includes("Describe the harness you need...") &&
+    name: "home screen keeps upload assistant concise",
+    pass: app.includes("Upload drawings, CAD, pinouts, spreadsheets, PDFs, or photos.") &&
+      app.includes("Describe the uploaded harness package") &&
+      app.includes("UploadAssistantGuide") &&
       !app.includes("Describe the connection, upload photos, old samples, sketches, pinouts, or BOM files.") &&
       !app.includes("Old harness samples")
   },
   {
-    name: "new request offers ai canvas and upload entry paths",
+    name: "new request offers assistant canvas and prepared package entry paths",
     pass: app.includes('requestEntryModes = ["agent", "canvas", "upload"]') &&
-      app.includes("Chat with AI") &&
+      app.includes("Upload assistant") &&
       app.includes("Canvas configurator") &&
-      app.includes("Upload design") &&
-      canvasConfigurator.includes("Upload design") &&
-      uploadDesign.includes("Upload prepared harness design")
+      app.includes("Prepared package") &&
+      canvasConfigurator.includes("Prepared package") &&
+      uploadDesign.includes("Submit prepared harness package")
   },
   {
-    name: "upload design path creates structured quote-review requests",
+    name: "prepared package path creates structured quote-review requests",
     pass: app.includes("UploadDesignRequest") &&
       app.includes("submitUploadDesignForUser") &&
       app.includes("source: \"upload_design\"") &&
@@ -411,20 +409,20 @@ const checks = [
       uploadDesign.includes("Submit for quote review")
   },
   {
-    name: "upload design keeps engineering files separate from rough ai intake",
+    name: "prepared package keeps engineering files separate from assistant intake",
     pass: uploadDesign.includes("engineeringExtensions") &&
       uploadDesign.includes("supportingExtensions") &&
       uploadDesign.includes("fileDrafts: allFiles") &&
       uploadDesign.includes("schemaVersion: \"easy-harness.upload-design.v1\"") &&
-      uploadDesign.includes("Use the AI Agent for rough ideas") &&
-      app.includes("Upload design needs at least one engineering source file") &&
+      uploadDesign.includes("Prepared package upload needs at least one drawing") &&
+      app.includes("Prepared package upload needs at least one drawing") &&
       app.includes("pruneServerBackedStorageForHostedMode")
   },
   {
-    name: "draft basis table uses full customer thread and avoids BOM promise",
+    name: "request basis table uses full customer thread and avoids BOM promise",
     pass: app.includes("function getCustomerThreadText") &&
-      app.includes("Here is the Easy Harness Draft basis and layout preview.") &&
-      app.includes("Draft basis item") &&
+      app.includes("Here is the Easy Harness request basis and connection summary") &&
+      app.includes("Request basis item") &&
       app.includes("Current order basis") &&
       !app.includes("Here is a quick BOM preview") &&
       app.includes("getCustomerThreadText(request || { messages: [] })")
@@ -504,9 +502,9 @@ const checks = [
     pass: app.includes("checkingInvokeTimeoutMs") &&
       app.includes("12 * 60 * 1000") &&
       app.includes("checkingPollIntervalMs") &&
-      app.includes("8 * 60 * 1000") &&
-      app.includes("This can take a few minutes when files need careful organization") &&
-      app.includes("Easy Harness is still organizing your request") &&
+      app.includes("4000") &&
+      app.includes("This can take a little longer when files need careful review") &&
+      app.includes("Easy Harness is still organizing your upload package") &&
       app.includes("summary-working-indicator") &&
       app.includes("callWithTimeout(") &&
       app.includes("isStaleCheckingRequest") &&
@@ -514,28 +512,30 @@ const checks = [
       app.includes("stale_check_recovery")
   },
   {
-    name: "checking requests create durable qwen jobs instead of blocking the UI",
+    name: "checking requests use supabase edge upload assistant without local worker",
     pass: checkingFunction.includes("checkingProgressMessageText") &&
-      checkingFunction.includes("Easy Harness is carefully organizing your request and files") &&
-      checkingFunction.includes("draft_check_queued") &&
-      checkingFunction.includes("checking_already_queued") &&
-      checkingFunction.includes("externalDraftJobsEnabled") &&
-      checkingFunction.includes("enqueueExternalDraftJob") &&
-      checkingFunction.includes("markRequestQueuedForExternalWorker") &&
-      checkingFunction.includes("draft_job_queued") &&
+      checkingFunction.includes("Easy Harness is checking the uploaded package and organizing the request basis") &&
+      checkingFunction.includes("upload_intake_started") &&
+      checkingFunction.includes("edgeFastResponseMs") &&
+      checkingFunction.includes("AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS") &&
+      checkingFunction.includes("runCheckingJobInBackground") &&
+      checkingFunction.includes('runtime: "supabase_edge_function"') &&
       checkingFunction.includes("latestMessageCanReceiveAgentReply") &&
       checkingFunction.includes("queuedCustomerMessageId") &&
       checkingFunction.includes("superseded") &&
-      draftJobsSql.includes("status in ('queued', 'running', 'completed', 'failed', 'retry_needed', 'superseded', 'canceled')") &&
-      qwenDraftWorker.includes("AI_DRAFT_WORKER_QWEN_TIMEOUT_MS") &&
-      qwenDraftWorker.includes("primary_agent_completed: true") &&
       checkingFunction.includes("queued: true") &&
       app.includes('status: "queued"') &&
-      app.includes("This page will keep checking for the result") &&
-      envExample.includes("AI_DRAFT_USE_EXTERNAL_WORKER=true") &&
-      envExample.includes("AI_DRAFT_WORKER_QWEN_TIMEOUT_MS=900000") &&
-      aiProviderDoc.includes("scripts/qwen-draft-worker.mjs") &&
-      aiProviderDoc.includes("durable `draft_jobs` plus a worker")
+      app.includes("The request basis will appear here when it is ready") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000") &&
+      !envExample.includes("AI_DRAFT_USE_EXTERNAL_WORKER=true") &&
+      !envExample.includes("AI_DRAFT_WORKER_QWEN_TIMEOUT_MS") &&
+      !checkingFunction.includes("externalDraftJobsEnabled") &&
+      !checkingFunction.includes("enqueueExternalDraftJob") &&
+      !checkingFunction.includes("markRequestQueuedForExternalWorker") &&
+      !packageJson.includes("\"draft:worker\"") &&
+      !existsSync(qwenDraftWorkerPath) &&
+      aiProviderDoc.includes("lightweight upload assistant") &&
+      aiProviderDoc.includes("Do not configure the old local `qwen-draft-worker`")
   },
   {
     name: "conversation attachments can render inline visuals",
@@ -893,20 +893,23 @@ const checks = [
       checkingFunction.includes("needed_next: questions")
   },
   {
-    name: "qwen draft uses durable jobs instead of edge fallback drafts",
-    pass: draftJobsSql.includes("create table if not exists public.draft_jobs") &&
-      draftJobsSql.includes("draft_jobs_one_active_per_request_idx") &&
-      checkingFunction.includes("externalDraftJobsEnabled") &&
-      checkingFunction.includes("enqueueExternalDraftJob") &&
-      checkingFunction.includes("draft_job_queued") &&
+    name: "qwen upload assistant no longer depends on local worker scripts",
+    pass: checkingFunction.includes("edgeFastResponseMs") &&
+      checkingFunction.includes("Promise.race") &&
+      checkingFunction.includes("runCheckingJobInBackground") &&
+      checkingFunction.includes("fast_response_timeout") &&
       checkingFunction.includes("primary_agent_failed_draft_pending") &&
       !checkingFunction.includes("primary_agent_failed_local_draft_used") &&
       !checkingFunction.includes('model: "local-draft-builder"') &&
-      packageJson.includes("\"draft:worker\"") &&
+      !checkingFunction.includes("externalDraftJobsEnabled") &&
+      !checkingFunction.includes("enqueueExternalDraftJob") &&
+      !packageJson.includes("\"draft:worker\"") &&
+      !packageJson.includes("\"draft:worker:once\"") &&
+      !existsSync(qwenDraftWorkerPath) &&
       packageJson.includes("\"xlsx\"") &&
-      qwenDraftWorker.includes("qwenJsonCompletion") &&
-      qwenDraftWorker.includes("xlsx_sheet_probe") &&
-      qwenDraftWorker.includes("draft_worker_completed")
+      envExample.includes("AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000") &&
+      !envExample.includes("AI_DRAFT_USE_EXTERNAL_WORKER") &&
+      aiProviderDoc.includes("EdgeRuntime.waitUntil")
   },
   {
     name: "repository boundary ignores generated local artifacts",
@@ -1011,7 +1014,7 @@ const checks = [
       app.includes("request?.checkResult?.requirement_map") &&
       app.includes("draft-details-disclosure") &&
       requirementMapVisual.includes("normalizeRequirementMap") &&
-      requirementMapVisual.includes("Visual draft") &&
+      requirementMapVisual.includes("Connection summary") &&
       requirementMapVisual.includes("known_signals") &&
       requirementMapVisual.includes("hasSupportedTopology") &&
       requirementMapVisual.includes("Connection layout not confirmed yet") &&

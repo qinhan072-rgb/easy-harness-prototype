@@ -278,7 +278,7 @@ export default function UploadDesignRequest({
     }
     if (unsupported) {
       setFormError(
-        `${unsupported.name} is not accepted here. Use CAD, drawing, spreadsheet, CSV/TSV, PDF, or an archive; use the AI Agent for rough references.`,
+        `${unsupported.name} is not accepted here. Use CAD, drawing, spreadsheet, CSV/TSV, PDF, photos, documents, or an archive for this upload package.`,
       );
       return;
     }
@@ -332,9 +332,9 @@ export default function UploadDesignRequest({
     if (targetStep >= 2) {
       const missingName = harnesses.find((harness) => !harness.name.trim());
       if (missingName) return "Name each harness in the upload package.";
-      if (!allFiles.length) return "Attach at least one design file.";
+      if (!allFiles.length) return "Attach at least one harness material file.";
       if (!engineeringFileCount) {
-        return "Upload design requires at least one engineering source file such as PDF, CAD, STEP, spreadsheet, CSV, TSV, or ZIP. Use the AI Agent for rough ideas, photos, or hand sketches.";
+        return "Prepared package upload needs at least one drawing, CAD, STEP, spreadsheet, CSV, TSV, PDF, or archive. Photos and notes can support the package.";
       }
     }
     if (targetStep >= 4) {
@@ -420,10 +420,10 @@ export default function UploadDesignRequest({
       <header className="upload-design-header">
         <div>
           <span className="eyebrow">New request</span>
-          <h1>Upload prepared harness design</h1>
+          <h1>Submit prepared harness package</h1>
           <p>
-            Send finished drawings, CAD, spreadsheets, or quote packages for
-            Easy Harness engineering review.
+            Upload drawings, CAD, pinouts, spreadsheets, photos, PDFs, or quote
+            packages. Easy Harness will check completeness and prepare review.
           </p>
         </div>
         <div className="request-entry-switch compact" aria-label="Request entry mode">
@@ -432,7 +432,7 @@ export default function UploadDesignRequest({
             onClick={() => onSwitchMode?.("agent")}
             type="button"
           >
-            Chat with AI
+            Upload assistant
           </button>
           <button
             className={activeMode === "canvas" ? "active" : ""}
@@ -446,7 +446,7 @@ export default function UploadDesignRequest({
             onClick={() => onSwitchMode?.("upload")}
             type="button"
           >
-            Upload design
+            Prepared package
           </button>
         </div>
       </header>
@@ -568,14 +568,14 @@ function stepCopy(step) {
   if (step === 1)
     return "Confirm the contact for this specific upload, even if the account belongs to a teammate.";
   if (step === 2)
-    return "Attach engineering-ready files and quantity breaks for each harness.";
+    return "Attach the materials you already have and add quantity breaks if they are known.";
   if (step === 3) return "Choose the review speed you want us to price against.";
   return "Check the package before Easy Harness engineering starts quote review.";
 }
 
 function Stepper({ step }) {
   return (
-    <div className="upload-stepper" aria-label="Upload design steps">
+    <div className="upload-stepper" aria-label="Prepared package steps">
       {steps.map((item) => {
         const complete = item.id < step;
         const active = item.id === step;
@@ -679,9 +679,10 @@ function DesignPackageStep({
         <div>
           <strong>Engineering source required</strong>
           <p>
-            Upload design is for prepared quote packages. Include at least one
+            This path is for prepared harness materials. Include at least one
             drawing, CAD, STEP, spreadsheet, CSV/TSV, PDF, or archive. Photos
-            and notes can be attached only as supporting references.
+            and notes can support the package, especially for connectors,
+            labels, pin face, rear wire exit, and dimensions.
           </p>
         </div>
       </div>

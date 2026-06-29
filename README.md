@@ -42,9 +42,9 @@ policy.
 - Auth: Supabase Auth email link and Google OAuth path.
 - Database: Supabase PostgreSQL with RLS and workspace RPCs.
 - Storage: Supabase Storage bucket `request-attachments`.
-- AI intake: Supabase Edge Function `run-checking`, configured around Easy
-  Harness Draft closure, with Qwen as the recommended first live provider and
-  DeepSeek kept as an optional fallback.
+- AI intake: Supabase Edge Function `run-checking`, configured as a lightweight
+  upload assistant that organizes the uploaded package into a request basis.
+  Qwen is the recommended first live provider and DeepSeek stays optional.
 - Payment: Stripe, PayPal, bank transfer, and a protected marketplace payment
   handoff are modeled, but live provider/API calls are not implemented yet.
 - Logistics: DHL Express is the first target, but live rate, shipment, label,
@@ -57,7 +57,7 @@ policy.
 The project documentation is organized under `docs/`:
 
 - `docs/current/` - current product and engineering baseline.
-- `docs/ai-agent/` - AI Agent principles and draft-stage behavior.
+- `docs/ai-agent/` - AI Agent principles and upload/request-basis behavior.
 - `docs/setup/` - service setup handoffs such as Auth and backend readiness.
   See `docs/setup/AI_PROVIDER_QWEN_SETUP.md` for Qwen provider secrets.
 - `docs/archive/change-notes/` - old iteration notes kept for traceability.

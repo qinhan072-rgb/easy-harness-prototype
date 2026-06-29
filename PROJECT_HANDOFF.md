@@ -1,6 +1,6 @@
 # Easy Harness Project Handoff
 
-Last updated: 2026-05-18
+Last updated: 2026-06-29
 
 This is the active handoff for the Easy Harness platform. It replaces older
 prototype-era notes that still mention local-only persistence.
@@ -33,17 +33,19 @@ http://127.0.0.1:5173
 ## Product Baseline
 
 Easy Harness helps customers submit custom wiring harness needs in plain
-language with photos, old samples, sketches, PDFs, pinouts, or other materials.
-The platform should turn that input into a clear request, then a quoteable
-draft, then a separate order for checkout, payment, production, shipping, and
-tracking.
+language with photos, old samples, sketches, PDFs, pinouts, CAD, spreadsheets,
+or other materials. The professional upload path should let prepared customers
+submit their material directly, while a small Easy Harness upload assistant can
+organize the package into a request basis and suggest only useful additions.
+After review, the request can become a quote and then a separate order for
+checkout, payment, production, shipping, and tracking.
 
 The visible customer-facing system identity is always **Easy Harness**.
 
 Requests and orders are separate:
 
-- Request: communication, uploaded material, AI intake, draft, price release,
-  and customer confirmation.
+- Request: communication, uploaded material, AI-assisted request basis, price
+  release, and customer confirmation.
 - Order: checkout, delivery address, payment, production state, shipping,
   tracking, and after-sales contact.
 
@@ -74,10 +76,10 @@ Implemented:
 - Staff order updates for production, payment, shipment, and tracking metadata.
 - In-app notifications, notification delivery records, audit logs, and service
   events.
-- `run-checking` Supabase Edge Function for Easy Harness Draft intake, with a
-  configurable Qwen/DeepSeek model adapter. Qwen can optionally receive selected
-  uploaded image attachments through short-lived Supabase signed URLs when
-  `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`.
+- `run-checking` Supabase Edge Function for the Easy Harness upload assistant,
+  with a configurable Qwen/DeepSeek model adapter. Qwen can optionally receive
+  selected uploaded image attachments through short-lived Supabase signed URLs
+  when `AI_DRAFT_ENABLE_ATTACHMENT_VISION=true`.
 - First `attachment_observations` layer in `run-checking`: CSV/text excerpts,
   CSV table samples, XLSX/XLSM sheet probes, lightweight PDF text probes, Qwen
   image-input observations, lightweight CAD metadata for STEP/STP, DXF, OBJ,
@@ -107,14 +109,14 @@ Still not live:
   catalog matching, rule validation, BOM/cut list/manufacturing package
   generation.
 
-## AI Agent Baseline
+## Upload Assistant Baseline
 
-The current AI target is not an automatic factory BOM generator.
+The current AI target is not an automatic factory drawing, BOM, or manufacturing
+package generator.
 
-The AI Agent's first job is to convert a customer's natural request into an
-Easy Harness Draft: a clear, trustworthy, stage-specific wiring harness
-requirement object that can move into Easy Harness review, quote-path
-evaluation, and later manufacturing assessment.
+The assistant's job is to help prepared customers upload better material and to
+organize the submitted package into a clear request basis. Professional users
+should be able to ignore the assistant and submit directly.
 
 Use:
 
@@ -127,12 +129,16 @@ as the product baseline for agent behavior.
 Key principles:
 
 - Do not turn the experience into a long industrial questionnaire.
-- Ask only the 1-3 questions that truly block draft closure.
+- Ask only the 1-3 questions that truly improve the upload package or request
+  basis.
 - Capture any explicit connector, pinout, wire, material, voltage/current, or
   environment details the user provides.
 - Do not force users to provide manufacturing details they may not know.
-- Draft closure means "ready for Easy Harness review", not "ready for
+- Request-basis readiness means "ready for Easy Harness review", not "ready for
   production".
+- Do not depend on the local `qwen-draft-worker` for production. The current
+  production path is Supabase Edge Function `run-checking` calling Qwen directly
+  with a bounded fast-response budget and `EdgeRuntime.waitUntil` continuation.
 - Do not expose "manual review", "human review", "prototype", "mock", or
   implementation details in customer UI.
 
