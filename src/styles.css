@@ -6847,11 +6847,24 @@ button:disabled {
   left: -9px;
 }
 
+.topology-connector-port.top {
+  top: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.topology-connector-port.bottom {
+  top: auto;
+  bottom: -9px;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
 .topology-empty-add {
   position: absolute;
   z-index: 5;
-  left: 50%;
-  top: 50%;
+  left: 360px;
+  top: 140px;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -6862,7 +6875,7 @@ button:disabled {
   background: #fff;
   color: #087a6e;
   font-weight: 760;
-  transform: translate(-50%, -50%);
+  box-shadow: 0 14px 30px rgba(20, 45, 42, 0.1);
 }
 
 .topology-pending-banner {
@@ -8072,6 +8085,14 @@ button:disabled {
   color: #b23b30;
   font-size: 12px;
   font-weight: 760;
+}
+
+.canvas-footer-summary .canvas-status-message.success {
+  color: #087a6e;
+}
+
+.canvas-footer-summary .canvas-status-message.notice {
+  color: #5c6a66;
 }
 
 .canvas-quantity-field {

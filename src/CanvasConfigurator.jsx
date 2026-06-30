@@ -61,6 +61,10 @@ function endpointKey(endpoint) {
   return `${endpoint.nodeId}:${endpoint.side}:${endpoint.pinId}`;
 }
 
+function electricalPinKey(endpoint) {
+  return `${endpoint?.nodeId || ""}:${endpoint?.pinId || ""}`;
+}
+
 function pinList(count) {
   return Array.from({ length: Number(count || 0) }, (_, index) => `P${index + 1}`);
 }
@@ -86,6 +90,12 @@ function readCanvasDraft(storageKey) {
 function clearCanvasDraft(storageKey) {
   if (!storageKey || typeof window === "undefined") return;
   window.localStorage.removeItem(storageKey);
+}
+
+function writeCanvasDraft(storageKey, payload) {
+  if (!storageKey || typeof window === "undefined") return false;
+  window.localStorage.setItem(storageKey, JSON.stringify(payload));
+  return true;
 }
 
 function createConnectorId(nodes) {
@@ -194,6 +204,58 @@ function layoutCanvasNodes(nodes) {
       ...midPosition(columnId, slotIndex),
     };
   });
+}
+
+function connectorCenter(node) {
+  return {
+    x: Number(node?.x || 0) + TOPOLOGY_CONNECTOR_WIDTH / 2,
+    y: Number(node?.y || 0) + TOPOLOGY_CONNECTOR_HEIGHT / 2,
+  };
+}
+
+function fallbackTopologyPinSide(node) {
+  if (node?.side === "right") return "left";
+  if (node?.side === "left") return "right";
+  return Number(node?.x || 0) < TOPOLOGY_CANVAS_WIDTH / 2 ? "right" : "left";
+}
+
+function resolveConnectorPortSide(node, connectorById, wires) {
+  const relatedCenters = [];
+  wires.forEach((wire) => {
+    if (wire.from?.nodeId === node.id && connectorById.has(wire.to?.nodeId)) {
+      relatedCenters.push(connectorCenter(connectorById.get(wire.to.nodeId)));
+    }
+    if (wire.to?.nodeId === node.id && connectorById.has(wire.from?.nodeId)) {
+      relatedCenters.push(connectorCenter(connectorById.get(wire.from.nodeId)));
+    }
+  });
+  if (!relatedCenters.length) return fallbackTopologyPinSide(node);
+
+  const current = connectorCenter(node);
+  const target = relatedCenters.reduce(
+    (sum, point) => ({ x: sum.x + point.x, y: sum.y + point.y }),
+    { x: 0, y: 0 },
+  );
+  target.x /= relatedCenters.length;
+  target.y /= relatedCenters.length;
+
+  const dx = target.x - current.x;
+  const dy = target.y - current.y;
+  if (Math.abs(dx) >= Math.abs(dy)) return dx >= 0 ? "right" : "left";
+  return dy >= 0 ? "bottom" : "top";
+}
+
+function applyConnectorPortSides(layoutNodes, wires) {
+  const connectorById = new Map(
+    layoutNodes
+      .filter((node) => node.type === "connector")
+      .map((node) => [node.id, node]),
+  );
+  return layoutNodes.map((node) =>
+    node.type === "connector"
+      ? { ...node, portSide: resolveConnectorPortSide(node, connectorById, wires) }
+      : node,
+  );
 }
 
 function endpointLabel(endpoint) {
@@ -312,11 +374,25 @@ function endpointNode(layoutNodes, endpoint) {
 }
 
 function topologyPinSide(node) {
-  return Number(node?.x || 0) < TOPOLOGY_CANVAS_WIDTH / 2 ? "right" : "left";
+  return node?.portSide || fallbackTopologyPinSide(node);
 }
 
 function topologyPortPoint(node) {
   const portSide = topologyPinSide(node);
+  if (portSide === "top") {
+    return {
+      x: Number(node.x) + TOPOLOGY_CONNECTOR_WIDTH / 2,
+      y: Number(node.y),
+      side: portSide,
+    };
+  }
+  if (portSide === "bottom") {
+    return {
+      x: Number(node.x) + TOPOLOGY_CONNECTOR_WIDTH / 2,
+      y: Number(node.y) + TOPOLOGY_CONNECTOR_HEIGHT,
+      side: portSide,
+    };
+  }
   return {
     x: portSide === "right" ? Number(node.x) + TOPOLOGY_CONNECTOR_WIDTH : Number(node.x),
     y: Number(node.y) + TOPOLOGY_CONNECTOR_HEIGHT / 2,
@@ -326,6 +402,16 @@ function topologyPortPoint(node) {
 
 function cubicPath(start, end, bend = 0) {
   const dx = Math.abs(end.x - start.x);
+  const dy = Math.abs(end.y - start.y);
+  if (dy > dx * 1.15) {
+    const control = clamp(dy * 0.36, 72, 210);
+    return (
+      `M ${start.x} ${start.y} ` +
+      `C ${start.x + bend} ${start.y + (start.y <= end.y ? control : -control)}, ` +
+      `${end.x - bend} ${end.y + (start.y <= end.y ? -control : control)}, ` +
+      `${end.x} ${end.y}`
+    );
+  }
   const control = clamp(dx * 0.36, 72, 210);
   return (
     `M ${start.x} ${start.y} ` +
@@ -606,10 +692,15 @@ export default function CanvasConfigurator({
   const [selectedWireId, setSelectedWireId] = useState("");
   const [selectedSegmentId, setSelectedSegmentId] = useState("");
   const [routeDecisionWireId, setRouteDecisionWireId] = useState("");
+  const [canvasStatus, setCanvasStatus] = useState(null);
   const canvasRef = useRef(null);
   const pinRefs = useRef(new Map());
 
-  const layoutNodes = useMemo(() => layoutCanvasNodes(nodes), [nodes]);
+  const positionedNodes = useMemo(() => layoutCanvasNodes(nodes), [nodes]);
+  const layoutNodes = useMemo(
+    () => applyConnectorPortSides(positionedNodes, wires),
+    [positionedNodes, wires],
+  );
 
   const nodeById = useMemo(
     () => new Map(layoutNodes.map((node) => [node.id, node])),
@@ -753,18 +844,15 @@ export default function CanvasConfigurator({
   useEffect(() => {
     if (!draftStorageKey || typeof window === "undefined") return;
     try {
-      window.localStorage.setItem(
-        draftStorageKey,
-        JSON.stringify({
-          version: canvasDraftVersion,
-          configurationName,
-          quantity,
-          nodes,
-          wires,
-          segmentLengths,
-          updatedAt: new Date().toISOString(),
-        }),
-      );
+      writeCanvasDraft(draftStorageKey, {
+        version: canvasDraftVersion,
+        configurationName,
+        quantity,
+        nodes,
+        wires,
+        segmentLengths,
+        updatedAt: new Date().toISOString(),
+      });
     } catch {
       // Draft restore is a convenience; checkout should not depend on browser storage.
     }
@@ -908,15 +996,16 @@ export default function CanvasConfigurator({
 
   const handlePinClick = (endpoint) => {
     setSubmitError("");
-    const key = endpointKey(endpoint);
-    if (!pendingEndpoint && connectedPins.has(key)) {
+    setCanvasStatus(null);
+    const key = electricalPinKey(endpoint);
+    if (!pendingEndpoint && wires.some((wire) => [wire.from, wire.to].some((item) => electricalPinKey(item) === key))) {
       const removedWire = wires.find(
-        (wire) => endpointKey(wire.from) === key || endpointKey(wire.to) === key,
+        (wire) => electricalPinKey(wire.from) === key || electricalPinKey(wire.to) === key,
       );
       setWires((current) =>
         current.filter(
           (wire) =>
-            endpointKey(wire.from) !== key && endpointKey(wire.to) !== key,
+            electricalPinKey(wire.from) !== key && electricalPinKey(wire.to) !== key,
         ),
       );
       if (removedWire?.id === selectedWireId) setSelectedWireId("");
@@ -926,15 +1015,15 @@ export default function CanvasConfigurator({
       setPendingEndpoint(endpoint);
       return;
     }
-    if (endpointKey(pendingEndpoint) === endpointKey(endpoint)) {
+    if (electricalPinKey(pendingEndpoint) === electricalPinKey(endpoint)) {
       setPendingEndpoint(null);
       return;
     }
     const duplicate = wires.some((wire) => {
-      const a = endpointKey(wire.from);
-      const b = endpointKey(wire.to);
-      const first = endpointKey(pendingEndpoint);
-      const second = endpointKey(endpoint);
+      const a = electricalPinKey(wire.from);
+      const b = electricalPinKey(wire.to);
+      const first = electricalPinKey(pendingEndpoint);
+      const second = electricalPinKey(endpoint);
       return (a === first && b === second) || (a === second && b === first);
     });
     if (!duplicate) {
@@ -1000,6 +1089,49 @@ export default function CanvasConfigurator({
     if (selectedWireId === wireId) setSelectedWireId("");
     if (wireModalId === wireId) setWireModalId("");
     if (routeDecisionWireId === wireId) setRouteDecisionWireId("");
+  };
+
+  const newHarnessDraft = () => {
+    setConfigurationName("New canvas harness configuration");
+    setQuantity(1);
+    setNodes([]);
+    setWires([]);
+    setSegmentLengths({});
+    setPendingEndpoint(null);
+    setConnectorPicker(null);
+    setWireModalId("");
+    setMidModalId("");
+    setConfirmingConfiguration(null);
+    setSelectedConnectorId("");
+    setSelectedWireId("");
+    setSelectedSegmentId("");
+    setRouteDecisionWireId("");
+    setSubmitError("");
+    setCanvasStatus({ tone: "success", text: "Started a new blank canvas draft." });
+  };
+
+  const saveHarnessDraft = () => {
+    try {
+      const saved = writeCanvasDraft(draftStorageKey, {
+        version: canvasDraftVersion,
+        configurationName,
+        quantity,
+        nodes,
+        wires,
+        segmentLengths,
+        updatedAt: new Date().toISOString(),
+      });
+      setSubmitError("");
+      setCanvasStatus({
+        tone: saved ? "success" : "notice",
+        text: saved
+          ? "Canvas draft saved for this request item."
+          : "Canvas draft is kept in memory for this session.",
+      });
+    } catch (error) {
+      setCanvasStatus(null);
+      setSubmitError(error?.message || "Canvas draft could not be saved.");
+    }
   };
 
   const updateMidElement = (nodeId, patch) => {
@@ -1176,11 +1308,11 @@ export default function CanvasConfigurator({
               <Plus size={15} />
               Add connector
             </button>
-            <button className="topology-tool" type="button" onClick={() => setSubmitError("New harness action is reserved for Canvas V2.")}>
+            <button className="topology-tool" type="button" onClick={newHarnessDraft}>
               <FilePlus size={15} />
               New
             </button>
-            <button className="topology-tool" type="button" onClick={() => setSubmitError("Draft is saved automatically in this browser.")}>
+            <button className="topology-tool" type="button" onClick={saveHarnessDraft}>
               <Save size={15} />
               Save
             </button>
@@ -1281,8 +1413,8 @@ export default function CanvasConfigurator({
                   type="button"
                   onClick={() =>
                     setConnectorPicker({
-                      x: 96,
-                      y: 88,
+                      x: 356,
+                      y: 220,
                       side: "left",
                       slotIndex: 0,
                       view: "choices",
@@ -1355,6 +1487,11 @@ export default function CanvasConfigurator({
             </>
           ) : null}
           {submitError && <small>{submitError}</small>}
+          {canvasStatus?.text && (
+            <small className={`canvas-status-message ${canvasStatus.tone || "notice"}`}>
+              {canvasStatus.text}
+            </small>
+          )}
         </div>
         <label className="canvas-quantity-field">
           <span>Quantity</span>
