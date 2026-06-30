@@ -428,6 +428,10 @@ const checks = [
       checkingFunction.includes("buildUploadAssistantPreview") &&
       checkingFunction.includes("callDraftTextCompletion") &&
       checkingFunction.includes("enable_thinking: false") &&
+      checkingFunction.includes("temperature: 0") &&
+      checkingFunction.includes("buildUploadAssistantGuidancePolicy") &&
+      checkingFunction.includes("structured_starting_basis") &&
+      checkingFunction.includes("Canvas configurator") &&
       checkingFunction.includes("visibleTextPreview") &&
       checkingFunction.includes("Do not require a drawing, 3D model") &&
       uploadDesign.includes("uploadAssistantFilePreview") &&

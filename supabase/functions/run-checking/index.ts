@@ -3796,7 +3796,7 @@ async function callDraftTextCompletion(
         model,
         stream: false,
         max_tokens: maxTokens,
-        temperature: 0.2,
+        temperature: 0,
         ...uploadAssistantProviderOptions(provider),
         messages: [
           {
@@ -4304,6 +4304,91 @@ function normalizePreviewList(value: unknown) {
     : [];
 }
 
+function previewHarnesses(payload: CheckingRequest) {
+  const preview = payload.preview || {};
+  const harnesses = Array.isArray(preview.harnesses)
+    ? preview.harnesses
+    : [];
+  return harnesses.filter(
+    (harness): harness is Record<string, unknown> =>
+      harness !== null && typeof harness === "object",
+  );
+}
+
+function previewFiles(payload: CheckingRequest) {
+  return previewHarnesses(payload).flatMap((harness) =>
+    Array.isArray(harness.files)
+      ? harness.files.filter(
+          (file): file is Record<string, unknown> =>
+            file !== null && typeof file === "object",
+        )
+      : [],
+  );
+}
+
+function previewVisibleText(payload: CheckingRequest) {
+  return previewFiles(payload)
+    .map((file) => normalizePreviewString(file.visibleTextPreview))
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildUploadAssistantGuidancePolicy(payload: CheckingRequest) {
+  const preview = payload.preview || {};
+  const counts =
+    preview.counts && typeof preview.counts === "object"
+      ? (preview.counts as Record<string, unknown>)
+      : {};
+  const files = previewFiles(payload);
+  const visibleText = previewVisibleText(payload);
+  const visibleTextLower = visibleText.toLowerCase();
+  const engineeringSources = Number(counts.engineering_sources || 0);
+  const supportingReferences = Number(counts.supporting_references || 0);
+  const hasVisibleText = Boolean(visibleText.trim());
+  const hasCadOrDrawing = files.some((file) =>
+    /\.(pdf|dwg|dxf|step|stp|igs|iges|stl)$/i.test(
+      normalizePreviewString(file.name || file.extension),
+    ),
+  );
+  const hasStructuredTable = files.some((file) =>
+    /\.(csv|tsv|xlsx?|xlsm)$/i.test(
+      normalizePreviewString(file.name || file.extension),
+    ),
+  );
+  const hasConnectionClues =
+    /branch|device|signal|power|wire|controller|connector|interface|switch|pump|fan|probe|connect|route|trunk|gland|连接|分支|接口|设备|线|走线|控制|传感|开关|泵|风扇|探头/.test(
+      visibleTextLower,
+    );
+  const hasDimensionOrEnvironmentClues =
+    /\b\d+(\.\d+)?\s*(mm|cm|m)\b|length|approx|environment|wet|splash|label|尺寸|长度|环境|防水|标签/.test(
+      visibleTextLower,
+    );
+
+  let posture = "needs_context";
+  if (engineeringSources > 0 && hasVisibleText && hasConnectionClues) {
+    posture = hasDimensionOrEnvironmentClues
+      ? "structured_starting_basis"
+      : "source_with_missing_context";
+  } else if (engineeringSources > 0 || hasStructuredTable || hasCadOrDrawing) {
+    posture = "professional_files_received";
+  } else if (!files.length) {
+    posture = "no_files_yet";
+  } else if (supportingReferences > 0) {
+    posture = "supporting_references_only";
+  }
+
+  return [
+    "Stable upload guidance policy:",
+    `- posture: ${posture}`,
+    "- If posture is structured_starting_basis, say the package is enough to start initial Easy Harness review, then suggest one high-value optional supplement.",
+    "- If professional files are present but their contents are not visible, acknowledge receipt and ask the user to identify the main source file or connection goal.",
+    "- If only supporting references or vague natural language are present, suggest either uploading a stronger professional package or using the Canvas configurator.",
+    "- Encourage professional materials when relevant: CAD/drawings/PDFs/pinouts/spreadsheets/connector photos are helpful, especially connector face, rear wire exit, dimensions, and installation photos.",
+    "- Never present CAD, 3D, exact connector model, wire gauge, BOM, cut list, crimp tooling, or factory test details as mandatory before Easy Harness can start review.",
+    "- Keep the answer stable: do not flip between 'enough to start review' and 'cannot review' when the visible text contains connection, branch, route, length, or environment clues.",
+  ].join("\n");
+}
+
 async function buildUploadAssistantPreview(
   payload: CheckingRequest,
   userId: string,
@@ -4323,6 +4408,8 @@ async function buildUploadAssistantPreview(
     "Use one or two short, helpful sentences. Do not return markdown tables.",
   ].join("\n");
   const userContent = [
+    buildUploadAssistantGuidancePolicy(payload),
+    "",
     "Current upload form state:",
     previewText(payload.preview),
     "",
