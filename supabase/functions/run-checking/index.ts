@@ -4405,7 +4405,12 @@ async function buildUploadAssistantPreview(
     "Do not require a drawing, 3D model, exact connector model, wire gauge, or full manufacturing detail just to start Easy Harness review.",
     "CSV, TSV, TXT route notes, photos, sketches, PDFs, CAD, and spreadsheets can all be useful starting materials. Explain what would make the upload clearer, not what blocks all review.",
     "Reply in the same language as the customer's latest message when possible.",
-    "Use one or two short, helpful sentences. Do not return markdown tables.",
+    "Return compact JSON only with keys: reply, suggested_note, quick_checks, risk_level, ask_next.",
+    "reply: one or two short, helpful customer-facing sentences.",
+    "suggested_note: a concise design note the customer can add to the active harness. Summarize the uploaded basis, known connection/route/quantity clues, and one optional supplement if useful. Do not overclaim hidden file contents.",
+    "quick_checks: 2 to 4 short strings.",
+    "risk_level: ok, needs_source, or needs_context.",
+    "ask_next: one short optional follow-up question.",
   ].join("\n");
   const userContent = [
     buildUploadAssistantGuidancePolicy(payload),

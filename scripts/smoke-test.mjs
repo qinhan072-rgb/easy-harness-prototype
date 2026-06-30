@@ -434,6 +434,8 @@ const checks = [
       checkingFunction.includes("Canvas configurator") &&
       checkingFunction.includes("visibleTextPreview") &&
       checkingFunction.includes("Do not require a drawing, 3D model") &&
+      checkingFunction.includes("suggested_note: a concise design note") &&
+      checkingFunction.includes("Summarize the uploaded basis") &&
       uploadDesign.includes("uploadAssistantFilePreview") &&
       uploadDesign.includes("visibleTextPreviewStatus: \"included\"") &&
       uploadDesign.includes("assistantTextPreviewExtensions") &&
