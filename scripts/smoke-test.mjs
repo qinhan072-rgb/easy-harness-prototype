@@ -424,14 +424,21 @@ const checks = [
       uploadDesign.includes("UploadAssistantSidecar") &&
       uploadDesign.includes("AI Upload Chat") &&
       uploadDesign.includes("Ask AI") &&
-      uploadDesign.includes("mode: \"upload_assistant_preview\"") &&
+      uploadDesign.includes("\"upload_assistant_preview\"") &&
       checkingFunction.includes("buildUploadAssistantPreview") &&
+      checkingFunction.includes("callDraftTextCompletion") &&
+      checkingFunction.includes("enable_thinking: false") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS") &&
       checkingFunction.includes("payload.mode === \"upload_assistant_preview\"") &&
+      checkingFunction.includes("payload.mode === \"upload_assistant_ping\"") &&
+      checkingFunction.includes("buildUploadAssistantPing") &&
+      checkingFunction.includes("AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS") &&
       checkingFunction.includes("Do not claim you visually inspected") &&
       uploadDesign.includes("supabase.auth.getSession") &&
       uploadDesign.includes("Authorization: `Bearer ${accessToken}`") &&
+      uploadDesign.includes("upload_assistant_ping") &&
+      uploadDesign.includes("message.toLowerCase() === \"/ping\"") &&
       uploadDesign.includes("readFunctionErrorBody") &&
       !uploadDesign.includes("function localAssistantReply") &&
       uploadDesign.includes("upload-assistant-note-preview") &&
@@ -841,11 +848,11 @@ const checks = [
     pass: checkingFunction.includes("draftModelConfig") &&
       checkingFunction.includes("dashscope.aliyuncs.com/compatible-mode/v1") &&
       checkingFunction.includes("callDraftModel") &&
-      checkingFunction.includes("qwen-plus") &&
+      checkingFunction.includes("qwen3.6-plus") &&
       checkingFunction.includes('provider === "qwen"') &&
       envExample.includes("AI_DRAFT_PROVIDER=qwen") &&
       envExample.includes("QWEN_API_KEY=") &&
-      envExample.includes("QWEN_MODEL=qwen-plus")
+      envExample.includes("QWEN_MODEL=qwen3.6-plus")
   },
   {
     name: "formal ai draft runs evidence audit before saving",
@@ -934,6 +941,8 @@ const checks = [
       !existsSync(qwenDraftWorkerPath) &&
       packageJson.includes("\"xlsx\"") &&
       envExample.includes("AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=45000") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS=30000") &&
       !envExample.includes("AI_DRAFT_USE_EXTERNAL_WORKER") &&
       aiProviderDoc.includes("EdgeRuntime.waitUntil")
   },

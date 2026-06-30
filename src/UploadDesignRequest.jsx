@@ -324,6 +324,7 @@ export default function UploadDesignRequest({
   async function askUploadAssistant(promptText = assistantInput) {
     const message = promptText.trim();
     if (!message || assistantLoading) return;
+    const pingMode = message.toLowerCase() === "/ping";
     const userMessage = {
       id: `upload_ai_user_${Date.now()}`,
       role: "user",
@@ -351,8 +352,12 @@ export default function UploadDesignRequest({
           Authorization: `Bearer ${accessToken}`,
         },
         body: {
-          mode: "upload_assistant_preview",
-          preview: assistantPreviewPayload(message),
+          mode: pingMode
+            ? "upload_assistant_ping"
+            : "upload_assistant_preview",
+          preview: pingMode
+            ? { ping: true }
+            : assistantPreviewPayload(message),
         },
       });
       if (error || !data?.ok) {
@@ -379,10 +384,12 @@ export default function UploadDesignRequest({
         {
           id: `upload_ai_${Date.now()}`,
           role: "assistant",
-          body: reply || "I can help turn the current package into a clearer upload note.",
+          body: pingMode
+            ? `Live AI connection is working. Model: ${data.model || "configured model"}.`
+            : reply || "I can help turn the current package into a clearer upload note.",
         },
       ]);
-      if (suggestedNote) setAssistantNote(suggestedNote);
+      if (!pingMode && suggestedNote) setAssistantNote(suggestedNote);
     } catch (error) {
       setAssistantError(
         `Live AI did not respond: ${error?.message || "unknown error"}. Upload and submit still work without it.`,

@@ -3671,7 +3671,7 @@ function draftModelConfig() {
         Deno.env.get("QWEN_BASE_URL") ||
         "https://dashscope.aliyuncs.com/compatible-mode/v1"
       ).replace(/\/$/, ""),
-      model: Deno.env.get("QWEN_MODEL") || "qwen-plus",
+      model: Deno.env.get("QWEN_MODEL") || "qwen3.6-plus",
       reasoningEffort: Deno.env.get("QWEN_REASONING_EFFORT") || "provider_default",
       maxTokens: Number(Deno.env.get("QWEN_MAX_TOKENS") || "12000"),
     };
@@ -3689,6 +3689,10 @@ function draftModelConfig() {
 }
 
 type DraftModelProviderConfig = ReturnType<typeof draftModelConfig>;
+
+function uploadAssistantProviderOptions(provider: string) {
+  return provider === "qwen" ? { enable_thinking: false } : {};
+}
 
 function draftModelUserContent(
   provider: string,
@@ -3768,6 +3772,60 @@ async function callDraftJsonCompletion(
   if (!content) throw new Error(`${provider} returned an empty draft result.`);
   return {
     parsed: JSON.parse(extractJsonObject(content)) as Record<string, unknown>,
+    usage: data?.usage || null,
+  };
+}
+
+async function callDraftTextCompletion(
+  config: DraftModelProviderConfig,
+  system: string,
+  userContent: string | Array<Record<string, unknown>>,
+  timeoutMs = providerRequestTimeoutMs(),
+  requestLabel = `${config.provider} text request`,
+) {
+  const { provider, apiKey, baseUrl, model, maxTokens } = config;
+  const response = await fetchWithTimeout(
+    `${baseUrl}/chat/completions`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model,
+        stream: false,
+        max_tokens: maxTokens,
+        temperature: 0.2,
+        ...uploadAssistantProviderOptions(provider),
+        messages: [
+          {
+            role: "system",
+            content: system,
+          },
+          {
+            role: "user",
+            content: userContent,
+          },
+        ],
+      }),
+    },
+    timeoutMs,
+    requestLabel,
+  );
+
+  const raw = await response.text();
+  if (!response.ok) {
+    throw new Error(
+      `${provider} request failed (${response.status}): ${raw.slice(0, 1200)}`,
+    );
+  }
+
+  const data = JSON.parse(raw);
+  const content = normalizePreviewString(data?.choices?.[0]?.message?.content);
+  if (!content) throw new Error(`${provider} returned an empty text result.`);
+  return {
+    text: content,
     usage: data?.usage || null,
   };
 }
@@ -4194,7 +4252,11 @@ async function keepRequestPendingAfterModelFailure(
 }
 
 function uploadAssistantPreviewTimeoutMs() {
-  return envNumber("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS", 15000, 3000, 45000);
+  return envNumber("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS", 45000, 5000, 90000);
+}
+
+function uploadAssistantPingTimeoutMs() {
+  return envNumber("AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS", 30000, 5000, 60000);
 }
 
 function uploadAssistantPreviewModelConfig() {
@@ -4206,6 +4268,19 @@ function uploadAssistantPreviewModelConfig() {
       800,
       200,
       2000,
+    ),
+  };
+}
+
+function uploadAssistantPingModelConfig() {
+  const config = draftModelConfig();
+  return {
+    ...config,
+    maxTokens: envNumber(
+      "AI_UPLOAD_ASSISTANT_PING_MAX_TOKENS",
+      64,
+      16,
+      200,
     ),
   };
 }
@@ -4241,12 +4316,8 @@ async function buildUploadAssistantPreview(
     "Do not use keyword workflows, fixture names, or case-specific scripts; reason from the current upload state.",
     "Do not claim you visually inspected, parsed, OCR-read, or understood hidden file contents.",
     "Do not ask for factory-only details such as crimp tooling, BOM, cut list, terminal sourcing, or manufacturing test methods.",
-    "Return only compact JSON with keys: reply, suggested_note, quick_checks, risk_level, ask_next.",
-    "reply: one friendly sentence under 34 words.",
-    "suggested_note: a useful note the user can add to the active harness, under 55 words.",
-    "quick_checks: 2 to 4 short strings.",
-    "risk_level: ok, needs_source, or needs_context.",
-    "ask_next: one short optional follow-up question.",
+    "Reply in the same language as the customer's latest message when possible.",
+    "Use one or two short, helpful sentences. Do not return markdown tables.",
   ].join("\n");
   const userContent = [
     "Current upload form state:",
@@ -4255,13 +4326,19 @@ async function buildUploadAssistantPreview(
     "Respond for the right-side upload chat only. Be concise.",
   ].join("\n");
 
-  const generated = await callDraftJsonCompletion(
+  const generated = await callDraftTextCompletion(
     config,
     system,
     userContent,
     uploadAssistantPreviewTimeoutMs(),
+    `${config.provider} upload assistant preview`,
   );
-  const parsed = generated.parsed || {};
+  let parsed: Record<string, unknown> = {};
+  try {
+    parsed = JSON.parse(extractJsonObject(generated.text));
+  } catch {
+    parsed = {};
+  }
   logCheckingEvent("upload_assistant_preview_completed", {
     user_id: userId,
     provider: config.provider,
@@ -4275,12 +4352,48 @@ async function buildUploadAssistantPreview(
     model: config.model,
     reply: normalizePreviewString(
       parsed.reply,
-      "I can help make this upload package clearer before you submit it.",
+      generated.text,
     ),
-    suggestedNote: normalizePreviewString(parsed.suggested_note),
+    suggestedNote: normalizePreviewString(
+      parsed.suggested_note,
+      "",
+    ),
     quickChecks: normalizePreviewList(parsed.quick_checks),
     riskLevel: normalizePreviewString(parsed.risk_level, "needs_context"),
     askNext: normalizePreviewString(parsed.ask_next),
+  };
+}
+
+async function buildUploadAssistantPing(userId: string) {
+  const config = uploadAssistantPingModelConfig();
+  const startedAt = Date.now();
+  const generated = await callDraftTextCompletion(
+    config,
+    "You are an Easy Harness live AI connection check. Reply with exactly: OK",
+    "Reply exactly OK.",
+    uploadAssistantPingTimeoutMs(),
+    `${config.provider} upload assistant ping`,
+  );
+  logCheckingEvent("upload_assistant_ping_completed", {
+    user_id: userId,
+    provider: config.provider,
+    model: config.model,
+    elapsed_ms: Date.now() - startedAt,
+    usage: generated.usage || null,
+  });
+  return {
+    ok: true,
+    mode: "upload_assistant_ping",
+    provider: config.provider,
+    model: config.model,
+    reply: normalizePreviewString(
+      generated.text,
+      "I can help make this upload package clearer before you submit it.",
+    ),
+    suggestedNote: "",
+    quickChecks: [],
+    riskLevel: "ok",
+    askNext: "",
   };
 }
 
@@ -4309,6 +4422,28 @@ Deno.serve(async (request) => {
     await supabase.auth.getUser(token);
   if (userError || !userData.user)
     return jsonResponse({ ok: false, code: "not_authenticated" }, 401);
+
+  if (payload.mode === "upload_assistant_ping") {
+    try {
+      const ping = await buildUploadAssistantPing(userData.user.id);
+      return jsonResponse(ping);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown upload assistant ping error";
+      logCheckingEvent("upload_assistant_ping_failed", {
+        user_id: userData.user.id,
+        error: message.slice(0, 500),
+      });
+      return jsonResponse(
+        {
+          ok: false,
+          code: "upload_assistant_ping_failed",
+          message,
+        },
+        502,
+      );
+    }
+  }
 
   if (payload.mode === "upload_assistant_preview") {
     try {

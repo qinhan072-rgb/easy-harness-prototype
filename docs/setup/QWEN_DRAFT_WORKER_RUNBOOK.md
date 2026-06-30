@@ -49,12 +49,14 @@ for this upload assistant path.
 ```text
 AI_DRAFT_PROVIDER=qwen
 QWEN_API_KEY=<secret>
-QWEN_MODEL=qwen-plus
+QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
 AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
-AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=15000
+AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=45000
 AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS=800
+AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS=30000
+AI_UPLOAD_ASSISTANT_PING_MAX_TOKENS=64
 AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=true
 AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=false
@@ -68,6 +70,8 @@ that window, the same Edge Function run continues through `EdgeRuntime.waitUntil
 chat sidecar. It is intentionally short and must not block upload submission.
 `AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS` keeps the sidecar response small even
 when the formal request-basis draft uses a larger Qwen budget.
+During staging, type `/ping` in the upload assistant input to test only the
+Supabase Edge Function -> Qwen API path with a tiny prompt.
 
 ## Attachment Evidence Boundary
 
