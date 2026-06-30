@@ -1757,7 +1757,7 @@ function isUploadDesignRequest(request = {}) {
 
 function requestSourceLabel(request = {}) {
   if (isUploadDesignRequest(request) || request.source === "upload_design") {
-    return "Prepared package";
+    return "Upload package";
   }
   if (
     isCanvasConfigurationRequest(request) ||
@@ -1765,7 +1765,7 @@ function requestSourceLabel(request = {}) {
   ) {
     return "Canvas configuration";
   }
-  return "Upload assistant request";
+  return "Upload package";
 }
 
 function uploadDesignSummaryText(uploadDesign = {}) {
@@ -3398,10 +3398,11 @@ function App() {
     typeof window !== "undefined"
       ? new URLSearchParams(window.location.search).get("entry")
       : "";
-  const requestEntryModes = ["agent", "canvas", "upload"];
-  const initialRequestEntryMode = requestEntryModes.includes(urlEntryMode)
-    ? urlEntryMode
-    : "agent";
+  const requestEntryModes = ["canvas", "upload"];
+  const normalizedUrlEntryMode = urlEntryMode === "agent" ? "upload" : urlEntryMode;
+  const initialRequestEntryMode = requestEntryModes.includes(normalizedUrlEntryMode)
+    ? normalizedUrlEntryMode
+    : "upload";
 
   const [users, setUsers] = useStoredState("easy-harness.users", seedUsers);
   const [currentUserId, setCurrentUserId] = useStoredState(
@@ -3536,8 +3537,13 @@ function App() {
 
   useEffect(() => {
     const entry = new URLSearchParams(window.location.search).get("entry");
-    if (requestEntryModes.includes(entry)) setRequestEntryMode(entry);
-  }, [setRequestEntryMode]);
+    const normalizedEntry = entry === "agent" ? "upload" : entry;
+    if (requestEntryModes.includes(normalizedEntry)) {
+      setRequestEntryMode(normalizedEntry);
+    } else if (!requestEntryModes.includes(requestEntryMode)) {
+      setRequestEntryMode("upload");
+    }
+  }, [requestEntryMode, setRequestEntryMode]);
 
   useEffect(() => {
     if (userView === "start" && ["canvas", "upload"].includes(requestEntryMode)) {
@@ -6433,7 +6439,7 @@ function App() {
     }
     if (!engineeringSourceCount) {
       throw new Error(
-        "Prepared package upload needs at least one drawing, CAD, STEP, spreadsheet, CSV, TSV, PDF, or archive. Photos and notes can support the package.",
+        "Upload package needs at least one drawing, CAD, STEP, spreadsheet, CSV, TSV, PDF, or archive. Photos and notes can support the package.",
       );
     }
 
@@ -8257,36 +8263,13 @@ function WiringBackdrop() {
 }
 
 function StartScreen({
-  description,
-  setDescription,
-  files,
-  uploadRef,
-  handleUpload,
-  handleDrop,
-  removeFile,
-  fillSampleRequest,
-  startRequest,
   submittingRequest = false,
-  submissionPhase = "",
   currentUser,
-  requestEntryMode = "agent",
+  requestEntryMode = "upload",
   setRequestEntryMode,
   submitCanvasConfiguration,
   submitUploadDesign,
-  uploadTermsAccepted = false,
-  termsChecked,
-  setTermsChecked,
-  termsError,
-  fileError,
-  openPolicy,
 }) {
-  const phaseCopy = {
-    creating: "Creating your request...",
-    uploading: "Uploading files...",
-    checking: "Easy Harness is organizing your upload package...",
-  };
-  const [dragActive, setDragActive] = useState(false);
-
   if (requestEntryMode === "canvas") {
     return (
       <section className="start-screen canvas-start-screen">
@@ -8301,255 +8284,16 @@ function StartScreen({
     );
   }
 
-  if (requestEntryMode === "upload") {
-    return (
-      <section className="start-screen upload-start-screen">
-        <UploadDesignRequest
-          activeMode="upload"
-          onSwitchMode={setRequestEntryMode}
-          onSubmitUploadDesign={submitUploadDesign}
-          submitting={submittingRequest}
-          currentUser={currentUser}
-        />
-      </section>
-    );
-  }
-
   return (
-    <section
-      className={`start-screen ${dragActive ? "drop-active" : ""}`}
-      onDragEnter={(event) => {
-        event.preventDefault();
-        if (!submittingRequest) setDragActive(true);
-      }}
-      onDragOver={(event) => event.preventDefault()}
-      onDragLeave={(event) => {
-        if (!event.currentTarget.contains(event.relatedTarget)) {
-          setDragActive(false);
-        }
-      }}
-      onDrop={(event) => {
-        setDragActive(false);
-        handleDrop?.(event);
-      }}
-    >
-      <div
-        className="request-entry-switch start-request-switch"
-        aria-label="Request entry mode"
-      >
-        <button
-          className={requestEntryMode === "agent" ? "active" : ""}
-          onClick={() => setRequestEntryMode?.("agent")}
-        >
-          Upload assistant
-        </button>
-        <button
-          className={requestEntryMode === "canvas" ? "active" : ""}
-          onClick={() => setRequestEntryMode?.("canvas")}
-        >
-          Canvas configurator
-        </button>
-        <button
-          className={requestEntryMode === "upload" ? "active" : ""}
-          onClick={() => setRequestEntryMode?.("upload")}
-        >
-          Prepared package
-        </button>
-      </div>
-
-      <div className="start-copy clean">
-        <h1>Upload what you have. We'll build the harness you need.</h1>
-        <p>
-          Upload drawings, CAD, pinouts, spreadsheets, PDFs, or photos. Easy
-          Harness will help organize the package and suggest only useful additions.
-        </p>
-      </div>
-
-      <div className="upload-composer">
-        <button
-          className="attach-button"
-          onClick={() => uploadRef.current?.click()}
-          disabled={submittingRequest}
-        >
-          <Plus size={21} />
-        </button>
-        <textarea
-          value={description}
-          onChange={(event) => setDescription(event.target.value)}
-          placeholder="Add the connection goal, quantity, length, or any note for this package..."
-          aria-label="Describe the uploaded harness package"
-          rows={1}
-          disabled={submittingRequest}
-        />
-        <input
-          ref={uploadRef}
-          type="file"
-          multiple
-          hidden
-          onChange={handleUpload}
-        />
-        <button
-          className="send-button"
-          onClick={startRequest}
-          aria-label="Start request"
-          disabled={submittingRequest}
-        >
-          {submittingRequest ? <Clock3 size={21} /> : <ArrowRight size={21} />}
-        </button>
-      </div>
-
-      <div className="start-actions">
-        <button
-          className="soft-chip"
-          onClick={() => uploadRef.current?.click()}
-          disabled={submittingRequest}
-        >
-          <Upload size={16} />
-          Upload materials
-        </button>
-        <span className="file-count">
-          {files.length
-            ? `${files.length} file${files.length > 1 ? "s" : ""} attached`
-            : "No files attached"}
-        </span>
-      </div>
-
-      {!!files.length && (
-        <div className="file-strip compact center">
-          {files.map((file) => (
-            <FileChip
-              key={file.id || fileName(file)}
-              file={file}
-              onRemove={() => removeFile?.(file.id || fileName(file))}
-            />
-          ))}
-        </div>
-      )}
-
-      <UploadAssistantGuide files={files} />
-
-      {submittingRequest && (
-        <div className="submission-progress-card">
-          <Clock3 size={17} />
-          <div>
-            <strong>{phaseCopy[submissionPhase] || "Creating your request..."}</strong>
-            <p>Keep this page open. Easy Harness will move you into the request thread automatically.</p>
-          </div>
-        </div>
-      )}
-
-      {fileError && <div className="form-error">{fileError}</div>}
-
-      {!uploadTermsAccepted && (
-        <label className={`terms-card ${termsError ? "error" : ""}`}>
-          <input
-            type="checkbox"
-            checked={termsChecked}
-            onChange={(event) => setTermsChecked(event.target.checked)}
-          />
-          <span>
-            I confirm that I have the right to upload these files and Easy
-            Harness may use them to review and prepare this request.{" "}
-            <InlinePolicyLink openPolicy={openPolicy} policyId="uploads">
-              Upload terms
-            </InlinePolicyLink>
-          </span>
-        </label>
-      )}
-      {termsError && <div className="form-error">{termsError}</div>}
+    <section className="start-screen upload-start-screen">
+      <UploadDesignRequest
+        activeMode="upload"
+        onSwitchMode={setRequestEntryMode}
+        onSubmitUploadDesign={submitUploadDesign}
+        submitting={submittingRequest}
+        currentUser={currentUser}
+      />
     </section>
-  );
-}
-
-function uploadAssistantFileKind(file = {}) {
-  const name = fileName(file).toLowerCase();
-  const type = String(file.type || file.mimeType || "").toLowerCase();
-  if (type.startsWith("image/") || /\.(png|jpe?g|webp|heic|bmp)$/i.test(name))
-    return "Photos";
-  if (type.includes("spreadsheet") || /\.(xlsx|xlsm|xls|csv|tsv)$/i.test(name))
-    return "Pinout / tables";
-  if (type.includes("pdf") || /\.pdf$/i.test(name)) return "Drawings / PDFs";
-  if (/\.(step|stp|dxf|dwg|igs|iges|stl|obj|3mf|fcstd)$/i.test(name))
-    return "CAD / mechanical";
-  if (/\.(zip|7z|rar)$/i.test(name)) return "Archive";
-  if (/\.(txt|md|doc|docx)$/i.test(name)) return "Notes / documents";
-  return "Reference files";
-}
-
-function uploadAssistantMaterialStats(files = []) {
-  return files.reduce((stats, file) => {
-    const kind = uploadAssistantFileKind(file);
-    stats[kind] = (stats[kind] || 0) + 1;
-    return stats;
-  }, {});
-}
-
-function UploadAssistantGuide({ files = [] }) {
-  const stats = uploadAssistantMaterialStats(files);
-  const kinds = Object.entries(stats);
-  const hasPhotos = Boolean(stats["Photos"]);
-  const hasTables = Boolean(stats["Pinout / tables"]);
-  const hasCad = Boolean(stats["CAD / mechanical"]);
-  const hasPdf = Boolean(stats["Drawings / PDFs"]);
-  const hasAny = files.length > 0;
-  const suggestions = [];
-
-  if (!hasAny) {
-    suggestions.push(
-      "Start with the best material you already have: drawing, pinout, CAD, PDF, connector photos, old harness photos, or a quote package.",
-    );
-  }
-  if (hasPhotos) {
-    suggestions.push(
-      "For harness photos, pin face, rear wire exit, labels, and a ruler or caliper photo make the package easier to review.",
-    );
-  }
-  if (hasTables) {
-    suggestions.push(
-      "For pinout tables, pin number, signal/function, wire color, gauge, other end, length, and quantity are the most useful columns.",
-    );
-  }
-  if (hasCad) {
-    suggestions.push(
-      "CAD helps with mechanical fit and installation space; it still needs a connection goal, endpoints, quantity, and electrical intent.",
-    );
-  }
-  if (hasPdf) {
-    suggestions.push(
-      "For drawings or PDFs, note the page, revision, and which connector or harness the request should follow.",
-    );
-  }
-  if (hasAny && suggestions.length < 2) {
-    suggestions.push(
-      "If the package is already complete, submit it now. Easy Harness will not ask for factory-only details at this step.",
-    );
-  }
-
-  return (
-    <div className="upload-assistant-guide">
-      <div className="upload-assistant-head">
-        <span>Upload assistant</span>
-        <strong>
-          {hasAny
-            ? "Materials received"
-            : "What helps Easy Harness review faster"}
-        </strong>
-      </div>
-      {hasAny && (
-        <div className="upload-material-kinds" aria-label="Uploaded material types">
-          {kinds.map(([kind, count]) => (
-            <span key={kind}>
-              {kind}: {count}
-            </span>
-          ))}
-        </div>
-      )}
-      <ul>
-        {suggestions.slice(0, 3).map((item) => (
-          <li key={item}>{item}</li>
-        ))}
-      </ul>
-    </div>
   );
 }
 

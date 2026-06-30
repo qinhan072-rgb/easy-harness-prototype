@@ -379,21 +379,23 @@ const checks = [
       app.includes("openAuthModal")
   },
   {
-    name: "home screen keeps upload assistant concise",
-    pass: app.includes("Upload drawings, CAD, pinouts, spreadsheets, PDFs, or photos.") &&
-      app.includes("Describe the uploaded harness package") &&
-      app.includes("UploadAssistantGuide") &&
+    name: "home screen opens the fused upload flow",
+    pass: app.includes('requestEntryModes = ["canvas", "upload"]') &&
+      app.includes("normalizedUrlEntryMode") &&
+      uploadDesign.includes("Upload harness package") &&
+      uploadDesign.includes("Upload with AI assistance") &&
       !app.includes("Describe the connection, upload photos, old samples, sketches, pinouts, or BOM files.") &&
       !app.includes("Old harness samples")
   },
   {
-    name: "new request offers assistant canvas and prepared package entry paths",
-    pass: app.includes('requestEntryModes = ["agent", "canvas", "upload"]') &&
-      app.includes("Upload assistant") &&
-      app.includes("Canvas configurator") &&
-      app.includes("Prepared package") &&
-      canvasConfigurator.includes("Prepared package") &&
-      uploadDesign.includes("Submit prepared harness package")
+    name: "new request offers only canvas and ai-assisted upload entry paths",
+    pass: app.includes('requestEntryModes = ["canvas", "upload"]') &&
+      !app.includes('requestEntryModes = ["agent", "canvas", "upload"]') &&
+      canvasConfigurator.includes("Canvas configurator") &&
+      uploadDesign.includes("Upload with AI assistance") &&
+      canvasConfigurator.includes("Upload with AI assistance") &&
+      !uploadDesign.includes('onSwitchMode?.("agent")') &&
+      !canvasConfigurator.includes('onSwitchMode?.("agent")')
   },
   {
     name: "prepared package path creates structured quote-review requests",
@@ -409,13 +411,17 @@ const checks = [
       uploadDesign.includes("Submit for quote review")
   },
   {
-    name: "prepared package keeps engineering files separate from assistant intake",
+    name: "upload page embeds a non-blocking assistant sidecar",
     pass: uploadDesign.includes("engineeringExtensions") &&
       uploadDesign.includes("supportingExtensions") &&
       uploadDesign.includes("fileDrafts: allFiles") &&
       uploadDesign.includes("schemaVersion: \"easy-harness.upload-design.v1\"") &&
-      uploadDesign.includes("Prepared package upload needs at least one drawing") &&
-      app.includes("Prepared package upload needs at least one drawing") &&
+      uploadDesign.includes("UploadAssistantSidecar") &&
+      uploadDesign.includes("Easy Harness assistant") &&
+      uploadDesign.includes("Add to design notes") &&
+      uploadDesign.includes("You can submit the package without chatting") &&
+      uploadDesign.includes("Upload package needs at least one drawing") &&
+      app.includes("Upload package needs at least one drawing") &&
       app.includes("pruneServerBackedStorageForHostedMode")
   },
   {

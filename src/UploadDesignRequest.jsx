@@ -8,6 +8,7 @@ import {
   Clock3,
   FileText,
   Mail,
+  MessageCircle,
   Phone,
   Plus,
   Trash2,
@@ -53,8 +54,8 @@ const acceptedUploadExtensions = [
 const maxUploadFileSizeBytes = 25 * 1024 * 1024;
 
 const steps = [
-  { id: 1, label: "Contact" },
-  { id: 2, label: "Design package" },
+  { id: 1, label: "Upload package" },
+  { id: 2, label: "Contact" },
   { id: 3, label: "Timeline" },
   { id: 4, label: "Review" },
 ];
@@ -194,6 +195,7 @@ export default function UploadDesignRequest({
   const [termsAccepted, setTermsAccepted] = useState(false);
   const [dragHarnessId, setDragHarnessId] = useState("");
   const [formError, setFormError] = useState("");
+  const [assistantNote, setAssistantNote] = useState("");
 
   useEffect(() => {
     if (!activeHarnessId && harnesses[0]) setActiveHarnessId(harnesses[0].id);
@@ -247,6 +249,15 @@ export default function UploadDesignRequest({
           : harness,
       ),
     );
+  }
+
+  function addAssistantNoteToActiveHarness() {
+    const note = assistantNote.trim();
+    if (!note || !activeHarness?.id) return;
+    updateHarness(activeHarness.id, (harness) => ({
+      notes: [harness.notes, note].filter(Boolean).join("\n"),
+    }));
+    setAssistantNote("");
   }
 
   function addHarness() {
@@ -324,18 +335,18 @@ export default function UploadDesignRequest({
 
   function validateStep(targetStep = step) {
     if (targetStep >= 1) {
-      if (!contact.name.trim()) return "Enter the contact name for this quote.";
-      if (!isEmailLike(contact.email))
-        return "Enter a valid email for quote communication.";
-      if (!contact.projectName.trim()) return "Enter a project name.";
-    }
-    if (targetStep >= 2) {
       const missingName = harnesses.find((harness) => !harness.name.trim());
       if (missingName) return "Name each harness in the upload package.";
       if (!allFiles.length) return "Attach at least one harness material file.";
       if (!engineeringFileCount) {
-        return "Prepared package upload needs at least one drawing, CAD, STEP, spreadsheet, CSV, TSV, PDF, or archive. Photos and notes can support the package.";
+        return "Upload package needs at least one drawing, CAD, STEP, spreadsheet, CSV, TSV, PDF, or archive. Photos and notes can support the package.";
       }
+    }
+    if (targetStep >= 2) {
+      if (!contact.name.trim()) return "Enter the contact name for this quote.";
+      if (!isEmailLike(contact.email))
+        return "Enter a valid email for quote communication.";
+      if (!contact.projectName.trim()) return "Enter a project name.";
     }
     if (targetStep >= 4) {
       if (!reviewChecked) return "Review the package checklist before submitting.";
@@ -420,20 +431,14 @@ export default function UploadDesignRequest({
       <header className="upload-design-header">
         <div>
           <span className="eyebrow">New request</span>
-          <h1>Submit prepared harness package</h1>
+          <h1>Upload harness package</h1>
           <p>
             Upload drawings, CAD, pinouts, spreadsheets, photos, PDFs, or quote
-            packages. Easy Harness will check completeness and prepare review.
+            packages. The assistant can help you make the package clearer before
+            Easy Harness review.
           </p>
         </div>
         <div className="request-entry-switch compact" aria-label="Request entry mode">
-          <button
-            className={activeMode === "agent" ? "active" : ""}
-            onClick={() => onSwitchMode?.("agent")}
-            type="button"
-          >
-            Upload assistant
-          </button>
           <button
             className={activeMode === "canvas" ? "active" : ""}
             onClick={() => onSwitchMode?.("canvas")}
@@ -446,107 +451,125 @@ export default function UploadDesignRequest({
             onClick={() => onSwitchMode?.("upload")}
             type="button"
           >
-            Prepared package
+            Upload with AI assistance
           </button>
         </div>
       </header>
 
       <main className="upload-design-main">
-        <Stepper step={step} />
+        <div className="upload-workspace-grid">
+          <div className="upload-form-column">
+            <Stepper step={step} />
 
-        <section className="upload-card">
-          <div className="upload-card-header">
-            <div>
-              <h2>{steps[step - 1].label}</h2>
-              <p>{stepCopy(step)}</p>
-            </div>
-            <span>Step {step} of 4</span>
+            <section className="upload-card">
+              <div className="upload-card-header">
+                <div>
+                  <h2>{steps[step - 1].label}</h2>
+                  <p>{stepCopy(step)}</p>
+                </div>
+                <span>Step {step} of 4</span>
+              </div>
+
+              {step === 1 && (
+                <DesignPackageStep
+                  harnesses={harnesses}
+                  activeHarness={activeHarness}
+                  activeHarnessId={activeHarnessId}
+                  setActiveHarnessId={setActiveHarnessId}
+                  addHarness={addHarness}
+                  removeHarness={removeHarness}
+                  updateHarness={updateHarness}
+                  browseFiles={browseFiles}
+                  removeFile={removeFile}
+                  addQuantity={addQuantity}
+                  updateQuantity={updateQuantity}
+                  removeQuantity={removeQuantity}
+                  addFilesToHarness={addFilesToHarness}
+                  dragHarnessId={dragHarnessId}
+                  setDragHarnessId={setDragHarnessId}
+                  engineeringFileCount={engineeringFileCount}
+                  supportingFileCount={supportingFileCount}
+                />
+              )}
+
+              {step === 2 && (
+                <ContactStep contact={contact} updateContact={updateContact} />
+              )}
+
+              {step === 3 && (
+                <TimelineStep
+                  leadTimeId={leadTimeId}
+                  setLeadTimeId={setLeadTimeId}
+                  leadTime={leadTime}
+                />
+              )}
+
+              {step === 4 && (
+                <ReviewStep
+                  contact={contact}
+                  harnesses={harnesses}
+                  leadTime={leadTime}
+                  engineeringFileCount={engineeringFileCount}
+                  supportingFileCount={supportingFileCount}
+                  totalQuantityCount={totalQuantityCount}
+                  reviewChecked={reviewChecked}
+                  setReviewChecked={setReviewChecked}
+                  termsAccepted={termsAccepted}
+                  setTermsAccepted={setTermsAccepted}
+                />
+              )}
+
+              {formError && (
+                <div className="upload-form-error">
+                  <AlertTriangle size={16} />
+                  <span>{formError}</span>
+                </div>
+              )}
+
+              <div className="upload-actions">
+                <button
+                  className="secondary-action upload-nav-button"
+                  onClick={goPrevious}
+                  disabled={step === 1 || submitting}
+                  type="button"
+                >
+                  <ChevronLeft size={17} />
+                  Previous
+                </button>
+                {step < 4 ? (
+                  <button className="primary-action upload-nav-button" onClick={goNext} type="button">
+                    Continue
+                    <ChevronRight size={17} />
+                  </button>
+                ) : (
+                  <button
+                    className="primary-action upload-nav-button"
+                    onClick={submitPackage}
+                    disabled={submitting}
+                    type="button"
+                  >
+                    {submitting ? <Clock3 size={17} /> : <Upload size={17} />}
+                    {submitting ? "Submitting" : "Submit for quote review"}
+                  </button>
+                )}
+              </div>
+            </section>
           </div>
 
-          {step === 1 && (
-            <ContactStep contact={contact} updateContact={updateContact} />
-          )}
-
-          {step === 2 && (
-            <DesignPackageStep
-              harnesses={harnesses}
-              activeHarness={activeHarness}
-              activeHarnessId={activeHarnessId}
-              setActiveHarnessId={setActiveHarnessId}
-              addHarness={addHarness}
-              removeHarness={removeHarness}
-              updateHarness={updateHarness}
-              browseFiles={browseFiles}
-              removeFile={removeFile}
-              addQuantity={addQuantity}
-              updateQuantity={updateQuantity}
-              removeQuantity={removeQuantity}
-              addFilesToHarness={addFilesToHarness}
-              dragHarnessId={dragHarnessId}
-              setDragHarnessId={setDragHarnessId}
-              engineeringFileCount={engineeringFileCount}
-              supportingFileCount={supportingFileCount}
-            />
-          )}
-
-          {step === 3 && (
-            <TimelineStep
-              leadTimeId={leadTimeId}
-              setLeadTimeId={setLeadTimeId}
-              leadTime={leadTime}
-            />
-          )}
-
-          {step === 4 && (
-            <ReviewStep
-              contact={contact}
-              harnesses={harnesses}
-              leadTime={leadTime}
-              engineeringFileCount={engineeringFileCount}
-              supportingFileCount={supportingFileCount}
-              totalQuantityCount={totalQuantityCount}
-              reviewChecked={reviewChecked}
-              setReviewChecked={setReviewChecked}
-              termsAccepted={termsAccepted}
-              setTermsAccepted={setTermsAccepted}
-            />
-          )}
-
-          {formError && (
-            <div className="upload-form-error">
-              <AlertTriangle size={16} />
-              <span>{formError}</span>
-            </div>
-          )}
-
-          <div className="upload-actions">
-            <button
-              className="secondary-action upload-nav-button"
-              onClick={goPrevious}
-              disabled={step === 1 || submitting}
-              type="button"
-            >
-              <ChevronLeft size={17} />
-              Previous
-            </button>
-            {step < 4 ? (
-              <button className="primary-action upload-nav-button" onClick={goNext} type="button">
-                Continue
-                <ChevronRight size={17} />
-              </button>
-            ) : (
-              <button
-                className="primary-action upload-nav-button"
-                onClick={submitPackage}
-                disabled={submitting}
-                type="button"
-              >
-                {submitting ? <Clock3 size={17} /> : <Upload size={17} />}
-                {submitting ? "Submitting" : "Submit for quote review"}
-              </button>
-            )}
-          </div>
-        </section>
+          <UploadAssistantSidecar
+            step={step}
+            contact={contact}
+            harnesses={harnesses}
+            activeHarness={activeHarness}
+            engineeringFileCount={engineeringFileCount}
+            supportingFileCount={supportingFileCount}
+            totalQuantityCount={totalQuantityCount}
+            leadTime={leadTime}
+            assistantNote={assistantNote}
+            setAssistantNote={setAssistantNote}
+            addAssistantNote={addAssistantNoteToActiveHarness}
+          />
+        </div>
       </main>
 
       <input
@@ -566,16 +589,173 @@ export default function UploadDesignRequest({
 
 function stepCopy(step) {
   if (step === 1)
-    return "Confirm the contact for this specific upload, even if the account belongs to a teammate.";
+    return "Upload the materials you already have. The assistant can help you explain what each file is for.";
   if (step === 2)
-    return "Attach the materials you already have and add quantity breaks if they are known.";
+    return "Add the contact for this specific upload, even if the account belongs to a teammate.";
   if (step === 3) return "Choose the review speed you want us to price against.";
   return "Check the package before Easy Harness engineering starts quote review.";
 }
 
+function uploadAssistantFileProfile(files = []) {
+  const extensions = files.map((file) => String(file.extension || "").toLowerCase());
+  return {
+    hasCad: extensions.some((extension) =>
+      [".dwg", ".dxf", ".step", ".stp", ".igs", ".iges", ".stl"].includes(extension),
+    ),
+    hasTable: extensions.some((extension) =>
+      [".csv", ".tsv", ".xlsx", ".xls", ".xlsm"].includes(extension),
+    ),
+    hasPdf: extensions.includes(".pdf"),
+    hasArchive: extensions.some((extension) =>
+      [".zip", ".7z", ".rar"].includes(extension),
+    ),
+    hasPhotos: extensions.some((extension) =>
+      [".png", ".jpg", ".jpeg", ".webp", ".heic"].includes(extension),
+    ),
+  };
+}
+
+function buildUploadAssistantGuidance({
+  contact,
+  files,
+  harnesses,
+  activeHarness,
+  engineeringFileCount,
+  supportingFileCount,
+  totalQuantityCount,
+  leadTime,
+}) {
+  const profile = uploadAssistantFileProfile(files);
+  const hasNotes = harnesses.some((harness) => String(harness.notes || "").trim());
+  const contactReady =
+    String(contact.name || "").trim() &&
+    isEmailLike(contact.email) &&
+    String(contact.projectName || "").trim();
+  const activeName = activeHarness?.name || "this harness";
+
+  const status = [
+    `${files.length} file${files.length === 1 ? "" : "s"}`,
+    `${engineeringFileCount} engineering source`,
+    `${supportingFileCount} reference`,
+    `${totalQuantityCount} quantity break${totalQuantityCount === 1 ? "" : "s"}`,
+    contactReady ? "contact ready" : "contact later",
+  ];
+
+  let read = "Start by uploading the package you already have. A drawing, pinout, CAD file, PDF, spreadsheet, or archive is the best first anchor.";
+  if (files.length && engineeringFileCount) {
+    read = `This package has ${engineeringFileCount} engineering source file${engineeringFileCount === 1 ? "" : "s"} and ${supportingFileCount} supporting reference file${supportingFileCount === 1 ? "" : "s"}. Easy Harness can use it as a request basis after you add any useful notes.`;
+  } else if (files.length) {
+    read = "These look like supporting references so far. They are useful, but this upload path still needs at least one drawing, CAD, pinout, spreadsheet, PDF, or archive.";
+  }
+
+  const suggestions = [];
+  if (!files.length) {
+    suggestions.push("Upload the strongest source first: drawing, pinout, CAD, PDF, spreadsheet, or quote package.");
+  }
+  if (files.length && !engineeringFileCount) {
+    suggestions.push("Add one engineering source file so Easy Harness has a stable basis for review.");
+  }
+  if (profile.hasPhotos) {
+    suggestions.push("For photos, include connector front pin face, rear wire exit, labels, wire colors, and one size reference if possible.");
+  }
+  if (profile.hasCad) {
+    suggestions.push("CAD helps mechanical fit and routing, but add the connection goal or pinout if the electrical relationship is not in another file.");
+  }
+  if (profile.hasTable) {
+    suggestions.push("For pinout tables, the most useful columns are pin number, signal/function, wire color, gauge, destination, length, and quantity.");
+  }
+  if (profile.hasPdf || profile.hasArchive) {
+    suggestions.push("If the package contains several files, add one short note explaining which file is the main source and which files are references.");
+  }
+  if (!hasNotes) {
+    suggestions.push(`Add one plain note for ${activeName}: what it connects, whether this copies/replaces/adapts an existing harness, and any rough length.`);
+  }
+  if (!contactReady) {
+    suggestions.push("Contact details can come after the package. They are only needed before submission.");
+  }
+  if (!suggestions.length) {
+    suggestions.push(`This looks ready to continue. Easy Harness will review manufacturability and release the quote after ${leadTime.detail}.`);
+  }
+
+  return { status, read, suggestions: suggestions.slice(0, 4) };
+}
+
+function UploadAssistantSidecar({
+  step,
+  contact,
+  harnesses,
+  activeHarness,
+  engineeringFileCount,
+  supportingFileCount,
+  totalQuantityCount,
+  leadTime,
+  assistantNote,
+  setAssistantNote,
+  addAssistantNote,
+}) {
+  const files = harnesses.flatMap((harness) => harness.files || []);
+  const guidance = buildUploadAssistantGuidance({
+    contact,
+    files,
+    harnesses,
+    activeHarness,
+    engineeringFileCount,
+    supportingFileCount,
+    totalQuantityCount,
+    leadTime,
+  });
+  const canAddNote = Boolean(assistantNote.trim() && activeHarness?.id);
+
+  return (
+    <aside className="upload-assistant-sidecar" aria-label="Easy Harness upload assistant">
+      <div className="upload-assistant-sidecar-head">
+        <span>
+          <MessageCircle size={17} />
+          Easy Harness assistant
+        </span>
+        <small>Optional</small>
+      </div>
+      <p>{guidance.read}</p>
+      <div className="upload-assistant-status">
+        {guidance.status.map((item) => (
+          <span key={item}>{item}</span>
+        ))}
+      </div>
+      <div className="upload-assistant-suggestions">
+        <strong>{step === 1 ? "Useful next step" : "Package check"}</strong>
+        <ul>
+          {guidance.suggestions.map((item) => (
+            <li key={item}>{item}</li>
+          ))}
+        </ul>
+      </div>
+      <label className="upload-assistant-note">
+        <span>Add a note to the active harness</span>
+        <textarea
+          value={assistantNote}
+          onChange={(event) => setAssistantNote(event.target.value)}
+          placeholder="Example: Main PDF is the original drawing. Photos show the old connector and label. Need 100 pcs, about 450 mm."
+          rows={5}
+        />
+      </label>
+      <button
+        className="secondary-action upload-assistant-note-button"
+        type="button"
+        onClick={addAssistantNote}
+        disabled={!canAddNote}
+      >
+        Add to design notes
+      </button>
+      <small className="upload-assistant-boundary">
+        Use this only if helpful. You can submit the package without chatting.
+      </small>
+    </aside>
+  );
+}
+
 function Stepper({ step }) {
   return (
-    <div className="upload-stepper" aria-label="Prepared package steps">
+    <div className="upload-stepper" aria-label="Upload package steps">
       {steps.map((item) => {
         const complete = item.id < step;
         const active = item.id === step;

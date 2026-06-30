@@ -42,6 +42,9 @@ policy.
 - Auth: Supabase Auth email link and Google OAuth path.
 - Database: Supabase PostgreSQL with RLS and workspace RPCs.
 - Storage: Supabase Storage bucket `request-attachments`.
+- New request UI: two entry points, Canvas configurator and Upload with AI
+  assistance. The assistant lives inside upload as a sidecar, not a standalone
+  chat entry.
 - AI intake: Supabase Edge Function `run-checking`, configured as a lightweight
   upload assistant that organizes the uploaded package into a request basis.
   Qwen is the recommended first live provider and DeepSeek stays optional.

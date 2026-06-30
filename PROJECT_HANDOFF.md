@@ -40,6 +40,14 @@ organize the package into a request basis and suggest only useful additions.
 After review, the request can become a quote and then a separate order for
 checkout, payment, production, shipping, and tracking.
 
+New request entry points are now only:
+
+- Canvas configurator.
+- Upload with AI assistance.
+
+The assistant is embedded beside the upload form. It is not a separate customer
+entry path.
+
 The visible customer-facing system identity is always **Easy Harness**.
 
 Requests and orders are separate:

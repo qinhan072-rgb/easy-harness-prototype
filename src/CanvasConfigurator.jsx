@@ -1255,12 +1255,6 @@ export default function CanvasConfigurator({
         </div>
         <div className="request-entry-switch compact" aria-label="Request entry mode">
           <button
-            className={activeMode === "agent" ? "active" : ""}
-            onClick={() => onSwitchMode?.("agent")}
-          >
-            Upload assistant
-          </button>
-          <button
             className={activeMode === "canvas" ? "active" : ""}
             onClick={() => onSwitchMode?.("canvas")}
           >
@@ -1270,7 +1264,7 @@ export default function CanvasConfigurator({
             className={activeMode === "upload" ? "active" : ""}
             onClick={() => onSwitchMode?.("upload")}
           >
-            Prepared package
+            Upload with AI assistance
           </button>
         </div>
       </header>
