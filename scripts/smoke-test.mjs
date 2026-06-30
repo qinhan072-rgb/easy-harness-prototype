@@ -417,9 +417,15 @@ const checks = [
       uploadDesign.includes("fileDrafts: allFiles") &&
       uploadDesign.includes("schemaVersion: \"easy-harness.upload-design.v1\"") &&
       uploadDesign.includes("UploadAssistantSidecar") &&
-      uploadDesign.includes("Easy Harness assistant") &&
+      uploadDesign.includes("AI Upload Chat") &&
+      uploadDesign.includes("Ask AI") &&
+      uploadDesign.includes("mode: \"upload_assistant_preview\"") &&
+      checkingFunction.includes("buildUploadAssistantPreview") &&
+      checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
+      checkingFunction.includes("payload.mode === \"upload_assistant_preview\"") &&
+      checkingFunction.includes("Do not claim you visually inspected") &&
       uploadDesign.includes("Add to design notes") &&
-      uploadDesign.includes("You can submit the package without chatting") &&
+      uploadDesign.includes("Upload and submit still work without it") &&
       uploadDesign.includes("Upload package needs at least one drawing") &&
       app.includes("Upload package needs at least one drawing") &&
       app.includes("pruneServerBackedStorageForHostedMode")

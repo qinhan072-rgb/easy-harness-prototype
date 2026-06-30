@@ -8,9 +8,11 @@ import {
 } from "../_shared/response.ts";
 
 type CheckingRequest = {
+  mode?: "upload_assistant_preview" | string;
   requestId?: string;
   trigger?: "initial_request" | "customer_followup" | "manual" | string;
   force?: boolean;
+  preview?: Record<string, unknown>;
 };
 
 declare const EdgeRuntime:
@@ -4189,23 +4191,89 @@ async function keepRequestPendingAfterModelFailure(
     .eq("id", requestRow.id);
 }
 
+function uploadAssistantPreviewTimeoutMs() {
+  return envNumber("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS", 15000, 3000, 45000);
+}
+
+function previewText(value: unknown, maxLength = 8000) {
+  const text = JSON.stringify(value || {}, null, 2);
+  return text.length > maxLength ? `${text.slice(0, maxLength)}\n...` : text;
+}
+
+function normalizePreviewString(value: unknown, fallback = "") {
+  const text = typeof value === "string" ? value.trim() : "";
+  return text || fallback;
+}
+
+function normalizePreviewList(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .map((item) => normalizePreviewString(item))
+        .filter(Boolean)
+        .slice(0, 4)
+    : [];
+}
+
+async function buildUploadAssistantPreview(
+  payload: CheckingRequest,
+  userId: string,
+) {
+  const config = draftModelConfig();
+  const system = [
+    "You are Easy Harness AI Upload Chat.",
+    "Help a customer who may not be a harness engineer make their upload package clearer before submission.",
+    "Use only the provided form state, file names, file categories, quantities, and notes.",
+    "Do not claim you visually inspected, parsed, OCR-read, or understood hidden file contents.",
+    "Do not ask for factory-only details such as crimp tooling, BOM, cut list, terminal sourcing, or manufacturing test methods.",
+    "Return only compact JSON with keys: reply, suggested_note, quick_checks, risk_level, ask_next.",
+    "reply: one friendly sentence under 34 words.",
+    "suggested_note: a useful note the user can add to the active harness, under 55 words.",
+    "quick_checks: 2 to 4 short strings.",
+    "risk_level: ok, needs_source, or needs_context.",
+    "ask_next: one short optional follow-up question.",
+  ].join("\n");
+  const userContent = [
+    "Current upload form state:",
+    previewText(payload.preview),
+    "",
+    "Respond for the right-side upload chat only. Be concise.",
+  ].join("\n");
+
+  const generated = await callDraftJsonCompletion(
+    config,
+    system,
+    userContent,
+    uploadAssistantPreviewTimeoutMs(),
+  );
+  const parsed = generated.parsed || {};
+  logCheckingEvent("upload_assistant_preview_completed", {
+    user_id: userId,
+    provider: config.provider,
+    model: config.model,
+    usage: generated.usage || null,
+  });
+  return {
+    ok: true,
+    mode: "upload_assistant_preview",
+    provider: config.provider,
+    model: config.model,
+    reply: normalizePreviewString(
+      parsed.reply,
+      "I can help make this upload package clearer before you submit it.",
+    ),
+    suggestedNote: normalizePreviewString(parsed.suggested_note),
+    quickChecks: normalizePreviewList(parsed.quick_checks),
+    riskLevel: normalizePreviewString(parsed.risk_level, "needs_context"),
+    askNext: normalizePreviewString(parsed.ask_next),
+  };
+}
+
 Deno.serve(async (request) => {
   if (request.method === "OPTIONS") return optionsResponse();
   if (request.method !== "POST")
     return jsonResponse({ ok: false, code: "method_not_allowed" }, 405);
 
   const payload = await readJson<CheckingRequest>(request);
-  if (!payload.requestId) {
-    return jsonResponse(
-      {
-        ok: false,
-        code: "invalid_checking_request",
-        message: "requestId is required.",
-      },
-      400,
-    );
-  }
-
   const missing = draftModelMissingEnv();
   if (missing.length)
     return integrationNotConfigured("ai_intake_checking", missing);
@@ -4226,11 +4294,47 @@ Deno.serve(async (request) => {
   if (userError || !userData.user)
     return jsonResponse({ ok: false, code: "not_authenticated" }, 401);
 
+  if (payload.mode === "upload_assistant_preview") {
+    try {
+      const preview = await buildUploadAssistantPreview(
+        payload,
+        userData.user.id,
+      );
+      return jsonResponse(preview);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Unknown upload assistant error";
+      logCheckingEvent("upload_assistant_preview_failed", {
+        user_id: userData.user.id,
+        error: message.slice(0, 500),
+      });
+      return jsonResponse(
+        {
+          ok: false,
+          code: "upload_assistant_preview_failed",
+          message,
+        },
+        502,
+      );
+    }
+  }
+
   const { data: profile } = await supabase
     .from("profiles")
     .select("id,role,email,display_name")
     .eq("id", userData.user.id)
     .maybeSingle();
+
+  if (!payload.requestId) {
+    return jsonResponse(
+      {
+        ok: false,
+        code: "invalid_checking_request",
+        message: "requestId is required.",
+      },
+      400,
+    );
+  }
 
   const lookupColumn = isUuidLike(payload.requestId) ? "id" : "request_number";
   let { data: requestRow, error: requestError } = await supabase

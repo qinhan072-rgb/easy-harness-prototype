@@ -53,6 +53,7 @@ QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
 AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
+AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=15000
 AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=true
 AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=false
@@ -61,6 +62,9 @@ AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=false
 `AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS` controls how long the Edge Function waits
 before returning a quick "organizing" response. If the result is not ready in
 that window, the same Edge Function run continues through `EdgeRuntime.waitUntil`.
+
+`AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS` controls the optional pre-submit AI
+chat sidecar. It is intentionally short and must not block upload submission.
 
 ## Attachment Evidence Boundary
 

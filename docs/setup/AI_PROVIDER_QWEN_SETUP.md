@@ -37,6 +37,7 @@ QWEN_MODEL=qwen3.6-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
 AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
+AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=15000
 AI_DRAFT_PLATFORM_WALL_CLOCK_MS=140000
 AI_DRAFT_JOB_BUDGET_MS=125000
 AI_DRAFT_FIRST_PASS_TIMEOUT_MS=100000
@@ -63,6 +64,10 @@ AI_DRAFT_CAD_METADATA_MAX_BYTES=10000000
 for a quick Qwen result before returning the page to the customer. If Qwen needs
 more time, the same Supabase Edge Function run registers background work with
 `EdgeRuntime.waitUntil` and writes the result back when it finishes.
+
+`AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS` controls the pre-submit AI chat sidecar
+inside `Upload with AI assistance`. That path uses only the current form state
+and file metadata; it does not inspect hidden file contents or create a request.
 
 Do not configure the old local `qwen-draft-worker` as a production dependency.
 

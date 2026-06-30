@@ -8,13 +8,15 @@ import {
   Clock3,
   FileText,
   Mail,
-  MessageCircle,
   Phone,
   Plus,
+  Send,
+  Sparkles,
   Trash2,
   Upload,
   User,
 } from "lucide-react";
+import { supabase, supabaseConfigured } from "./supabaseClient.js";
 
 const engineeringExtensions = [
   ".pdf",
@@ -196,6 +198,10 @@ export default function UploadDesignRequest({
   const [dragHarnessId, setDragHarnessId] = useState("");
   const [formError, setFormError] = useState("");
   const [assistantNote, setAssistantNote] = useState("");
+  const [assistantInput, setAssistantInput] = useState("");
+  const [assistantMessages, setAssistantMessages] = useState([]);
+  const [assistantLoading, setAssistantLoading] = useState(false);
+  const [assistantError, setAssistantError] = useState("");
 
   useEffect(() => {
     if (!activeHarnessId && harnesses[0]) setActiveHarnessId(harnesses[0].id);
@@ -258,6 +264,135 @@ export default function UploadDesignRequest({
       notes: [harness.notes, note].filter(Boolean).join("\n"),
     }));
     setAssistantNote("");
+  }
+
+  function localAssistantReply(message = "") {
+    const files = allFiles;
+    const profile = uploadAssistantFileProfile(files);
+    if (!files.length) {
+      return {
+        reply: "Start with the strongest file you already have. A drawing, pinout table, CAD file, PDF, spreadsheet, or quote package is best.",
+        suggestedNote:
+          "I am preparing the harness package and will upload the main drawing, pinout, CAD, PDF, spreadsheet, or quote package first.",
+      };
+    }
+    if (!engineeringFileCount) {
+      return {
+        reply: "The current files look like references. Add one engineering source file so Easy Harness has a stable basis for review.",
+        suggestedNote:
+          "Current photos or notes are supporting references. I will add the main drawing, CAD, pinout, spreadsheet, PDF, or archive as the engineering source.",
+      };
+    }
+    if (profile.hasPhotos) {
+      return {
+        reply: "The photos can help if they show connector front pin face, rear wire exit, labels, wire colors, and one size reference.",
+        suggestedNote:
+          "Photos show the existing harness or connectors. Please use them as references for connector face, rear wire exit, labels, wire colors, and approximate size.",
+      };
+    }
+    if (profile.hasCad) {
+      return {
+        reply: "CAD is useful for mechanical fit. Add a short note for the electrical goal if the CAD does not show what connects to what.",
+        suggestedNote:
+          "CAD files are included for mechanical fit and routing reference. Electrical connection goal, endpoints, and pinout should follow the uploaded drawing/table or later Easy Harness review.",
+      };
+    }
+    return {
+      reply: "This looks usable as an upload package. Add one short note saying what connects, whether this copies or adapts an existing harness, and the rough length.",
+      suggestedNote:
+        "Please review this package as the request basis. It includes the main source files and supporting references for quote preparation.",
+    };
+  }
+
+  function assistantPreviewPayload(message) {
+    return {
+      step,
+      user_message: message,
+      contact: {
+        project_name: contact.projectName,
+        has_name: Boolean(contact.name.trim()),
+        has_email: isEmailLike(contact.email),
+        company: contact.company,
+      },
+      counts: {
+        harnesses: harnesses.length,
+        files: allFiles.length,
+        engineering_sources: engineeringFileCount,
+        supporting_references: supportingFileCount,
+        quantity_breaks: totalQuantityCount,
+      },
+      lead_time: leadTime.title,
+      active_harness_id: activeHarness?.id || "",
+      harnesses: harnesses.map((harness) => ({
+        id: harness.id,
+        name: harness.name,
+        quantities: harness.quantities || [],
+        substitution: harness.substitution,
+        tolerance: harness.tolerance,
+        notes: harness.notes,
+        files: (harness.files || []).map((file) => ({
+          name: file.displayName || file.name,
+          extension: file.extension,
+          category: file.category,
+          size: file.size,
+        })),
+      })),
+    };
+  }
+
+  async function askUploadAssistant(promptText = assistantInput) {
+    const message = promptText.trim();
+    if (!message || assistantLoading) return;
+    const userMessage = {
+      id: `upload_ai_user_${Date.now()}`,
+      role: "user",
+      body: message,
+    };
+    setAssistantMessages((current) => [...current, userMessage]);
+    setAssistantInput("");
+    setAssistantError("");
+    setAssistantLoading(true);
+    try {
+      if (!supabaseConfigured || !supabase) {
+        throw new Error("AI is not connected in this environment.");
+      }
+      const { data, error } = await supabase.functions.invoke("run-checking", {
+        body: {
+          mode: "upload_assistant_preview",
+          preview: assistantPreviewPayload(message),
+        },
+      });
+      if (error || !data?.ok) {
+        throw new Error(error?.message || data?.message || "AI assistant did not answer.");
+      }
+      const reply = String(data.reply || "").trim();
+      const suggestedNote = String(data.suggestedNote || "").trim();
+      setAssistantMessages((current) => [
+        ...current,
+        {
+          id: `upload_ai_${Date.now()}`,
+          role: "assistant",
+          body: reply || "I can help turn the current package into a clearer upload note.",
+        },
+      ]);
+      if (suggestedNote) setAssistantNote(suggestedNote);
+    } catch (error) {
+      const fallback = localAssistantReply(message);
+      setAssistantMessages((current) => [
+        ...current,
+        {
+          id: `upload_ai_local_${Date.now()}`,
+          role: "assistant",
+          body: fallback.reply,
+        },
+      ]);
+      setAssistantNote(fallback.suggestedNote);
+      setAssistantError(
+        "Live AI did not respond here. The upload flow is still ready.",
+      );
+    } finally {
+      setAssistantLoading(false);
+    }
   }
 
   function addHarness() {
@@ -568,6 +703,12 @@ export default function UploadDesignRequest({
             assistantNote={assistantNote}
             setAssistantNote={setAssistantNote}
             addAssistantNote={addAssistantNoteToActiveHarness}
+            assistantInput={assistantInput}
+            setAssistantInput={setAssistantInput}
+            assistantMessages={assistantMessages}
+            assistantLoading={assistantLoading}
+            assistantError={assistantError}
+            askUploadAssistant={askUploadAssistant}
           />
         </div>
       </main>
@@ -635,49 +776,45 @@ function buildUploadAssistantGuidance({
 
   const status = [
     `${files.length} file${files.length === 1 ? "" : "s"}`,
-    `${engineeringFileCount} engineering source`,
-    `${supportingFileCount} reference`,
-    `${totalQuantityCount} quantity break${totalQuantityCount === 1 ? "" : "s"}`,
-    contactReady ? "contact ready" : "contact later",
+    `${engineeringFileCount} source`,
+    `${totalQuantityCount} qty`,
+    contactReady ? "contact ok" : "contact later",
   ];
 
-  let read = "Start by uploading the package you already have. A drawing, pinout, CAD file, PDF, spreadsheet, or archive is the best first anchor.";
+  let read = "Drop in what you have. I can help turn it into a clear upload note.";
   if (files.length && engineeringFileCount) {
-    read = `This package has ${engineeringFileCount} engineering source file${engineeringFileCount === 1 ? "" : "s"} and ${supportingFileCount} supporting reference file${supportingFileCount === 1 ? "" : "s"}. Easy Harness can use it as a request basis after you add any useful notes.`;
+    read = `I see ${engineeringFileCount} source file${engineeringFileCount === 1 ? "" : "s"} and ${supportingFileCount} reference file${supportingFileCount === 1 ? "" : "s"}. I can help label what matters.`;
   } else if (files.length) {
-    read = "These look like supporting references so far. They are useful, but this upload path still needs at least one drawing, CAD, pinout, spreadsheet, PDF, or archive.";
+    read = "These look useful, but add one drawing, CAD, pinout, spreadsheet, PDF, or archive if you have it.";
   }
 
-  const suggestions = [];
+  const quickPrompts = [];
   if (!files.length) {
-    suggestions.push("Upload the strongest source first: drawing, pinout, CAD, PDF, spreadsheet, or quote package.");
+    quickPrompts.push("What should I upload first?");
   }
   if (files.length && !engineeringFileCount) {
-    suggestions.push("Add one engineering source file so Easy Harness has a stable basis for review.");
+    quickPrompts.push("Are my photos enough?");
   }
   if (profile.hasPhotos) {
-    suggestions.push("For photos, include connector front pin face, rear wire exit, labels, wire colors, and one size reference if possible.");
+    quickPrompts.push("Check my photos");
   }
   if (profile.hasCad) {
-    suggestions.push("CAD helps mechanical fit and routing, but add the connection goal or pinout if the electrical relationship is not in another file.");
+    quickPrompts.push("Explain CAD limits");
   }
   if (profile.hasTable) {
-    suggestions.push("For pinout tables, the most useful columns are pin number, signal/function, wire color, gauge, destination, length, and quantity.");
+    quickPrompts.push("Check pinout table");
   }
   if (profile.hasPdf || profile.hasArchive) {
-    suggestions.push("If the package contains several files, add one short note explaining which file is the main source and which files are references.");
+    quickPrompts.push("Write a file note");
   }
   if (!hasNotes) {
-    suggestions.push(`Add one plain note for ${activeName}: what it connects, whether this copies/replaces/adapts an existing harness, and any rough length.`);
+    quickPrompts.push(`Help describe ${activeName}`);
   }
-  if (!contactReady) {
-    suggestions.push("Contact details can come after the package. They are only needed before submission.");
-  }
-  if (!suggestions.length) {
-    suggestions.push(`This looks ready to continue. Easy Harness will review manufacturability and release the quote after ${leadTime.detail}.`);
+  if (!quickPrompts.length) {
+    quickPrompts.push("Is this ready to submit?");
   }
 
-  return { status, read, suggestions: suggestions.slice(0, 4) };
+  return { status, read, quickPrompts: quickPrompts.slice(0, 4) };
 }
 
 function UploadAssistantSidecar({
@@ -692,6 +829,12 @@ function UploadAssistantSidecar({
   assistantNote,
   setAssistantNote,
   addAssistantNote,
+  assistantInput,
+  setAssistantInput,
+  assistantMessages,
+  assistantLoading,
+  assistantError,
+  askUploadAssistant,
 }) {
   const files = harnesses.flatMap((harness) => harness.files || []);
   const guidance = buildUploadAssistantGuidance({
@@ -705,39 +848,96 @@ function UploadAssistantSidecar({
     leadTime,
   });
   const canAddNote = Boolean(assistantNote.trim() && activeHarness?.id);
+  const chatMessages = assistantMessages.length
+    ? assistantMessages
+    : [
+        {
+          id: "upload_ai_welcome",
+          role: "assistant",
+          body: guidance.read,
+        },
+      ];
 
   return (
-    <aside className="upload-assistant-sidecar" aria-label="Easy Harness upload assistant">
+    <aside className="upload-assistant-sidecar" aria-label="AI upload assistant chat">
       <div className="upload-assistant-sidecar-head">
         <span>
-          <MessageCircle size={17} />
-          Easy Harness assistant
+          <Sparkles size={17} />
+          AI Upload Chat
         </span>
-        <small>Optional</small>
+        <small>Optional helper</small>
       </div>
-      <p>{guidance.read}</p>
       <div className="upload-assistant-status">
         {guidance.status.map((item) => (
           <span key={item}>{item}</span>
         ))}
       </div>
-      <div className="upload-assistant-suggestions">
-        <strong>{step === 1 ? "Useful next step" : "Package check"}</strong>
-        <ul>
-          {guidance.suggestions.map((item) => (
-            <li key={item}>{item}</li>
-          ))}
-        </ul>
+
+      <div className="upload-ai-thread">
+        {chatMessages.slice(-4).map((message) => (
+          <div
+            className={`upload-ai-message ${message.role === "user" ? "user" : "assistant"}`}
+            key={message.id}
+          >
+            <small>{message.role === "user" ? "You" : "Easy Harness AI"}</small>
+            <p>{message.body}</p>
+          </div>
+        ))}
+        {assistantLoading && (
+          <div className="upload-ai-message assistant">
+            <small>Easy Harness AI</small>
+            <p>Checking the package state...</p>
+          </div>
+        )}
       </div>
+
+      <div className="upload-ai-prompts" aria-label="AI upload prompts">
+        {guidance.quickPrompts.map((prompt) => (
+          <button
+            key={prompt}
+            type="button"
+            onClick={() => askUploadAssistant(prompt)}
+            disabled={assistantLoading}
+          >
+            {prompt}
+          </button>
+        ))}
+      </div>
+
       <label className="upload-assistant-note">
-        <span>Add a note to the active harness</span>
+        <span>AI suggested note</span>
         <textarea
           value={assistantNote}
           onChange={(event) => setAssistantNote(event.target.value)}
-          placeholder="Example: Main PDF is the original drawing. Photos show the old connector and label. Need 100 pcs, about 450 mm."
-          rows={5}
+          placeholder="Ask AI to draft a short note for the uploaded files..."
+          rows={4}
         />
       </label>
+      <div className="upload-ai-compose">
+        <input
+          value={assistantInput}
+          onChange={(event) => setAssistantInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && !event.shiftKey) {
+              event.preventDefault();
+              askUploadAssistant();
+            }
+          }}
+          placeholder="Ask AI what to add..."
+          disabled={assistantLoading}
+        />
+        <button
+          type="button"
+          onClick={() => askUploadAssistant()}
+          disabled={!assistantInput.trim() || assistantLoading}
+          aria-label="Ask AI"
+        >
+          <Send size={15} />
+        </button>
+      </div>
+      {assistantError && (
+        <small className="upload-assistant-error">{assistantError}</small>
+      )}
       <button
         className="secondary-action upload-assistant-note-button"
         type="button"
@@ -747,7 +947,7 @@ function UploadAssistantSidecar({
         Add to design notes
       </button>
       <small className="upload-assistant-boundary">
-        Use this only if helpful. You can submit the package without chatting.
+        Use AI if helpful. Upload and submit still work without it.
       </small>
     </aside>
   );
