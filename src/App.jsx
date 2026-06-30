@@ -1978,8 +1978,9 @@ function enrichBlocksWithAttachments(blocks = [], messageId = "", attachments = 
   });
 }
 
-async function rowsWithSignedAttachmentUrls(rows = []) {
+async function rowsWithSignedAttachmentUrls(rows = [], options = {}) {
   if (!supabase) return rows;
+  const signedRequestNumber = options.requestNumber || "";
   const nextRows = rows.map((row) => ({
     ...row,
     attachments: (row.attachments || []).map((attachment) => ({
@@ -1988,9 +1989,11 @@ async function rowsWithSignedAttachmentUrls(rows = []) {
   }));
 
   const signingJobs = nextRows.flatMap((row) =>
-    (row.attachments || [])
-      .filter((attachment) => attachment.object_path && !attachment.signed_url)
-      .map((attachment) => ({ row, attachment })),
+    signedRequestNumber && row.request_number !== signedRequestNumber
+      ? []
+      : (row.attachments || [])
+          .filter((attachment) => attachment.object_path && !attachment.signed_url)
+          .map((attachment) => ({ row, attachment })),
   );
 
   await Promise.all(
@@ -3632,7 +3635,10 @@ function App() {
     let disposed = false;
     const refresh = async () => {
       if (disposed) return;
-      await loadSupabaseRequestData(currentUser);
+      await loadSupabaseRequestData(currentUser, {
+        signAttachmentUrls: userView === "thread",
+        requestNumber: activeRequest.id,
+      });
     };
     const timer = window.setInterval(refresh, checkingPollIntervalMs);
     return () => {
@@ -3645,6 +3651,7 @@ function App() {
     activeRequest?.supabaseId,
     currentUser?.id,
     supabaseSessionReady,
+    userView,
     authSession?.adapter,
     authSession?.userId,
   ]);
@@ -3690,7 +3697,10 @@ function App() {
     )
       return;
     if (["requests", "thread"].includes(userView)) {
-      void loadSupabaseRequestData(currentUser);
+      void loadSupabaseRequestData(currentUser, {
+        signAttachmentUrls: userView === "thread",
+        requestNumber: activeRequestId,
+      });
     }
     if (["orders", "order"].includes(userView)) {
       void loadSupabaseOrderData(currentUser);
@@ -3699,6 +3709,7 @@ function App() {
     currentUser?.id,
     supabase,
     userView,
+    activeRequestId,
     supabaseSessionReady,
     authSession?.adapter,
     authSession?.userId,
@@ -3714,7 +3725,10 @@ function App() {
     )
       return;
     if (["queue", "detail"].includes(staffView)) {
-      void loadSupabaseRequestData(currentUser);
+      void loadSupabaseRequestData(currentUser, {
+        signAttachmentUrls: staffView === "detail",
+        requestNumber: activeRequestId,
+      });
     }
     if (staffView === "order") {
       void loadSupabaseOrderData(currentUser);
@@ -3724,6 +3738,7 @@ function App() {
     currentUser?.role,
     staffView,
     supabase,
+    activeRequestId,
     supabaseSessionReady,
     authSession?.adapter,
     authSession?.userId,
@@ -4801,7 +4816,7 @@ function App() {
     }
   }
 
-  async function loadSupabaseRequestData(user) {
+  async function loadSupabaseRequestData(user, options = {}) {
     if (!supabase || !user?.id) return;
     setDatabaseProviderStatus("connecting");
 
@@ -4819,9 +4834,12 @@ function App() {
       return;
     }
 
-    const rows = await rowsWithSignedAttachmentUrls(
-      (data || []).map(normalizeWorkspaceRequestRow),
-    );
+    const normalizedRows = (data || []).map(normalizeWorkspaceRequestRow);
+    const rows = options.signAttachmentUrls
+      ? await rowsWithSignedAttachmentUrls(normalizedRows, {
+          requestNumber: options.requestNumber || activeRequestId,
+        })
+      : normalizedRows;
     const remoteRequests = dedupeRequestsByIdentity(
       rows.map((row) => localRequestFromSupabase(row, user)),
     );
@@ -5387,7 +5405,10 @@ function App() {
         messages: appendMessageIfMissing(current.messages || [], aiMessage),
       }));
 
-      await loadSupabaseRequestData(currentUser);
+      await loadSupabaseRequestData(currentUser, {
+        signAttachmentUrls: userView === "thread",
+        requestNumber: data.requestNumber || request.id,
+      });
 
       if (aiMessage) {
         updateRequest(data.requestNumber || request.id, (current) => ({

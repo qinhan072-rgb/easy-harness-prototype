@@ -45,7 +45,8 @@ Required secrets for the current Qwen attachment path:
 AI_DRAFT_PROVIDER=qwen
 QWEN_API_KEY=<set in Supabase Secrets>
 QWEN_BASE_URL=<set in Supabase Secrets>
-QWEN_MODEL=qwen3.6-plus
+QWEN_MODEL=qwen-plus
+AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS=800
 AI_DRAFT_ENABLE_ATTACHMENT_VISION=true
 AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=true
 QWEN_FILE_EXTRACT_MODEL=qwen-long

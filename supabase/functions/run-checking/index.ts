@@ -3671,7 +3671,7 @@ function draftModelConfig() {
         Deno.env.get("QWEN_BASE_URL") ||
         "https://dashscope.aliyuncs.com/compatible-mode/v1"
       ).replace(/\/$/, ""),
-      model: Deno.env.get("QWEN_MODEL") || "qwen3.6-plus",
+      model: Deno.env.get("QWEN_MODEL") || "qwen-plus",
       reasoningEffort: Deno.env.get("QWEN_REASONING_EFFORT") || "provider_default",
       maxTokens: Number(Deno.env.get("QWEN_MAX_TOKENS") || "12000"),
     };
@@ -3737,7 +3737,9 @@ async function callDraftJsonCompletion(
               },
             }
           : {}),
-        response_format: { type: "json_object" },
+        ...(provider === "qwen"
+          ? {}
+          : { response_format: { type: "json_object" } }),
         messages: [
           {
             role: "system",
@@ -4195,6 +4197,19 @@ function uploadAssistantPreviewTimeoutMs() {
   return envNumber("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS", 15000, 3000, 45000);
 }
 
+function uploadAssistantPreviewModelConfig() {
+  const config = draftModelConfig();
+  return {
+    ...config,
+    maxTokens: envNumber(
+      "AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS",
+      800,
+      200,
+      2000,
+    ),
+  };
+}
+
 function previewText(value: unknown, maxLength = 8000) {
   const text = JSON.stringify(value || {}, null, 2);
   return text.length > maxLength ? `${text.slice(0, maxLength)}\n...` : text;
@@ -4218,7 +4233,7 @@ async function buildUploadAssistantPreview(
   payload: CheckingRequest,
   userId: string,
 ) {
-  const config = draftModelConfig();
+  const config = uploadAssistantPreviewModelConfig();
   const system = [
     "You are Easy Harness AI Upload Chat.",
     "Help a customer who may not be a harness engineer make their upload package clearer before submission.",

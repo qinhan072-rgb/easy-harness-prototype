@@ -33,11 +33,12 @@ Add:
 ```text
 AI_DRAFT_PROVIDER=qwen
 QWEN_API_KEY=<your Qwen/DashScope API key>
-QWEN_MODEL=qwen3.6-plus
+QWEN_MODEL=qwen-plus
 QWEN_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 QWEN_MAX_TOKENS=12000
 AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
 AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=15000
+AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS=800
 AI_DRAFT_PLATFORM_WALL_CLOCK_MS=140000
 AI_DRAFT_JOB_BUDGET_MS=125000
 AI_DRAFT_FIRST_PASS_TIMEOUT_MS=100000
@@ -68,6 +69,8 @@ more time, the same Supabase Edge Function run registers background work with
 `AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS` controls the pre-submit AI chat sidecar
 inside `Upload with AI assistance`. That path uses only the current form state
 and file metadata; it does not inspect hidden file contents or create a request.
+`AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS` keeps this lightweight chat path from
+using the long-form request-basis token budget.
 
 Do not configure the old local `qwen-draft-worker` as a production dependency.
 

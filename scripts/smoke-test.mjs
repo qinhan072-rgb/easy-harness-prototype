@@ -149,6 +149,9 @@ const checks = [
       app.includes("updateSupabaseRequestFromLocal") &&
       app.includes('supabase.rpc("complete_request_check"') &&
       app.includes("rowsWithSignedAttachmentUrls") &&
+      app.includes("signAttachmentUrls: userView === \"thread\"") &&
+      app.includes("signAttachmentUrls: staffView === \"detail\"") &&
+      app.includes("requestNumber: activeRequestId") &&
       app.includes("requests (Supabase live)") &&
       app.includes("attachments (Supabase live metadata)")
   },
@@ -424,10 +427,12 @@ const checks = [
       uploadDesign.includes("mode: \"upload_assistant_preview\"") &&
       checkingFunction.includes("buildUploadAssistantPreview") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
+      checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS") &&
       checkingFunction.includes("payload.mode === \"upload_assistant_preview\"") &&
       checkingFunction.includes("Do not claim you visually inspected") &&
       uploadDesign.includes("supabase.auth.getSession") &&
       uploadDesign.includes("Authorization: `Bearer ${accessToken}`") &&
+      uploadDesign.includes("readFunctionErrorBody") &&
       !uploadDesign.includes("function localAssistantReply") &&
       uploadDesign.includes("upload-assistant-note-preview") &&
       uploadDesign.includes("Add to design notes") &&
@@ -836,10 +841,11 @@ const checks = [
     pass: checkingFunction.includes("draftModelConfig") &&
       checkingFunction.includes("dashscope.aliyuncs.com/compatible-mode/v1") &&
       checkingFunction.includes("callDraftModel") &&
-      checkingFunction.includes("qwen3.6-plus") &&
+      checkingFunction.includes("qwen-plus") &&
+      checkingFunction.includes('provider === "qwen"') &&
       envExample.includes("AI_DRAFT_PROVIDER=qwen") &&
       envExample.includes("QWEN_API_KEY=") &&
-      envExample.includes("QWEN_MODEL=qwen3.6-plus")
+      envExample.includes("QWEN_MODEL=qwen-plus")
   },
   {
     name: "formal ai draft runs evidence audit before saving",

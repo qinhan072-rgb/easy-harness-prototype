@@ -163,6 +163,25 @@ function cleanFileMetadata(file = {}) {
   };
 }
 
+async function readFunctionErrorBody(error) {
+  const response = error?.context;
+  if (!response || typeof response.clone !== "function") return null;
+  try {
+    const clone = response.clone();
+    const contentType = response.headers?.get?.("content-type") || "";
+    if (contentType.includes("application/json")) return await clone.json();
+    const text = await clone.text();
+    return text ? { message: text } : null;
+  } catch {
+    return null;
+  }
+}
+
+function compactErrorDetail(value = "") {
+  const text = String(value || "").replace(/\s+/g, " ").trim();
+  return text.length > 260 ? `${text.slice(0, 260)}...` : text;
+}
+
 function isEmailLike(value = "") {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value).trim());
 }
@@ -337,9 +356,20 @@ export default function UploadDesignRequest({
         },
       });
       if (error || !data?.ok) {
-        const code = data?.code || error?.context?.status || "invoke_failed";
+        const errorBody = await readFunctionErrorBody(error);
+        const code =
+          data?.code ||
+          errorBody?.code ||
+          error?.context?.status ||
+          "invoke_failed";
+        const detail =
+          data?.message ||
+          errorBody?.message ||
+          errorBody?.nextStep ||
+          error?.message ||
+          "AI assistant did not answer.";
         throw new Error(
-          `${code}: ${error?.message || data?.message || "AI assistant did not answer."}`,
+          `${code}: ${compactErrorDetail(detail)}`,
         );
       }
       const reply = String(data.reply || "").trim();
