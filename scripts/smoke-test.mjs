@@ -426,6 +426,9 @@ const checks = [
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
       checkingFunction.includes("payload.mode === \"upload_assistant_preview\"") &&
       checkingFunction.includes("Do not claim you visually inspected") &&
+      uploadDesign.includes("supabase.auth.getSession") &&
+      uploadDesign.includes("Authorization: `Bearer ${accessToken}`") &&
+      !uploadDesign.includes("function localAssistantReply") &&
       uploadDesign.includes("upload-assistant-note-preview") &&
       uploadDesign.includes("Add to design notes") &&
       !uploadDesign.includes("setAssistantNote={setAssistantNote}") &&

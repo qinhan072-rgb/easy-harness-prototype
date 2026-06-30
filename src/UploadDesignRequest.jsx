@@ -266,38 +266,6 @@ export default function UploadDesignRequest({
     setAssistantNote("");
   }
 
-  function localAssistantReply(message = "") {
-    const files = allFiles;
-    const trimmedMessage = String(message || "").trim();
-    const hasNotes = harnesses.some((harness) => String(harness.notes || "").trim());
-    if (!files.length) {
-      return {
-        reply: "I cannot see any uploaded files yet. Add the strongest material you have, then I can help you describe the package.",
-        suggestedNote:
-          "I am preparing the harness upload package and will add the main source files or supporting references I already have.",
-      };
-    }
-    if (!engineeringFileCount) {
-      return {
-        reply: "I see uploaded references, but no clear engineering source yet. Add a short note naming what these files should support.",
-        suggestedNote:
-          "The uploaded files are supporting references. Please use them with my notes to understand the request basis before Easy Harness review.",
-      };
-    }
-    if (!hasNotes && !trimmedMessage) {
-      return {
-        reply: "The uploaded files give a starting basis. Add one sentence about what this harness connects and whether it copies or changes an existing item.",
-        suggestedNote:
-          "Please review the uploaded files as the starting request basis. I will add a short description of the connection goal, quantity, and approximate length if available.",
-      };
-    }
-    return {
-      reply: "I can help turn this into a cleaner upload note, but Easy Harness will review the files before treating details as confirmed.",
-      suggestedNote:
-        "Please review this package as the request basis. It includes the main source files and supporting references for quote preparation.",
-    };
-  }
-
   function assistantPreviewPayload(message) {
     return {
       step,
@@ -350,14 +318,29 @@ export default function UploadDesignRequest({
       if (!supabaseConfigured || !supabase) {
         throw new Error("AI is not connected in this environment.");
       }
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+      if (sessionError) {
+        throw new Error(`auth_session_error: ${sessionError.message}`);
+      }
+      const accessToken = sessionData?.session?.access_token;
+      if (!accessToken) {
+        throw new Error("not_authenticated: please sign in again to use live AI.");
+      }
       const { data, error } = await supabase.functions.invoke("run-checking", {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
         body: {
           mode: "upload_assistant_preview",
           preview: assistantPreviewPayload(message),
         },
       });
       if (error || !data?.ok) {
-        throw new Error(error?.message || data?.message || "AI assistant did not answer.");
+        const code = data?.code || error?.context?.status || "invoke_failed";
+        throw new Error(
+          `${code}: ${error?.message || data?.message || "AI assistant did not answer."}`,
+        );
       }
       const reply = String(data.reply || "").trim();
       const suggestedNote = String(data.suggestedNote || "").trim();
@@ -371,18 +354,8 @@ export default function UploadDesignRequest({
       ]);
       if (suggestedNote) setAssistantNote(suggestedNote);
     } catch (error) {
-      const fallback = localAssistantReply(message);
-      setAssistantMessages((current) => [
-        ...current,
-        {
-          id: `upload_ai_local_${Date.now()}`,
-          role: "assistant",
-          body: fallback.reply,
-        },
-      ]);
-      setAssistantNote(fallback.suggestedNote);
       setAssistantError(
-        "Live AI did not respond here. The upload flow is still ready.",
+        `Live AI did not respond: ${error?.message || "unknown error"}. Upload and submit still work without it.`,
       );
     } finally {
       setAssistantLoading(false);
