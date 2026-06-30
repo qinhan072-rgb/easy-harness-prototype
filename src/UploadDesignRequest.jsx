@@ -54,6 +54,9 @@ const acceptedUploadExtensions = [
 ];
 
 const maxUploadFileSizeBytes = 25 * 1024 * 1024;
+const assistantTextPreviewExtensions = [".csv", ".tsv", ".txt", ".md", ".json"];
+const assistantTextPreviewMaxBytes = 120 * 1024;
+const assistantTextPreviewMaxChars = 3000;
 
 const steps = [
   { id: 1, label: "Upload package" },
@@ -161,6 +164,51 @@ function cleanFileMetadata(file = {}) {
     harnessId: file.harnessId || "",
     harnessName: file.harnessName || "",
   };
+}
+
+function compactVisibleFileText(value = "") {
+  return String(value || "")
+    .replace(/\u0000/g, "")
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim()
+    .slice(0, assistantTextPreviewMaxChars);
+}
+
+async function uploadAssistantFilePreview(file = {}) {
+  const metadata = cleanFileMetadata(file);
+  const extension = metadata.extension || extensionFromName(metadata.name);
+  if (!assistantTextPreviewExtensions.includes(extension)) return metadata;
+  if (!file.sourceFile || typeof file.sourceFile.text !== "function") {
+    return {
+      ...metadata,
+      visibleTextPreviewStatus: "not_available_after_upload_reload",
+    };
+  }
+  if ((file.size || 0) > assistantTextPreviewMaxBytes) {
+    return {
+      ...metadata,
+      visibleTextPreviewStatus: "omitted_file_too_large",
+    };
+  }
+  try {
+    const text = compactVisibleFileText(await file.sourceFile.text());
+    return text
+      ? {
+          ...metadata,
+          visibleTextPreviewStatus: "included",
+          visibleTextPreview: text,
+        }
+      : {
+          ...metadata,
+          visibleTextPreviewStatus: "empty",
+        };
+  } catch {
+    return {
+      ...metadata,
+      visibleTextPreviewStatus: "read_failed",
+    };
+  }
 }
 
 async function readFunctionErrorBody(error) {
@@ -285,7 +333,22 @@ export default function UploadDesignRequest({
     setAssistantNote("");
   }
 
-  function assistantPreviewPayload(message) {
+  async function assistantPreviewPayload(message) {
+    const previewHarnesses = await Promise.all(
+      harnesses.map(async (harness) => ({
+        id: harness.id,
+        name: harness.name,
+        quantities: harness.quantities || [],
+        substitution: harness.substitution,
+        tolerance: harness.tolerance,
+        notes: harness.notes,
+        files: await Promise.all(
+          (harness.files || []).map((file) =>
+            uploadAssistantFilePreview(file),
+          ),
+        ),
+      })),
+    );
     return {
       step,
       user_message: message,
@@ -304,20 +367,7 @@ export default function UploadDesignRequest({
       },
       lead_time: leadTime.title,
       active_harness_id: activeHarness?.id || "",
-      harnesses: harnesses.map((harness) => ({
-        id: harness.id,
-        name: harness.name,
-        quantities: harness.quantities || [],
-        substitution: harness.substitution,
-        tolerance: harness.tolerance,
-        notes: harness.notes,
-        files: (harness.files || []).map((file) => ({
-          name: file.displayName || file.name,
-          extension: file.extension,
-          category: file.category,
-          size: file.size,
-        })),
-      })),
+      harnesses: previewHarnesses,
     };
   }
 
@@ -357,7 +407,7 @@ export default function UploadDesignRequest({
             : "upload_assistant_preview",
           preview: pingMode
             ? { ping: true }
-            : assistantPreviewPayload(message),
+            : await assistantPreviewPayload(message),
         },
       });
       if (error || !data?.ok) {

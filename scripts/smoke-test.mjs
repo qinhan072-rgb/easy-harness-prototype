@@ -428,6 +428,11 @@ const checks = [
       checkingFunction.includes("buildUploadAssistantPreview") &&
       checkingFunction.includes("callDraftTextCompletion") &&
       checkingFunction.includes("enable_thinking: false") &&
+      checkingFunction.includes("visibleTextPreview") &&
+      checkingFunction.includes("Do not require a drawing, 3D model") &&
+      uploadDesign.includes("uploadAssistantFilePreview") &&
+      uploadDesign.includes("visibleTextPreviewStatus: \"included\"") &&
+      uploadDesign.includes("assistantTextPreviewExtensions") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS") &&
       checkingFunction.includes("payload.mode === \"upload_assistant_preview\"") &&
