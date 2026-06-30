@@ -268,37 +268,31 @@ export default function UploadDesignRequest({
 
   function localAssistantReply(message = "") {
     const files = allFiles;
-    const profile = uploadAssistantFileProfile(files);
+    const trimmedMessage = String(message || "").trim();
+    const hasNotes = harnesses.some((harness) => String(harness.notes || "").trim());
     if (!files.length) {
       return {
-        reply: "Start with the strongest file you already have. A drawing, pinout table, CAD file, PDF, spreadsheet, or quote package is best.",
+        reply: "I cannot see any uploaded files yet. Add the strongest material you have, then I can help you describe the package.",
         suggestedNote:
-          "I am preparing the harness package and will upload the main drawing, pinout, CAD, PDF, spreadsheet, or quote package first.",
+          "I am preparing the harness upload package and will add the main source files or supporting references I already have.",
       };
     }
     if (!engineeringFileCount) {
       return {
-        reply: "The current files look like references. Add one engineering source file so Easy Harness has a stable basis for review.",
+        reply: "I see uploaded references, but no clear engineering source yet. Add a short note naming what these files should support.",
         suggestedNote:
-          "Current photos or notes are supporting references. I will add the main drawing, CAD, pinout, spreadsheet, PDF, or archive as the engineering source.",
+          "The uploaded files are supporting references. Please use them with my notes to understand the request basis before Easy Harness review.",
       };
     }
-    if (profile.hasPhotos) {
+    if (!hasNotes && !trimmedMessage) {
       return {
-        reply: "The photos can help if they show connector front pin face, rear wire exit, labels, wire colors, and one size reference.",
+        reply: "The uploaded files give a starting basis. Add one sentence about what this harness connects and whether it copies or changes an existing item.",
         suggestedNote:
-          "Photos show the existing harness or connectors. Please use them as references for connector face, rear wire exit, labels, wire colors, and approximate size.",
-      };
-    }
-    if (profile.hasCad) {
-      return {
-        reply: "CAD is useful for mechanical fit. Add a short note for the electrical goal if the CAD does not show what connects to what.",
-        suggestedNote:
-          "CAD files are included for mechanical fit and routing reference. Electrical connection goal, endpoints, and pinout should follow the uploaded drawing/table or later Easy Harness review.",
+          "Please review the uploaded files as the starting request basis. I will add a short description of the connection goal, quantity, and approximate length if available.",
       };
     }
     return {
-      reply: "This looks usable as an upload package. Add one short note saying what connects, whether this copies or adapts an existing harness, and the rough length.",
+      reply: "I can help turn this into a cleaner upload note, but Easy Harness will review the files before treating details as confirmed.",
       suggestedNote:
         "Please review this package as the request basis. It includes the main source files and supporting references for quote preparation.",
     };
@@ -792,16 +786,16 @@ function buildUploadAssistantGuidance({
     quickPrompts.push("What should I upload first?");
   }
   if (files.length && !engineeringFileCount) {
-    quickPrompts.push("Are my photos enough?");
+    quickPrompts.push("Can these files support review?");
   }
   if (profile.hasPhotos) {
-    quickPrompts.push("Check my photos");
+    quickPrompts.push("How should I explain these photos?");
   }
   if (profile.hasCad) {
-    quickPrompts.push("Explain CAD limits");
+    quickPrompts.push("How should I describe these CAD files?");
   }
   if (profile.hasTable) {
-    quickPrompts.push("Check pinout table");
+    quickPrompts.push("How should I explain this table?");
   }
   if (profile.hasPdf || profile.hasArchive) {
     quickPrompts.push("Write a file note");
