@@ -12,6 +12,30 @@ Upload with AI assistance
 The AI chat is a sidecar inside upload. It helps the user describe the current
 package; it is not a separate entry path and it must not block submission.
 
+## Fixture Attachments
+
+Test attachments are stored outside the platform repo:
+
+```text
+D:\Harness\easy-harness-project-materials\test-fixtures\ai-attachment-intake-v1\attachments
+```
+
+Useful files in that folder:
+
+- `dt06_6s_connector_photo_front.png`
+- `dt06_6s_connector_shell.step`
+- `dt06_6s_pinout.csv`
+- `dt06_6s_pinout.xlsx`
+- `dt06_6s_reference_note.pdf`
+- `bracket_outline.dxf`
+- `protective_boot_ascii.stl`
+
+The fixture pack README is:
+
+```text
+D:\Harness\easy-harness-project-materials\test-fixtures\ai-attachment-intake-v1\README.md
+```
+
 ## User Story 1: Old Harness Photos Only
 
 User: maintenance buyer with photos of an old harness, not a harness engineer.
@@ -26,7 +50,8 @@ Expected:
 
 - AI says photos are useful but should include connector front pin face, rear
   wire exit, labels, wire colors, and a size reference.
-- AI suggested note can be added to `Design notes`.
+- AI suggested note appears as a read-only suggestion and can be added to
+  `Design notes`.
 - The upload still requires one engineering source file before final submit,
   unless Easy Harness decides to relax that gate later.
 
@@ -74,7 +99,8 @@ Steps:
 Expected:
 
 - AI asks the user to identify the main source file and reference files.
-- AI suggested note is short and customer-editable.
+- AI suggested note is short, shown as a suggestion, and can be added to the
+  active harness notes.
 - User can add that note to the active harness and continue.
 
 ## User Story 5: Qwen / Supabase Live Preview

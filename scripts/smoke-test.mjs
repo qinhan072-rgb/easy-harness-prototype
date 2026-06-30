@@ -6,6 +6,7 @@ const appPath = resolve(root, "src", "App.jsx");
 const supabaseClientPath = resolve(root, "src", "supabaseClient.js");
 const packagePath = resolve(root, "package.json");
 const appIndexPath = resolve(root, "index.html");
+const stylesPath = resolve(root, "src", "styles.css");
 const schemaPath = resolve(root, "supabase", "migrations", "202605080001_stage_2a_schema.sql");
 const rlsPath = resolve(root, "supabase", "migrations", "202605080002_stage_2a_rls.sql");
 const hardeningPath = resolve(root, "supabase", "migrations", "202605080003_stage_2a_security_hardening.sql");
@@ -49,6 +50,7 @@ function readIfExists(path) {
 }
 
 const app = readFileSync(appPath, "utf8");
+const stylesCss = readIfExists(stylesPath);
 const requirementMapVisual = readIfExists(requirementMapVisualPath);
 const supabaseClient = readIfExists(supabaseClientPath);
 const packageJson = readIfExists(packagePath);
@@ -424,7 +426,10 @@ const checks = [
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
       checkingFunction.includes("payload.mode === \"upload_assistant_preview\"") &&
       checkingFunction.includes("Do not claim you visually inspected") &&
+      uploadDesign.includes("upload-assistant-note-preview") &&
       uploadDesign.includes("Add to design notes") &&
+      !uploadDesign.includes("setAssistantNote={setAssistantNote}") &&
+      !stylesCss.includes(".upload-assistant-note textarea") &&
       uploadDesign.includes("Upload and submit still work without it") &&
       uploadDesign.includes("Upload package needs at least one drawing") &&
       app.includes("Upload package needs at least one drawing") &&

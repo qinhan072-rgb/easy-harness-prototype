@@ -701,7 +701,6 @@ export default function UploadDesignRequest({
             totalQuantityCount={totalQuantityCount}
             leadTime={leadTime}
             assistantNote={assistantNote}
-            setAssistantNote={setAssistantNote}
             addAssistantNote={addAssistantNoteToActiveHarness}
             assistantInput={assistantInput}
             setAssistantInput={setAssistantInput}
@@ -827,7 +826,6 @@ function UploadAssistantSidecar({
   totalQuantityCount,
   leadTime,
   assistantNote,
-  setAssistantNote,
   addAssistantNote,
   assistantInput,
   setAssistantInput,
@@ -904,15 +902,6 @@ function UploadAssistantSidecar({
         ))}
       </div>
 
-      <label className="upload-assistant-note">
-        <span>AI suggested note</span>
-        <textarea
-          value={assistantNote}
-          onChange={(event) => setAssistantNote(event.target.value)}
-          placeholder="Ask AI to draft a short note for the uploaded files..."
-          rows={4}
-        />
-      </label>
       <div className="upload-ai-compose">
         <input
           value={assistantInput}
@@ -938,14 +927,20 @@ function UploadAssistantSidecar({
       {assistantError && (
         <small className="upload-assistant-error">{assistantError}</small>
       )}
-      <button
-        className="secondary-action upload-assistant-note-button"
-        type="button"
-        onClick={addAssistantNote}
-        disabled={!canAddNote}
-      >
-        Add to design notes
-      </button>
+      {assistantNote && (
+        <div className="upload-assistant-note-preview">
+          <span>Suggested upload note</span>
+          <p>{assistantNote}</p>
+          <button
+            className="secondary-action upload-assistant-note-button"
+            type="button"
+            onClick={addAssistantNote}
+            disabled={!canAddNote}
+          >
+            Add to design notes
+          </button>
+        </div>
+      )}
       <small className="upload-assistant-boundary">
         Use AI if helpful. Upload and submit still work without it.
       </small>
