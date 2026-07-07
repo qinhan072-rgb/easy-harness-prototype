@@ -39,6 +39,9 @@ QWEN_MAX_TOKENS=12000
 AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
 AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=45000
 AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS=800
+AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS=115000
+AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS=1200
+AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=false
 AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS=30000
 AI_UPLOAD_ASSISTANT_PING_MAX_TOKENS=64
 AI_DRAFT_PLATFORM_WALL_CLOCK_MS=140000
@@ -68,11 +71,19 @@ for a quick Qwen result before returning the page to the customer. If Qwen needs
 more time, the same Supabase Edge Function run registers background work with
 `EdgeRuntime.waitUntil` and writes the result back when it finishes.
 
-`AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS` controls the pre-submit AI chat sidecar
-inside `Upload with AI assistance`. That path uses only the current form state
-and file metadata; it does not inspect hidden file contents or create a request.
-`AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS` keeps this lightweight chat path from
-using the long-form request-basis token budget.
+`AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS` controls quick pre-submit AI guidance
+inside `Upload with AI assistance`.
+`AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS` controls the same visible chat when the
+customer already has uploaded files and asks whether the package is clear enough,
+what is missing, or how to summarize it. Keep this below the Supabase Edge wall
+clock limit with safety buffer; `115000` ms is intended for the Free-plan
+150-second wall-clock envelope.
+`AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS` and
+`AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS` keep sidecar answers short compared
+with the long-form request-basis budget.
+`AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING` can enable Qwen thinking for
+package-aware upload chat after staging proves the model still returns stable
+compact JSON. Leave it `false` for the first live pass.
 Use `/ping` in the upload assistant input during staging to run the minimal live
 AI connection check before testing the real upload assistant prompt.
 

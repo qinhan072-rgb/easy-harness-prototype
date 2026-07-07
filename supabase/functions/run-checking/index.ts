@@ -3690,8 +3690,18 @@ function draftModelConfig() {
 
 type DraftModelProviderConfig = ReturnType<typeof draftModelConfig>;
 
-function uploadAssistantProviderOptions(provider: string) {
-  return provider === "qwen" ? { enable_thinking: false } : {};
+type DraftTextCompletionOptions = {
+  enableThinking?: boolean;
+  temperature?: number;
+};
+
+function uploadAssistantProviderOptions(
+  provider: string,
+  options: DraftTextCompletionOptions = {},
+) {
+  return provider === "qwen"
+    ? { enable_thinking: Boolean(options.enableThinking) }
+    : {};
 }
 
 function draftModelUserContent(
@@ -3782,6 +3792,7 @@ async function callDraftTextCompletion(
   userContent: string | Array<Record<string, unknown>>,
   timeoutMs = providerRequestTimeoutMs(),
   requestLabel = `${config.provider} text request`,
+  options: DraftTextCompletionOptions = {},
 ) {
   const { provider, apiKey, baseUrl, model, maxTokens } = config;
   const response = await fetchWithTimeout(
@@ -3796,8 +3807,8 @@ async function callDraftTextCompletion(
         model,
         stream: false,
         max_tokens: maxTokens,
-        temperature: 0,
-        ...uploadAssistantProviderOptions(provider),
+        temperature: options.temperature ?? 0,
+        ...uploadAssistantProviderOptions(provider, options),
         messages: [
           {
             role: "system",
@@ -4251,8 +4262,27 @@ async function keepRequestPendingAfterModelFailure(
     .eq("id", requestRow.id);
 }
 
+function uploadAssistantSafeMaxTimeoutMs() {
+  return Math.max(15000, Math.min(125000, platformWallClockMs() - 20000));
+}
+
 function uploadAssistantPreviewTimeoutMs() {
-  return envNumber("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS", 45000, 5000, 90000);
+  return envNumber(
+    "AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS",
+    45000,
+    5000,
+    Math.min(90000, uploadAssistantSafeMaxTimeoutMs()),
+  );
+}
+
+function uploadAssistantPackageTimeoutMs() {
+  const safeMax = uploadAssistantSafeMaxTimeoutMs();
+  return envNumber(
+    "AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS",
+    Math.min(115000, safeMax),
+    30000,
+    safeMax,
+  );
 }
 
 function uploadAssistantPingTimeoutMs() {
@@ -4270,6 +4300,23 @@ function uploadAssistantPreviewModelConfig() {
       2000,
     ),
   };
+}
+
+function uploadAssistantPackageModelConfig() {
+  const config = draftModelConfig();
+  return {
+    ...config,
+    maxTokens: envNumber(
+      "AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS",
+      1200,
+      400,
+      2500,
+    ),
+  };
+}
+
+function uploadAssistantDeepThinkingEnabled() {
+  return envFlagDefault("AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING", false);
 }
 
 function uploadAssistantPingModelConfig() {
@@ -4333,6 +4380,38 @@ function previewVisibleText(payload: CheckingRequest) {
     .join("\n");
 }
 
+function uploadAssistantInteractionIntent(payload: CheckingRequest) {
+  const preview = payload.preview || {};
+  const counts =
+    preview.counts && typeof preview.counts === "object"
+      ? (preview.counts as Record<string, unknown>)
+      : {};
+  const files = previewFiles(payload);
+  const userMessage = normalizePreviewString(preview.user_message).toLowerCase();
+  const visibleTextLength = previewVisibleText(payload).length;
+  const engineeringSources = Number(counts.engineering_sources || 0);
+  const asksAboutPackage =
+    /review|ready|submit|enough|missing|add|upload|package|material|file|note|summary|summarize|explain|check|缺|补|够|审|提交|上传|资料|文件|说明|备注|总结|整理/.test(
+      userMessage,
+    );
+  const hasFiles = files.length > 0;
+  const depth = hasFiles ? "package_context" : "quick_guidance";
+  const timeoutMs =
+    depth === "package_context"
+      ? uploadAssistantPackageTimeoutMs()
+      : uploadAssistantPreviewTimeoutMs();
+  return {
+    depth,
+    has_files: hasFiles,
+    asks_about_package: asksAboutPackage,
+    has_engineering_source: engineeringSources > 0,
+    visible_text_length: visibleTextLength,
+    timeout_ms: timeoutMs,
+    enable_thinking:
+      depth === "package_context" && uploadAssistantDeepThinkingEnabled(),
+  };
+}
+
 function buildUploadAssistantGuidancePolicy(payload: CheckingRequest) {
   const preview = payload.preview || {};
   const counts =
@@ -4393,10 +4472,16 @@ async function buildUploadAssistantPreview(
   payload: CheckingRequest,
   userId: string,
 ) {
-  const config = uploadAssistantPreviewModelConfig();
+  const intent = uploadAssistantInteractionIntent(payload);
+  const config =
+    intent.depth === "package_context"
+      ? uploadAssistantPackageModelConfig()
+      : uploadAssistantPreviewModelConfig();
+  const startedAt = Date.now();
   const system = [
     "You are Easy Harness AI Upload Chat.",
     "Help a customer who may not be a harness engineer make their upload package clearer before submission.",
+    "There is only one customer-facing AI chat. Do not mention quick mode, deep mode, timeout budgets, Qwen, Supabase, Edge Functions, fallback, or internal routing.",
     "Use only the provided form state, file names, file categories, visibleTextPreview snippets, quantities, and notes.",
     "When visibleTextPreview is included, treat it as actual user-provided file text. When it is absent, do not pretend to know the file contents.",
     "Do not use keyword workflows, fixture names, or case-specific scripts; reason from the current upload state.",
@@ -4404,16 +4489,22 @@ async function buildUploadAssistantPreview(
     "Do not ask for factory-only details such as crimp tooling, BOM, cut list, terminal sourcing, or manufacturing test methods.",
     "Do not require a drawing, 3D model, exact connector model, wire gauge, or full manufacturing detail just to start Easy Harness review.",
     "CSV, TSV, TXT route notes, photos, sketches, PDFs, CAD, and spreadsheets can all be useful starting materials. Explain what would make the upload clearer, not what blocks all review.",
+    "If the customer has uploaded files, answer as a package-aware upload assistant: read the available snippets, reconcile them with the latest message, then decide whether the package is enough for initial Easy Harness review or what single supplement would help most.",
+    "Professional materials such as CAD, drawings, PDFs, pinouts, spreadsheets, and connector photos are valuable. Encourage them when useful, but frame them as high-value supplements unless the current request cannot be understood at all.",
+    "If the customer has no professional source material and is mainly describing a new harness in natural language, suggest the Canvas configurator as an easier path without forcing the customer away from upload.",
     "Reply in the same language as the customer's latest message when possible.",
     "Return compact JSON only with keys: reply, suggested_note, quick_checks, risk_level, ask_next.",
     "reply: one or two short, helpful customer-facing sentences.",
-    "suggested_note: a concise design note the customer can add to the active harness. Summarize the uploaded basis, known connection/route/quantity clues, and one optional supplement if useful. Do not overclaim hidden file contents.",
+    "suggested_note: a concise upload note the customer can add to the active harness. Summarize the actual uploaded basis, known connection/route/quantity clues, and one optional high-value supplement if useful. Do not overclaim hidden file contents.",
     "quick_checks: 2 to 4 short strings.",
     "risk_level: ok, needs_source, or needs_context.",
     "ask_next: one short optional follow-up question.",
   ].join("\n");
   const userContent = [
     buildUploadAssistantGuidancePolicy(payload),
+    "",
+    "Internal interaction intent:",
+    previewText(intent, 2000),
     "",
     "Current upload form state:",
     previewText(payload.preview),
@@ -4425,8 +4516,12 @@ async function buildUploadAssistantPreview(
     config,
     system,
     userContent,
-    uploadAssistantPreviewTimeoutMs(),
+    intent.timeout_ms,
     `${config.provider} upload assistant preview`,
+    {
+      enableThinking: intent.enable_thinking,
+      temperature: 0,
+    },
   );
   let parsed: Record<string, unknown> = {};
   try {
@@ -4438,6 +4533,10 @@ async function buildUploadAssistantPreview(
     user_id: userId,
     provider: config.provider,
     model: config.model,
+    interaction_depth: intent.depth,
+    elapsed_ms: Date.now() - startedAt,
+    timeout_ms: intent.timeout_ms,
+    thinking_enabled: intent.enable_thinking,
     usage: generated.usage || null,
   });
   return {
@@ -4445,6 +4544,8 @@ async function buildUploadAssistantPreview(
     mode: "upload_assistant_preview",
     provider: config.provider,
     model: config.model,
+    interactionDepth: intent.depth,
+    elapsedMs: Date.now() - startedAt,
     reply: normalizePreviewString(
       parsed.reply,
       generated.text,

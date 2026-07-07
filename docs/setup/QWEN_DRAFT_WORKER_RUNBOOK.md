@@ -55,6 +55,9 @@ QWEN_MAX_TOKENS=12000
 AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
 AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=45000
 AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS=800
+AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS=115000
+AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS=1200
+AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=false
 AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS=30000
 AI_UPLOAD_ASSISTANT_PING_MAX_TOKENS=64
 AI_DRAFT_ENABLE_EVIDENCE_AUDIT=true
@@ -66,10 +69,18 @@ AI_DRAFT_ENABLE_QWEN_FILE_EXTRACT=false
 before returning a quick "organizing" response. If the result is not ready in
 that window, the same Edge Function run continues through `EdgeRuntime.waitUntil`.
 
-`AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS` controls the optional pre-submit AI
-chat sidecar. It is intentionally short and must not block upload submission.
-`AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS` keeps the sidecar response small even
-when the formal request-basis draft uses a larger Qwen budget.
+`AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS` controls quick pre-submit AI guidance.
+The same visible sidecar automatically uses
+`AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS` when the customer has uploaded files and
+asks about review readiness, missing material, or upload notes. This keeps the
+UI simple while allowing a 90-120 second package-aware answer inside Supabase
+Edge limits.
+`AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS` and
+`AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS` keep sidecar responses small even when
+the formal request-basis draft uses a larger Qwen budget.
+`AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=false` is the recommended first live
+setting. Turn it on only after verifying Qwen still returns stable compact JSON
+for package-aware chat.
 During staging, type `/ping` in the upload assistant input to test only the
 Supabase Edge Function -> Qwen API path with a tiny prompt.
 

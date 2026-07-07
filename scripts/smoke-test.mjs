@@ -427,20 +427,29 @@ const checks = [
       uploadDesign.includes("\"upload_assistant_preview\"") &&
       checkingFunction.includes("buildUploadAssistantPreview") &&
       checkingFunction.includes("callDraftTextCompletion") &&
-      checkingFunction.includes("enable_thinking: false") &&
+      checkingFunction.includes("uploadAssistantInteractionIntent") &&
+      checkingFunction.includes("package_context") &&
+      checkingFunction.includes("AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS") &&
+      checkingFunction.includes("AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING") &&
+      checkingFunction.includes("enable_thinking: Boolean(options.enableThinking)") &&
       checkingFunction.includes("temperature: 0") &&
       checkingFunction.includes("buildUploadAssistantGuidancePolicy") &&
       checkingFunction.includes("structured_starting_basis") &&
       checkingFunction.includes("Canvas configurator") &&
       checkingFunction.includes("visibleTextPreview") &&
       checkingFunction.includes("Do not require a drawing, 3D model") &&
-      checkingFunction.includes("suggested_note: a concise design note") &&
-      checkingFunction.includes("Summarize the uploaded basis") &&
+      checkingFunction.includes("suggested_note: a concise upload note") &&
+      checkingFunction.includes("Summarize the actual uploaded basis") &&
       uploadDesign.includes("uploadAssistantFilePreview") &&
       uploadDesign.includes("visibleTextPreviewStatus: \"included\"") &&
       uploadDesign.includes("assistantTextPreviewExtensions") &&
+      uploadDesign.includes("assistantSpreadsheetPreviewExtensions") &&
+      uploadDesign.includes("visibleTextPreviewKind: \"spreadsheet_sample\"") &&
+      uploadDesign.includes("Easy Harness AI took longer than this step allows") &&
+      uploadDesign.includes("AI suggested upload note") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS") &&
+      checkingFunction.includes("AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS") &&
       checkingFunction.includes("payload.mode === \"upload_assistant_preview\"") &&
       checkingFunction.includes("payload.mode === \"upload_assistant_ping\"") &&
       checkingFunction.includes("buildUploadAssistantPing") &&
@@ -570,6 +579,7 @@ const checks = [
       app.includes('status: "queued"') &&
       app.includes("The request basis will appear here when it is ready") &&
       envExample.includes("AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS=115000") &&
       !envExample.includes("AI_DRAFT_USE_EXTERNAL_WORKER=true") &&
       !envExample.includes("AI_DRAFT_WORKER_QWEN_TIMEOUT_MS") &&
       !checkingFunction.includes("externalDraftJobsEnabled") &&
@@ -953,6 +963,8 @@ const checks = [
       packageJson.includes("\"xlsx\"") &&
       envExample.includes("AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000") &&
       envExample.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=45000") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS=115000") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=false") &&
       envExample.includes("AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS=30000") &&
       !envExample.includes("AI_DRAFT_USE_EXTERNAL_WORKER") &&
       aiProviderDoc.includes("EdgeRuntime.waitUntil")

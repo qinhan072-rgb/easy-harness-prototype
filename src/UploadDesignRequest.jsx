@@ -56,6 +56,8 @@ const acceptedUploadExtensions = [
 const maxUploadFileSizeBytes = 25 * 1024 * 1024;
 const assistantTextPreviewExtensions = [".csv", ".tsv", ".txt", ".md", ".json"];
 const assistantTextPreviewMaxBytes = 120 * 1024;
+const assistantSpreadsheetPreviewExtensions = [".xlsx", ".xls", ".xlsm"];
+const assistantSpreadsheetPreviewMaxBytes = 700 * 1024;
 const assistantTextPreviewMaxChars = 3000;
 
 const steps = [
@@ -178,12 +180,77 @@ function compactVisibleFileText(value = "") {
 async function uploadAssistantFilePreview(file = {}) {
   const metadata = cleanFileMetadata(file);
   const extension = metadata.extension || extensionFromName(metadata.name);
-  if (!assistantTextPreviewExtensions.includes(extension)) return metadata;
+  if (
+    !assistantTextPreviewExtensions.includes(extension) &&
+    !assistantSpreadsheetPreviewExtensions.includes(extension)
+  ) {
+    return metadata;
+  }
   if (!file.sourceFile || typeof file.sourceFile.text !== "function") {
     return {
       ...metadata,
       visibleTextPreviewStatus: "not_available_after_upload_reload",
     };
+  }
+  if (assistantSpreadsheetPreviewExtensions.includes(extension)) {
+    if (
+      typeof file.sourceFile.arrayBuffer !== "function" ||
+      (file.size || 0) > assistantSpreadsheetPreviewMaxBytes
+    ) {
+      return {
+        ...metadata,
+        visibleTextPreviewStatus: "omitted_file_too_large",
+      };
+    }
+    try {
+      const XLSX = await import("xlsx");
+      const workbook = XLSX.read(await file.sourceFile.arrayBuffer(), {
+        type: "array",
+        cellDates: false,
+        sheetRows: 12,
+      });
+      const sheetSummaries = workbook.SheetNames.slice(0, 3)
+        .map((sheetName) => {
+          const sheet = workbook.Sheets[sheetName];
+          const rows = XLSX.utils
+            .sheet_to_json(sheet, {
+              header: 1,
+              blankrows: false,
+              defval: "",
+            })
+            .slice(0, 9)
+            .map((row) =>
+              row
+                .slice(0, 12)
+                .map((cell) => String(cell ?? "").trim())
+                .join(" | "),
+            )
+            .filter(Boolean);
+          return rows.length
+            ? [`Sheet: ${sheetName}`, ...rows].join("\n")
+            : `Sheet: ${sheetName} (empty preview)`;
+        })
+        .filter(Boolean);
+      const text = compactVisibleFileText(sheetSummaries.join("\n\n"));
+      return text
+        ? {
+            ...metadata,
+            visibleTextPreviewStatus: "included",
+            visibleTextPreviewKind: "spreadsheet_sample",
+            visibleTextPreview: text,
+          }
+        : {
+            ...metadata,
+            visibleTextPreviewStatus: "empty",
+            visibleTextPreviewKind: "spreadsheet_sample",
+          };
+    } catch {
+      return {
+        ...metadata,
+        visibleTextPreviewStatus: "read_failed",
+        visibleTextPreviewKind: "spreadsheet_sample",
+      };
+    }
   }
   if ((file.size || 0) > assistantTextPreviewMaxBytes) {
     return {
@@ -197,16 +264,19 @@ async function uploadAssistantFilePreview(file = {}) {
       ? {
           ...metadata,
           visibleTextPreviewStatus: "included",
+          visibleTextPreviewKind: "text_excerpt",
           visibleTextPreview: text,
         }
       : {
           ...metadata,
           visibleTextPreviewStatus: "empty",
+          visibleTextPreviewKind: "text_excerpt",
         };
   } catch {
     return {
       ...metadata,
       visibleTextPreviewStatus: "read_failed",
+      visibleTextPreviewKind: "text_excerpt",
     };
   }
 }
@@ -269,6 +339,9 @@ export default function UploadDesignRequest({
   const [assistantMessages, setAssistantMessages] = useState([]);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState("");
+  const [assistantWorkingCopy, setAssistantWorkingCopy] = useState(
+    "Checking the current upload state...",
+  );
 
   useEffect(() => {
     if (!activeHarnessId && harnesses[0]) setActiveHarnessId(harnesses[0].id);
@@ -333,7 +406,41 @@ export default function UploadDesignRequest({
     setAssistantNote("");
   }
 
-  async function assistantPreviewPayload(message) {
+  function uploadAssistantInteractionIntent(message) {
+    const normalized = String(message || "").toLowerCase();
+    const asksAboutPackage =
+      /review|ready|submit|enough|missing|add|upload|package|material|file|note|summary|summarize|explain|check|缺|补|够|审|提交|上传|资料|文件|说明|备注|总结|整理/.test(
+        normalized,
+      );
+    const hasFiles = allFiles.length > 0;
+    const depth = hasFiles ? "package_context" : "quick_guidance";
+    return {
+      depth,
+      asks_about_package: asksAboutPackage,
+      has_files: hasFiles,
+      has_engineering_source: engineeringFileCount > 0,
+      visible_wait_copy: hasFiles
+        ? "Reading the uploaded file summaries and preparing a clear upload note..."
+        : "Checking what would help this upload package...",
+    };
+  }
+
+  function customerSafeAssistantError(error) {
+    const detail = String(error?.message || "unknown error");
+    console.warn("Upload assistant request failed", error);
+    if (/timed out|abort|timeout/i.test(detail)) {
+      return "Easy Harness AI took longer than this step allows. Upload and submit still work, and you can ask again with a shorter question.";
+    }
+    if (/not_authenticated|auth_session/i.test(detail)) {
+      return "Please sign in again to use Easy Harness AI. Upload and submit still work without it.";
+    }
+    if (/not connected|not configured|integration_not_configured/i.test(detail)) {
+      return "Easy Harness AI is not connected in this environment. Upload and submit still work without it.";
+    }
+    return "Easy Harness AI did not answer this time. Upload and submit still work without it.";
+  }
+
+  async function assistantPreviewPayload(message, interactionIntent) {
     const previewHarnesses = await Promise.all(
       harnesses.map(async (harness) => ({
         id: harness.id,
@@ -352,6 +459,7 @@ export default function UploadDesignRequest({
     return {
       step,
       user_message: message,
+      assistant_intent: interactionIntent,
       contact: {
         project_name: contact.projectName,
         has_name: Boolean(contact.name.trim()),
@@ -375,6 +483,7 @@ export default function UploadDesignRequest({
     const message = promptText.trim();
     if (!message || assistantLoading) return;
     const pingMode = message.toLowerCase() === "/ping";
+    const interactionIntent = uploadAssistantInteractionIntent(message);
     const userMessage = {
       id: `upload_ai_user_${Date.now()}`,
       role: "user",
@@ -383,6 +492,11 @@ export default function UploadDesignRequest({
     setAssistantMessages((current) => [...current, userMessage]);
     setAssistantInput("");
     setAssistantError("");
+    setAssistantWorkingCopy(
+      pingMode
+        ? "Checking the live AI connection..."
+        : interactionIntent.visible_wait_copy,
+    );
     setAssistantLoading(true);
     try {
       if (!supabaseConfigured || !supabase) {
@@ -407,7 +521,7 @@ export default function UploadDesignRequest({
             : "upload_assistant_preview",
           preview: pingMode
             ? { ping: true }
-            : await assistantPreviewPayload(message),
+            : await assistantPreviewPayload(message, interactionIntent),
         },
       });
       if (error || !data?.ok) {
@@ -441,9 +555,7 @@ export default function UploadDesignRequest({
       ]);
       if (!pingMode && suggestedNote) setAssistantNote(suggestedNote);
     } catch (error) {
-      setAssistantError(
-        `Live AI did not respond: ${error?.message || "unknown error"}. Upload and submit still work without it.`,
-      );
+      setAssistantError(customerSafeAssistantError(error));
     } finally {
       setAssistantLoading(false);
     }
@@ -760,6 +872,7 @@ export default function UploadDesignRequest({
             setAssistantInput={setAssistantInput}
             assistantMessages={assistantMessages}
             assistantLoading={assistantLoading}
+            assistantWorkingCopy={assistantWorkingCopy}
             assistantError={assistantError}
             askUploadAssistant={askUploadAssistant}
           />
@@ -867,7 +980,7 @@ function buildUploadAssistantGuidance({
     quickPrompts.push("Is this ready to submit?");
   }
 
-  return { status, read, quickPrompts: quickPrompts.slice(0, 4) };
+  return { status, read, quickPrompts: quickPrompts.slice(0, 3) };
 }
 
 function UploadAssistantSidecar({
@@ -885,6 +998,7 @@ function UploadAssistantSidecar({
   setAssistantInput,
   assistantMessages,
   assistantLoading,
+  assistantWorkingCopy,
   assistantError,
   askUploadAssistant,
 }) {
@@ -938,7 +1052,7 @@ function UploadAssistantSidecar({
         {assistantLoading && (
           <div className="upload-ai-message assistant">
             <small>Easy Harness AI</small>
-            <p>Checking the package state...</p>
+            <p>{assistantWorkingCopy}</p>
           </div>
         )}
       </div>
@@ -983,7 +1097,7 @@ function UploadAssistantSidecar({
       )}
       {assistantNote && (
         <div className="upload-assistant-note-preview">
-          <span>Suggested upload note</span>
+          <span>AI suggested upload note</span>
           <p>{assistantNote}</p>
           <button
             className="secondary-action upload-assistant-note-button"

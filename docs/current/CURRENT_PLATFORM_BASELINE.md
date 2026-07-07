@@ -60,6 +60,10 @@ platform yet.
   Upload with AI assistance. The AI assistant is a sidecar inside the upload
   form that helps explain and organize the current package; it is not a separate
   chat-first entry path.
+- The pre-submit AI sidecar has one visible chat entry. It automatically uses a
+  short budget for quick guidance and a longer package-aware budget when the
+  customer has uploaded files and asks about review readiness, missing material,
+  or upload notes. No separate "deep check" button is exposed to customers.
 - `run-checking` Edge Function exists for AI intake and Easy Harness upload
   assistant behavior. It can run through Qwen or DeepSeek; Qwen is the
   recommended first live provider for the next deployment pass.
