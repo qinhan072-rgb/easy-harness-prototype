@@ -59,6 +59,8 @@ const assistantTextPreviewMaxBytes = 120 * 1024;
 const assistantSpreadsheetPreviewExtensions = [".xlsx", ".xls", ".xlsm"];
 const assistantSpreadsheetPreviewMaxBytes = 700 * 1024;
 const assistantTextPreviewMaxChars = 3000;
+const uploadAssistantName = "Harness Guide";
+const uploadAssistantSubtitle = "Easy Harness package agent";
 
 const steps = [
   { id: 1, label: "Upload package" },
@@ -429,15 +431,15 @@ export default function UploadDesignRequest({
     const detail = String(error?.message || "unknown error");
     console.warn("Upload assistant request failed", error);
     if (/timed out|abort|timeout/i.test(detail)) {
-      return "Easy Harness AI took longer than this step allows. Upload and submit still work, and you can ask again with a shorter question.";
+      return `${uploadAssistantName} took longer than this step allows. Upload and submit still work, and you can ask again with a shorter question.`;
     }
     if (/not_authenticated|auth_session/i.test(detail)) {
-      return "Please sign in again to use Easy Harness AI. Upload and submit still work without it.";
+      return `Please sign in again to use ${uploadAssistantName}. Upload and submit still work without it.`;
     }
     if (/not connected|not configured|integration_not_configured/i.test(detail)) {
-      return "Easy Harness AI is not connected in this environment. Upload and submit still work without it.";
+      return `${uploadAssistantName} is not connected in this environment. Upload and submit still work without it.`;
     }
-    return "Easy Harness AI did not answer this time. Upload and submit still work without it.";
+    return `${uploadAssistantName} did not answer this time. Upload and submit still work without it.`;
   }
 
   async function assistantPreviewPayload(message, interactionIntent) {
@@ -492,9 +494,9 @@ export default function UploadDesignRequest({
     setAssistantMessages((current) => [...current, userMessage]);
     setAssistantInput("");
     setAssistantError("");
-    setAssistantWorkingCopy(
+      setAssistantWorkingCopy(
       pingMode
-        ? "Checking the live AI connection..."
+        ? "Checking the live assistant connection..."
         : interactionIntent.visible_wait_copy,
     );
     setAssistantLoading(true);
@@ -549,7 +551,7 @@ export default function UploadDesignRequest({
           id: `upload_ai_${Date.now()}`,
           role: "assistant",
           body: pingMode
-            ? `Live AI connection is working. Model: ${data.model || "configured model"}.`
+            ? `Live assistant connection is working. Model: ${data.model || "configured model"}.`
             : reply || "I can help turn the current package into a clearer upload note.",
         },
       ]);
@@ -1025,13 +1027,13 @@ function UploadAssistantSidecar({
       ];
 
   return (
-    <aside className="upload-assistant-sidecar" aria-label="AI upload assistant chat">
+    <aside className="upload-assistant-sidecar" aria-label={`${uploadAssistantName} upload assistant chat`}>
       <div className="upload-assistant-sidecar-head">
         <span>
           <Sparkles size={17} />
-          AI Upload Chat
+          {uploadAssistantName}
         </span>
-        <small>Optional helper</small>
+        <small>{uploadAssistantSubtitle}</small>
       </div>
       <div className="upload-assistant-status">
         {guidance.status.map((item) => (
@@ -1040,18 +1042,18 @@ function UploadAssistantSidecar({
       </div>
 
       <div className="upload-ai-thread">
-        {chatMessages.slice(-4).map((message) => (
+        {chatMessages.map((message) => (
           <div
             className={`upload-ai-message ${message.role === "user" ? "user" : "assistant"}`}
             key={message.id}
           >
-            <small>{message.role === "user" ? "You" : "Easy Harness AI"}</small>
+            <small>{message.role === "user" ? "You" : uploadAssistantName}</small>
             <p>{message.body}</p>
           </div>
         ))}
         {assistantLoading && (
           <div className="upload-ai-message assistant">
-            <small>Easy Harness AI</small>
+            <small>{uploadAssistantName}</small>
             <p>{assistantWorkingCopy}</p>
           </div>
         )}
@@ -1080,14 +1082,14 @@ function UploadAssistantSidecar({
               askUploadAssistant();
             }
           }}
-          placeholder="Ask AI what to add..."
+          placeholder={`Ask ${uploadAssistantName} what to add...`}
           disabled={assistantLoading}
         />
         <button
           type="button"
           onClick={() => askUploadAssistant()}
           disabled={!assistantInput.trim() || assistantLoading}
-          aria-label="Ask AI"
+          aria-label={`Ask ${uploadAssistantName}`}
         >
           <Send size={15} />
         </button>
@@ -1097,7 +1099,7 @@ function UploadAssistantSidecar({
       )}
       {assistantNote && (
         <div className="upload-assistant-note-preview">
-          <span>AI suggested upload note</span>
+          <span>{uploadAssistantName} suggested upload note</span>
           <p>{assistantNote}</p>
           <button
             className="secondary-action upload-assistant-note-button"
@@ -1110,7 +1112,7 @@ function UploadAssistantSidecar({
         </div>
       )}
       <small className="upload-assistant-boundary">
-        Use AI if helpful. Upload and submit still work without it.
+        Use {uploadAssistantName} if helpful. Upload and submit still work without it.
       </small>
     </aside>
   );

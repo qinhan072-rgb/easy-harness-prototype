@@ -4404,12 +4404,23 @@ function uploadAssistantInteractionIntent(payload: CheckingRequest) {
     depth,
     has_files: hasFiles,
     asks_about_package: asksAboutPackage,
+    asks_for_note:
+      /note|summary|summarize|remark|description|draft|organize|整理|总结|备注|说明|提交|描述/.test(
+        userMessage,
+      ),
     has_engineering_source: engineeringSources > 0,
     visible_text_length: visibleTextLength,
     timeout_ms: timeoutMs,
     enable_thinking:
       depth === "package_context" && uploadAssistantDeepThinkingEnabled(),
   };
+}
+
+function uploadAssistantNoteDraftReply(payload: CheckingRequest) {
+  const latestMessage = normalizePreviewString(payload.preview?.user_message);
+  return /[\u3400-\u9fff]/.test(latestMessage)
+    ? "我已在下方整理了一段提交备注。你可以直接加入 Design notes，也可以继续让我改得更具体。"
+    : "I drafted a submission note below. You can add it to Design notes or ask me to tighten it.";
 }
 
 function buildUploadAssistantGuidancePolicy(payload: CheckingRequest) {
@@ -4479,7 +4490,7 @@ async function buildUploadAssistantPreview(
       : uploadAssistantPreviewModelConfig();
   const startedAt = Date.now();
   const system = [
-    "You are Easy Harness AI Upload Chat.",
+    "You are Harness Guide, the Easy Harness package agent inside the upload flow.",
     "Help a customer who may not be a harness engineer make their upload package clearer before submission.",
     "There is only one customer-facing AI chat. Do not mention quick mode, deep mode, timeout budgets, Qwen, Supabase, Edge Functions, fallback, or internal routing.",
     "Use only the provided form state, file names, file categories, visibleTextPreview snippets, quantities, and notes.",
@@ -4492,6 +4503,8 @@ async function buildUploadAssistantPreview(
     "If the customer has uploaded files, answer as a package-aware upload assistant: read the available snippets, reconcile them with the latest message, then decide whether the package is enough for initial Easy Harness review or what single supplement would help most.",
     "Professional materials such as CAD, drawings, PDFs, pinouts, spreadsheets, and connector photos are valuable. Encourage them when useful, but frame them as high-value supplements unless the current request cannot be understood at all.",
     "If the customer has no professional source material and is mainly describing a new harness in natural language, suggest the Canvas configurator as an easier path without forcing the customer away from upload.",
+    "When the latest customer message asks to summarize, draft, organize, write a note, or prepare submission remarks, put the usable submission wording in suggested_note. In that case, reply should only briefly say that a note has been drafted below, plus at most one improvement hint.",
+    "The suggested_note should read like a customer-approved upload note for Easy Harness review, not like a chat answer. It should be specific, evidence-based, and avoid phrases such as 'your package is clear' unless that wording belongs in the customer's actual note.",
     "Reply in the same language as the customer's latest message when possible.",
     "Return compact JSON only with keys: reply, suggested_note, quick_checks, risk_level, ask_next.",
     "reply: one or two short, helpful customer-facing sentences.",
@@ -4539,6 +4552,17 @@ async function buildUploadAssistantPreview(
     thinking_enabled: intent.enable_thinking,
     usage: generated.usage || null,
   });
+  const suggestedNote = normalizePreviewString(
+    parsed.suggested_note,
+    "",
+  );
+  const reply =
+    intent.asks_for_note && suggestedNote
+      ? uploadAssistantNoteDraftReply(payload)
+      : normalizePreviewString(
+          parsed.reply,
+          generated.text,
+        );
   return {
     ok: true,
     mode: "upload_assistant_preview",
@@ -4546,14 +4570,8 @@ async function buildUploadAssistantPreview(
     model: config.model,
     interactionDepth: intent.depth,
     elapsedMs: Date.now() - startedAt,
-    reply: normalizePreviewString(
-      parsed.reply,
-      generated.text,
-    ),
-    suggestedNote: normalizePreviewString(
-      parsed.suggested_note,
-      "",
-    ),
+    reply,
+    suggestedNote,
     quickChecks: normalizePreviewList(parsed.quick_checks),
     riskLevel: normalizePreviewString(parsed.risk_level, "needs_context"),
     askNext: normalizePreviewString(parsed.ask_next),

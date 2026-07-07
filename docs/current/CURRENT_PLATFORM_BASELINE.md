@@ -57,9 +57,9 @@ platform yet.
   shipping, and after-sales support now link to those policies with lightweight
   customer-facing copy.
 - New request creation has two customer entry points: Canvas configurator and
-  Upload with AI assistance. The AI assistant is a sidecar inside the upload
-  form that helps explain and organize the current package; it is not a separate
-  chat-first entry path.
+  Upload with AI assistance. Harness Guide, the Easy Harness package agent, is a
+  sidecar inside the upload form that helps explain and organize the current
+  package; it is not a separate chat-first entry path.
 - The pre-submit AI sidecar has one visible chat entry. It automatically uses a
   short budget for quick guidance and a longer package-aware budget when the
   customer has uploaded files and asks about review readiness, missing material,

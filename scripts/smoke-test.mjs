@@ -422,8 +422,9 @@ const checks = [
       uploadDesign.includes("fileDrafts: allFiles") &&
       uploadDesign.includes("schemaVersion: \"easy-harness.upload-design.v1\"") &&
       uploadDesign.includes("UploadAssistantSidecar") &&
-      uploadDesign.includes("AI Upload Chat") &&
-      uploadDesign.includes("Ask AI") &&
+      uploadDesign.includes("Harness Guide") &&
+      uploadDesign.includes("Easy Harness package agent") &&
+      uploadDesign.includes("Ask ${uploadAssistantName}") &&
       uploadDesign.includes("\"upload_assistant_preview\"") &&
       checkingFunction.includes("buildUploadAssistantPreview") &&
       checkingFunction.includes("callDraftTextCompletion") &&
@@ -445,8 +446,12 @@ const checks = [
       uploadDesign.includes("assistantTextPreviewExtensions") &&
       uploadDesign.includes("assistantSpreadsheetPreviewExtensions") &&
       uploadDesign.includes("visibleTextPreviewKind: \"spreadsheet_sample\"") &&
-      uploadDesign.includes("Easy Harness AI took longer than this step allows") &&
-      uploadDesign.includes("AI suggested upload note") &&
+      uploadDesign.includes("chatMessages.map") &&
+      stylesCss.includes("min-height: 340px") &&
+      checkingFunction.includes("uploadAssistantNoteDraftReply") &&
+      checkingFunction.includes("asks_for_note") &&
+      uploadDesign.includes("took longer than this step allows") &&
+      uploadDesign.includes("suggested upload note") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS") &&

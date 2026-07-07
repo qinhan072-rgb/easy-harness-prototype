@@ -9,7 +9,7 @@ Canvas configurator
 Upload with AI assistance
 ```
 
-`AI Upload Chat` 是上传页右侧的小助理。它帮助用户把当前上传包说清楚，不是独立需求入口，也不能阻塞用户提交。
+`Harness Guide` 是上传页右侧的 Easy Harness package agent。它帮助用户把当前上传包说清楚，不是独立需求入口，也不能阻塞用户提交。
 
 ## 当前测试附件
 
@@ -80,7 +80,7 @@ D:\Harness\easy-harness-project-materials\test-fixtures\ai-attachment-intake-v1\
 
 1. 进入 `Upload with AI assistance`。
 2. 上传以上两个文件。
-3. 在右侧 `AI Upload Chat` 输入：`这些资料够你们先 review 吗？我还应该补什么说明？`
+3. 在右侧 `Harness Guide` 输入：`这些资料够你们先 review 吗？我还应该补什么说明？`
 4. 发送。
 
 期望：
@@ -255,7 +255,7 @@ I need a harness for a washdown pump motor. One end should match the pump pigtai
 
 1. 进入 `Upload with AI assistance`。
 2. 上传任意一个上述真实附件，或填写一段 harness note。
-3. 在 `AI Upload Chat` 输入一句自然问题，例如：`这些文件里哪个我应该说明成主依据？`
+3. 在 `Harness Guide` 输入一句自然问题，例如：`这些文件里哪个我应该说明成主依据？`
 4. 发送。
 
 期望：
