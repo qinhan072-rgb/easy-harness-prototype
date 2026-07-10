@@ -1774,8 +1774,23 @@ function textFromBlocks(blocks: MessageRow["blocks"], fallback = "") {
           return block.text;
         if (block.type === "event" && typeof block.body === "string")
           return `${block.title || "Event"}: ${block.body}`;
-        if (block.type === "attachments" && Array.isArray(block.files))
-          return `Attachments: ${block.files.join(", ")}`;
+        if (block.type === "attachments" && Array.isArray(block.files)) {
+          const names = block.files
+            .map((file) =>
+              typeof file === "string"
+                ? file
+                : normalizeString((file as Record<string, unknown>)?.name),
+            )
+            .filter(Boolean);
+          return `Attachments: ${names.join(", ")}`;
+        }
+        if (
+          block.type === "upload_design" &&
+          block.uploadDesign &&
+          typeof block.uploadDesign === "object"
+        ) {
+          return `Customer-approved upload package form: ${JSON.stringify(block.uploadDesign).slice(0, 16000)}`;
+        }
         if (block.type === "price" && block.amount)
           return `Harness price released: ${block.amount}`;
         return "";
@@ -3692,6 +3707,7 @@ type DraftModelProviderConfig = ReturnType<typeof draftModelConfig>;
 
 type DraftTextCompletionOptions = {
   enableThinking?: boolean;
+  thinkingBudget?: number;
   temperature?: number;
 };
 
@@ -3700,7 +3716,12 @@ function uploadAssistantProviderOptions(
   options: DraftTextCompletionOptions = {},
 ) {
   return provider === "qwen"
-    ? { enable_thinking: Boolean(options.enableThinking) }
+    ? {
+        enable_thinking: Boolean(options.enableThinking),
+        ...(options.enableThinking && options.thinkingBudget
+          ? { thinking_budget: options.thinkingBudget }
+          : {}),
+      }
     : {};
 }
 
@@ -4308,15 +4329,24 @@ function uploadAssistantPackageModelConfig() {
     ...config,
     maxTokens: envNumber(
       "AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS",
-      1200,
-      400,
-      2500,
+      2400,
+      800,
+      4000,
     ),
   };
 }
 
 function uploadAssistantDeepThinkingEnabled() {
-  return envFlagDefault("AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING", false);
+  return envFlagDefault("AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING", true);
+}
+
+function uploadAssistantThinkingBudget() {
+  return envNumber(
+    "AI_UPLOAD_ASSISTANT_THINKING_BUDGET",
+    1400,
+    256,
+    4000,
+  );
 }
 
 function uploadAssistantPingModelConfig() {
@@ -4387,7 +4417,6 @@ function uploadAssistantInteractionIntent(payload: CheckingRequest) {
       ? (preview.counts as Record<string, unknown>)
       : {};
   const files = previewFiles(payload);
-  const userMessage = normalizePreviewString(preview.user_message).toLowerCase();
   const visibleTextLength = previewVisibleText(payload).length;
   const engineeringSources = Number(counts.engineering_sources || 0);
   const hasFiles = files.length > 0;
@@ -4396,29 +4425,20 @@ function uploadAssistantInteractionIntent(payload: CheckingRequest) {
     depth === "package_context"
       ? uploadAssistantPackageTimeoutMs()
       : uploadAssistantPreviewTimeoutMs();
+  const enableThinking =
+    depth === "package_context" && uploadAssistantDeepThinkingEnabled();
   return {
     depth,
     has_files: hasFiles,
-    asks_for_note:
-      /note|summary|summarize|remark|description|draft|organize|整理|总结|备注|说明|提交|描述/.test(
-        userMessage,
-      ),
     has_engineering_source: engineeringSources > 0,
     visible_text_length: visibleTextLength,
     timeout_ms: timeoutMs,
-    enable_thinking:
-      depth === "package_context" && uploadAssistantDeepThinkingEnabled(),
+    enable_thinking: enableThinking,
+    thinking_budget: enableThinking ? uploadAssistantThinkingBudget() : 0,
   };
 }
 
-function uploadAssistantNoteDraftReply(payload: CheckingRequest) {
-  const latestMessage = normalizePreviewString(payload.preview?.user_message);
-  return /[\u3400-\u9fff]/.test(latestMessage)
-    ? "我已在下方整理了一段提交备注。你可以直接加入 Design notes，也可以继续让我改得更具体。"
-    : "I drafted a submission note below. You can add it to Design notes or ask me to tighten it.";
-}
-
-function buildUploadAssistantGuidancePolicy(payload: CheckingRequest) {
+function buildUploadAssistantEvidenceContext(payload: CheckingRequest) {
   const preview = payload.preview || {};
   const counts =
     preview.counts && typeof preview.counts === "object"
@@ -4426,51 +4446,23 @@ function buildUploadAssistantGuidancePolicy(payload: CheckingRequest) {
       : {};
   const files = previewFiles(payload);
   const visibleText = previewVisibleText(payload);
-  const visibleTextLower = visibleText.toLowerCase();
-  const engineeringSources = Number(counts.engineering_sources || 0);
-  const supportingReferences = Number(counts.supporting_references || 0);
-  const hasVisibleText = Boolean(visibleText.trim());
-  const hasCadOrDrawing = files.some((file) =>
-    /\.(pdf|dwg|dxf|step|stp|igs|iges|stl)$/i.test(
-      normalizePreviewString(file.name || file.extension),
-    ),
-  );
-  const hasStructuredTable = files.some((file) =>
-    /\.(csv|tsv|xlsx?|xlsm)$/i.test(
-      normalizePreviewString(file.name || file.extension),
-    ),
-  );
-  const hasConnectionClues =
-    /branch|device|signal|power|wire|controller|connector|interface|switch|pump|fan|probe|connect|route|trunk|gland|连接|分支|接口|设备|线|走线|控制|传感|开关|泵|风扇|探头/.test(
-      visibleTextLower,
-    );
-  const hasDimensionOrEnvironmentClues =
-    /\b\d+(\.\d+)?\s*(mm|cm|m)\b|length|approx|environment|wet|splash|label|尺寸|长度|环境|防水|标签/.test(
-      visibleTextLower,
-    );
-
-  let posture = "needs_context";
-  if (engineeringSources > 0 && hasVisibleText && hasConnectionClues) {
-    posture = hasDimensionOrEnvironmentClues
-      ? "structured_starting_basis"
-      : "source_with_missing_context";
-  } else if (engineeringSources > 0 || hasStructuredTable || hasCadOrDrawing) {
-    posture = "professional_files_received";
-  } else if (!files.length) {
-    posture = "no_files_yet";
-  } else if (supportingReferences > 0) {
-    posture = "supporting_references_only";
-  }
+  const fileEvidence = files.slice(0, 24).map((file) => ({
+    name: normalizePreviewString(file.name),
+    extension: normalizePreviewString(file.extension),
+    category: normalizePreviewString(file.category),
+    preview_status: normalizePreviewString(file.visibleTextPreviewStatus),
+    preview_kind: normalizePreviewString(file.visibleTextPreviewKind),
+  }));
 
   return [
-    "Stable upload guidance policy:",
-    `- posture: ${posture}`,
-    "- If posture is structured_starting_basis, say the package is enough to start initial Easy Harness review, then suggest one high-value optional supplement.",
-    "- If professional files are present but their contents are not visible, acknowledge receipt and ask the user to identify the main source file or connection goal.",
-    "- If only supporting references or vague natural language are present, suggest either uploading a stronger professional package or using the Canvas configurator.",
-    "- Encourage professional materials when relevant: CAD/drawings/PDFs/pinouts/spreadsheets/connector photos are helpful, especially connector face, rear wire exit, dimensions, and installation photos.",
-    "- Never present CAD, 3D, exact connector model, wire gauge, BOM, cut list, crimp tooling, or factory test details as mandatory before Easy Harness can start review.",
-    "- Keep the answer stable: do not flip between 'enough to start review' and 'cannot review' when the visible text contains connection, branch, route, length, or environment clues.",
+    "Deterministic evidence inventory (not a readiness decision):",
+    `- file_count: ${files.length}`,
+    `- engineering_source_count: ${Number(counts.engineering_sources || 0)}`,
+    `- supporting_reference_count: ${Number(counts.supporting_references || 0)}`,
+    `- visible_file_text_available: ${Boolean(visibleText.trim())}`,
+    `- visible_file_text_characters: ${visibleText.length}`,
+    `- file_evidence: ${JSON.stringify(fileEvidence)}`,
+    "Use this inventory only to understand what evidence is available. Decide readiness and the next useful question by reasoning over the full current context, not by matching product, industry, file, or test-case keywords.",
   ].join("\n");
 }
 
@@ -4491,6 +4483,7 @@ async function buildUploadAssistantPreview(
     "Use only the provided form state, file names, file categories, visibleTextPreview snippets, quantities, and notes.",
     "When visibleTextPreview is included, treat it as actual user-provided file text. When it is absent, do not pretend to know the file contents.",
     "Do not use keyword workflows, fixture names, or case-specific scripts; reason from the current upload state.",
+    "Use the recent conversation as real context. Do not repeat a question that the customer has already answered, and treat the latest customer correction as authoritative over earlier chat or reference material.",
     "Do not claim you visually inspected, parsed, OCR-read, or understood hidden file contents.",
     "Do not ask for factory-only details such as crimp tooling, BOM, cut list, terminal sourcing, or manufacturing test methods.",
     "Do not require a drawing, 3D model, exact connector model, wire gauge, or full manufacturing detail just to start Easy Harness review.",
@@ -4498,24 +4491,26 @@ async function buildUploadAssistantPreview(
     "If the customer has uploaded files, answer as a package-aware upload assistant: read the available snippets, reconcile them with the latest message, then decide whether the package is enough for initial Easy Harness review or what single supplement would help most.",
     "Professional materials such as CAD, drawings, PDFs, pinouts, spreadsheets, and connector photos are valuable. Encourage them when useful, but frame them as high-value supplements unless the current request cannot be understood at all.",
     "If the customer has no professional source material and is mainly describing a new harness in natural language, suggest the Canvas configurator as an easier path without forcing the customer away from upload.",
-    "When the latest customer message asks to summarize, draft, organize, write a note, or prepare submission remarks, put the usable submission wording in suggested_note. In that case, reply should only briefly say that a note has been drafted below, plus at most one improvement hint.",
+    "Decide semantically whether the customer wants a reusable upload note; do not depend on exact words or a fixed list of phrases.",
     "The suggested_note should read like a customer-approved upload note for Easy Harness review, not like a chat answer. It should be specific, evidence-based, and avoid phrases such as 'your package is clear' unless that wording belongs in the customer's actual note.",
+    "Return suggested_note as an empty string when a reusable note would not help yet. Do not produce a generic note merely because the response schema contains this field.",
     "Reply in the same language as the customer's latest message when possible.",
-    "Return compact JSON only with keys: reply, suggested_note, quick_checks, risk_level, ask_next.",
+    "Return compact JSON only with keys: reply, suggested_note, quick_checks, risk_level, ask_next, response_kind.",
     "reply: one or two short, helpful customer-facing sentences.",
-    "suggested_note: a concise upload note the customer can add to the active harness. Summarize the actual uploaded basis, known connection/route/quantity clues, and one optional high-value supplement if useful. Do not overclaim hidden file contents.",
-    "quick_checks: 2 to 4 short strings.",
+    "suggested_note: when useful, a concise note the customer can add to the active harness. Summarize only the actual uploaded basis and known connection, route, quantity, length, purpose, or change clues. Do not include optional supplements inside the customer-approved note and do not overclaim hidden file contents.",
+    "quick_checks: zero to three short, context-specific actions the customer could ask you to perform next.",
     "risk_level: ok, needs_source, or needs_context.",
-    "ask_next: one short optional follow-up question.",
+    "ask_next: the single most valuable optional follow-up question, or an empty string when no question is needed.",
+    "response_kind: guidance, package_assessment, or note_draft.",
   ].join("\n");
   const userContent = [
-    buildUploadAssistantGuidancePolicy(payload),
+    buildUploadAssistantEvidenceContext(payload),
     "",
     "Internal interaction intent:",
     previewText(intent, 2000),
     "",
     "Current upload form state:",
-    previewText(payload.preview),
+    previewText(payload.preview, 24000),
     "",
     "Respond for the right-side upload chat only. Be concise.",
   ].join("\n");
@@ -4528,12 +4523,15 @@ async function buildUploadAssistantPreview(
     `${config.provider} upload assistant preview`,
     {
       enableThinking: intent.enable_thinking,
+      thinkingBudget: intent.thinking_budget,
       temperature: 0,
     },
   );
   let parsed: Record<string, unknown> = {};
+  let responseJsonValid = false;
   try {
     parsed = JSON.parse(extractJsonObject(generated.text));
+    responseJsonValid = Boolean(parsed && typeof parsed === "object");
   } catch {
     parsed = {};
   }
@@ -4545,24 +4543,24 @@ async function buildUploadAssistantPreview(
     elapsed_ms: Date.now() - startedAt,
     timeout_ms: intent.timeout_ms,
     thinking_enabled: intent.enable_thinking,
+    thinking_budget: intent.thinking_budget,
+    response_json_valid: responseJsonValid,
     usage: generated.usage || null,
   });
   const suggestedNote = normalizePreviewString(
     parsed.suggested_note,
     "",
   );
-  const reply =
-    intent.asks_for_note && suggestedNote
-      ? uploadAssistantNoteDraftReply(payload)
-      : normalizePreviewString(
-          parsed.reply,
-          generated.text,
-        );
+  const unstructuredReply = normalizePreviewString(generated.text);
+  const reply = normalizePreviewString(
+    parsed.reply,
+    unstructuredReply.startsWith("{")
+      ? "I could not finish a clear package response this time. Your upload form is unchanged, so you can ask again."
+      : unstructuredReply,
+  );
   return {
     ok: true,
     mode: "upload_assistant_preview",
-    provider: config.provider,
-    model: config.model,
     interactionDepth: intent.depth,
     elapsedMs: Date.now() - startedAt,
     reply,
@@ -4570,6 +4568,7 @@ async function buildUploadAssistantPreview(
     quickChecks: normalizePreviewList(parsed.quick_checks),
     riskLevel: normalizePreviewString(parsed.risk_level, "needs_context"),
     askNext: normalizePreviewString(parsed.ask_next),
+    responseKind: normalizePreviewString(parsed.response_kind, "guidance"),
   };
 }
 
@@ -4593,8 +4592,6 @@ async function buildUploadAssistantPing(userId: string) {
   return {
     ok: true,
     mode: "upload_assistant_ping",
-    provider: config.provider,
-    model: config.model,
     reply: normalizePreviewString(
       generated.text,
       "I can help make this upload package clearer before you submit it.",
@@ -4647,7 +4644,7 @@ Deno.serve(async (request) => {
         {
           ok: false,
           code: "upload_assistant_ping_failed",
-          message,
+          message: "Harness Guide could not complete the connection check.",
         },
         502,
       );
@@ -4672,7 +4669,7 @@ Deno.serve(async (request) => {
         {
           ok: false,
           code: "upload_assistant_preview_failed",
-          message,
+          message: "Harness Guide could not complete this response.",
         },
         502,
       );

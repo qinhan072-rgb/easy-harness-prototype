@@ -27,6 +27,18 @@ const engineeringExtensions = [
   ".igs",
   ".iges",
   ".stl",
+  ".obj",
+  ".amf",
+  ".3mf",
+  ".fcstd",
+  ".sldprt",
+  ".sldasm",
+  ".ipt",
+  ".iam",
+  ".catpart",
+  ".catproduct",
+  ".prt",
+  ".asm",
   ".xlsx",
   ".xls",
   ".xlsm",
@@ -45,7 +57,11 @@ const supportingExtensions = [
   ".heic",
   ".doc",
   ".docx",
+  ".ppt",
+  ".pptx",
   ".txt",
+  ".md",
+  ".json",
 ];
 
 const acceptedUploadExtensions = [
@@ -94,6 +110,7 @@ const leadTimeOptions = [
 ];
 
 const substitutionOptions = [
+  "Easy Harness to review",
   "Exact parts only",
   "Equivalent parts allowed after approval",
   "Easy Harness may recommend alternatives",
@@ -132,9 +149,9 @@ function defaultHarness(index = 0) {
     id: uploadId("harness"),
     name: index ? `Harness ${index + 1}` : "Harness 1",
     files: [],
-    quantities: [10, 50, 100],
-    substitution: substitutionOptions[1],
-    tolerance: toleranceOptions[0],
+    quantities: [""],
+    substitution: substitutionOptions[0],
+    tolerance: toleranceOptions[2],
     notes: "",
   };
 }
@@ -312,11 +329,20 @@ function sanitizeQuantity(value) {
   return Math.max(1, Math.round(number));
 }
 
+function quantityInputValue(value) {
+  if (value === "" || value === null || value === undefined) return "";
+  const number = Number(value);
+  if (!Number.isFinite(number)) return "";
+  return Math.max(1, Math.round(number));
+}
+
 export default function UploadDesignRequest({
   activeMode = "upload",
   onSwitchMode,
   onSubmitUploadDesign,
+  onRequestAssistantSignIn,
   submitting = false,
+  submissionProgress,
   currentUser,
 }) {
   const fileInputRef = useRef(null);
@@ -337,8 +363,10 @@ export default function UploadDesignRequest({
   const [dragHarnessId, setDragHarnessId] = useState("");
   const [formError, setFormError] = useState("");
   const [assistantNote, setAssistantNote] = useState("");
+  const [assistantNoteHarnessId, setAssistantNoteHarnessId] = useState("");
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessages, setAssistantMessages] = useState([]);
+  const [assistantSuggestions, setAssistantSuggestions] = useState([]);
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState("");
   const [assistantWorkingCopy, setAssistantWorkingCopy] = useState(
@@ -374,7 +402,8 @@ export default function UploadDesignRequest({
   ).length;
 
   const totalQuantityCount = harnesses.reduce(
-    (sum, harness) => sum + (harness.quantities || []).length,
+    (sum, harness) =>
+      sum + (harness.quantities || []).filter((quantity) => Number(quantity) > 0).length,
     0,
   );
 
@@ -401,14 +430,16 @@ export default function UploadDesignRequest({
 
   function addAssistantNoteToActiveHarness() {
     const note = assistantNote.trim();
-    if (!note || !activeHarness?.id) return;
-    updateHarness(activeHarness.id, (harness) => ({
+    const targetHarnessId = assistantNoteHarnessId || activeHarness?.id;
+    if (!note || !targetHarnessId) return;
+    updateHarness(targetHarnessId, (harness) => ({
       notes: [harness.notes, note].filter(Boolean).join("\n"),
     }));
     setAssistantNote("");
+    setAssistantNoteHarnessId("");
   }
 
-  function uploadAssistantInteractionIntent(message) {
+  function uploadAssistantInteractionIntent() {
     const hasFiles = allFiles.length > 0;
     const depth = hasFiles ? "package_context" : "quick_guidance";
     return {
@@ -471,6 +502,11 @@ export default function UploadDesignRequest({
       },
       lead_time: leadTime.title,
       active_harness_id: activeHarness?.id || "",
+      conversation: assistantMessages.slice(-8).map((message) => ({
+        role: message.role,
+        body: String(message.body || "").slice(0, 1600),
+      })),
+      current_suggested_note: assistantNote,
       harnesses: previewHarnesses,
     };
   }
@@ -479,7 +515,36 @@ export default function UploadDesignRequest({
     const message = promptText.trim();
     if (!message || assistantLoading) return;
     const pingMode = message.toLowerCase() === "/ping";
-    const interactionIntent = uploadAssistantInteractionIntent(message);
+    const interactionIntent = uploadAssistantInteractionIntent();
+    const assistantTargetHarnessId = activeHarness?.id || "";
+    if (!supabaseConfigured || !supabase) {
+      setAssistantError(
+        `${uploadAssistantName} is not connected in this environment. Upload and submit still work without it.`,
+      );
+      return;
+    }
+
+    let accessToken = "";
+    try {
+      const { data: sessionData, error: sessionError } =
+        await supabase.auth.getSession();
+      if (sessionError) {
+        throw new Error(`auth_session_error: ${sessionError.message}`);
+      }
+      accessToken = sessionData?.session?.access_token || "";
+    } catch (error) {
+      setAssistantError(customerSafeAssistantError(error));
+      return;
+    }
+
+    if (!accessToken) {
+      setAssistantError(
+        `Sign in to use ${uploadAssistantName}. Your upload form will stay available.`,
+      );
+      onRequestAssistantSignIn?.();
+      return;
+    }
+
     const userMessage = {
       id: `upload_ai_user_${Date.now()}`,
       role: "user",
@@ -488,25 +553,14 @@ export default function UploadDesignRequest({
     setAssistantMessages((current) => [...current, userMessage]);
     setAssistantInput("");
     setAssistantError("");
-      setAssistantWorkingCopy(
+    setAssistantSuggestions([]);
+    setAssistantWorkingCopy(
       pingMode
         ? "Checking the live assistant connection..."
         : interactionIntent.visible_wait_copy,
     );
     setAssistantLoading(true);
     try {
-      if (!supabaseConfigured || !supabase) {
-        throw new Error("AI is not connected in this environment.");
-      }
-      const { data: sessionData, error: sessionError } =
-        await supabase.auth.getSession();
-      if (sessionError) {
-        throw new Error(`auth_session_error: ${sessionError.message}`);
-      }
-      const accessToken = sessionData?.session?.access_token;
-      if (!accessToken) {
-        throw new Error("not_authenticated: please sign in again to use live AI.");
-      }
       const { data, error } = await supabase.functions.invoke("run-checking", {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -539,17 +593,29 @@ export default function UploadDesignRequest({
       }
       const reply = String(data.reply || "").trim();
       const suggestedNote = String(data.suggestedNote || "").trim();
+      const nextSuggestions = [
+        String(data.askNext || "").trim(),
+        ...(Array.isArray(data.quickChecks) ? data.quickChecks : []),
+      ]
+        .map((item) => String(item || "").trim())
+        .filter(Boolean)
+        .filter((item, index, items) => items.indexOf(item) === index)
+        .slice(0, 3);
       setAssistantMessages((current) => [
         ...current,
         {
           id: `upload_ai_${Date.now()}`,
           role: "assistant",
           body: pingMode
-            ? `Live assistant connection is working. Model: ${data.model || "configured model"}.`
+            ? "Live Harness Guide connection is working."
             : reply || "I can help turn the current package into a clearer upload note.",
         },
       ]);
-      if (!pingMode && suggestedNote) setAssistantNote(suggestedNote);
+      if (!pingMode) {
+        setAssistantSuggestions(nextSuggestions);
+        setAssistantNote(suggestedNote);
+        setAssistantNoteHarnessId(suggestedNote ? assistantTargetHarnessId : "");
+      }
     } catch (error) {
       setAssistantError(customerSafeAssistantError(error));
     } finally {
@@ -609,14 +675,14 @@ export default function UploadDesignRequest({
 
   function addQuantity(harnessId) {
     updateHarness(harnessId, (harness) => ({
-      quantities: [...(harness.quantities || []), 250],
+      quantities: [...(harness.quantities || []), ""],
     }));
   }
 
   function updateQuantity(harnessId, index, value) {
     updateHarness(harnessId, (harness) => ({
       quantities: (harness.quantities || []).map((quantity, quantityIndex) =>
-        quantityIndex === index ? sanitizeQuantity(value) : quantity,
+        quantityIndex === index ? quantityInputValue(value) : quantity,
       ),
     }));
   }
@@ -626,7 +692,7 @@ export default function UploadDesignRequest({
       const next = (harness.quantities || []).filter(
         (_, quantityIndex) => quantityIndex !== index,
       );
-      return { quantities: next.length ? next : [1] };
+      return { quantities: next.length ? next : [""] };
     });
   }
 
@@ -634,6 +700,13 @@ export default function UploadDesignRequest({
     if (targetStep >= 1) {
       const missingName = harnesses.find((harness) => !harness.name.trim());
       if (missingName) return "Name each harness in the upload package.";
+      const missingQuantity = harnesses.find(
+        (harness) =>
+          !(harness.quantities || []).some((quantity) => Number(quantity) > 0),
+      );
+      if (missingQuantity) {
+        return `Add at least one quote quantity for ${missingQuantity.name || "each harness"}.`;
+      }
       if (!allFiles.length) return "Attach at least one harness material file.";
       if (!engineeringFileCount) {
         return "Upload package needs at least one drawing, CAD, STEP, spreadsheet, CSV, TSV, PDF, or archive. Photos and notes can support the package.";
@@ -677,7 +750,9 @@ export default function UploadDesignRequest({
     const cleanHarnesses = harnesses.map((harness) => ({
       id: harness.id,
       name: harness.name.trim(),
-      quantities: (harness.quantities || []).map(sanitizeQuantity),
+      quantities: (harness.quantities || [])
+        .filter((quantity) => Number(quantity) > 0)
+        .map(sanitizeQuantity),
       substitution: harness.substitution,
       tolerance: harness.tolerance,
       notes: harness.notes.trim(),
@@ -846,7 +921,11 @@ export default function UploadDesignRequest({
                     type="button"
                   >
                     {submitting ? <Clock3 size={17} /> : <Upload size={17} />}
-                    {submitting ? "Submitting" : "Submit for quote review"}
+                    {submitting && submissionProgress?.total
+                      ? `Uploading ${submissionProgress.completed}/${submissionProgress.total}`
+                      : submitting
+                        ? "Preparing request"
+                        : "Submit for quote review"}
                   </button>
                 )}
               </div>
@@ -863,10 +942,15 @@ export default function UploadDesignRequest({
             totalQuantityCount={totalQuantityCount}
             leadTime={leadTime}
             assistantNote={assistantNote}
+            assistantNoteTarget={
+              harnesses.find((harness) => harness.id === assistantNoteHarnessId) ||
+              activeHarness
+            }
             addAssistantNote={addAssistantNoteToActiveHarness}
             assistantInput={assistantInput}
             setAssistantInput={setAssistantInput}
             assistantMessages={assistantMessages}
+            assistantSuggestions={assistantSuggestions}
             assistantLoading={assistantLoading}
             assistantWorkingCopy={assistantWorkingCopy}
             assistantError={assistantError}
@@ -939,7 +1023,7 @@ function buildUploadAssistantGuidance({
   const status = [
     `${files.length} file${files.length === 1 ? "" : "s"}`,
     `${engineeringFileCount} source`,
-    `${totalQuantityCount} qty`,
+    `${totalQuantityCount} price break${totalQuantityCount === 1 ? "" : "s"}`,
     contactReady ? "contact ok" : "contact later",
   ];
 
@@ -989,15 +1073,18 @@ function UploadAssistantSidecar({
   totalQuantityCount,
   leadTime,
   assistantNote,
+  assistantNoteTarget,
   addAssistantNote,
   assistantInput,
   setAssistantInput,
   assistantMessages,
+  assistantSuggestions,
   assistantLoading,
   assistantWorkingCopy,
   assistantError,
   askUploadAssistant,
 }) {
+  const threadRef = useRef(null);
   const files = harnesses.flatMap((harness) => harness.files || []);
   const guidance = buildUploadAssistantGuidance({
     contact,
@@ -1009,7 +1096,7 @@ function UploadAssistantSidecar({
     totalQuantityCount,
     leadTime,
   });
-  const canAddNote = Boolean(assistantNote.trim() && activeHarness?.id);
+  const canAddNote = Boolean(assistantNote.trim() && assistantNoteTarget?.id);
   const chatMessages = assistantMessages.length
     ? assistantMessages
     : [
@@ -1019,6 +1106,15 @@ function UploadAssistantSidecar({
           body: guidance.read,
         },
       ];
+  const visiblePrompts = assistantSuggestions.length
+    ? assistantSuggestions
+    : guidance.quickPrompts;
+
+  useEffect(() => {
+    const thread = threadRef.current;
+    if (!thread) return;
+    thread.scrollTop = thread.scrollHeight;
+  }, [assistantLoading, assistantMessages]);
 
   return (
     <aside className="upload-assistant-sidecar" aria-label={`${uploadAssistantName} upload assistant chat`}>
@@ -1035,7 +1131,10 @@ function UploadAssistantSidecar({
         ))}
       </div>
 
-      <div className="upload-ai-thread">
+      <div
+        className={`upload-ai-thread ${assistantMessages.length ? "has-conversation" : "empty"}`}
+        ref={threadRef}
+      >
         {chatMessages.map((message) => (
           <div
             className={`upload-ai-message ${message.role === "user" ? "user" : "assistant"}`}
@@ -1054,7 +1153,7 @@ function UploadAssistantSidecar({
       </div>
 
       <div className="upload-ai-prompts" aria-label="AI upload prompts">
-        {guidance.quickPrompts.map((prompt) => (
+        {visiblePrompts.map((prompt) => (
           <button
             key={prompt}
             type="button"
@@ -1093,7 +1192,7 @@ function UploadAssistantSidecar({
       )}
       {assistantNote && (
         <div className="upload-assistant-note-preview">
-          <span>{uploadAssistantName} suggested upload note</span>
+          <span>{uploadAssistantName} prepared upload note</span>
           <p>{assistantNote}</p>
           <button
             className="secondary-action upload-assistant-note-button"
@@ -1101,7 +1200,7 @@ function UploadAssistantSidecar({
             onClick={addAssistantNote}
             disabled={!canAddNote}
           >
-            Add to design notes
+            Add to {assistantNoteTarget?.name || "harness"} notes
           </button>
         </div>
       )}
@@ -1213,16 +1312,29 @@ function DesignPackageStep({
 }) {
   return (
     <div className="upload-package">
-      <div className="upload-quality-gate">
-        <AlertTriangle size={17} />
+      <div
+        className={`upload-quality-gate ${engineeringFileCount ? "satisfied" : ""}`}
+      >
+        {engineeringFileCount ? <Check size={17} /> : <AlertTriangle size={17} />}
         <div>
-          <strong>Engineering source required</strong>
-          <p>
-            This path is for prepared harness materials. Include at least one
-            drawing, CAD, STEP, spreadsheet, CSV/TSV, PDF, or archive. Photos
-            and notes can support the package, especially for connectors,
-            labels, pin face, rear wire exit, and dimensions.
-          </p>
+          <strong>
+            {engineeringFileCount
+              ? "Professional source received"
+              : "Engineering source required"}
+          </strong>
+          {engineeringFileCount ? (
+            <p>
+              The package has a professional source file. Add photos or notes only
+              when they make the drawing, table, CAD, or quote package easier to use.
+            </p>
+          ) : (
+            <p>
+              This path is for prepared harness materials. Include at least one
+              drawing, CAD, STEP, spreadsheet, CSV/TSV, PDF, or archive. Photos
+              and notes can support the package, especially for connectors,
+              labels, pin face, rear wire exit, and dimensions.
+            </p>
+          )}
         </div>
       </div>
 
@@ -1244,7 +1356,8 @@ function DesignPackageStep({
                 <strong>{harness.name || "Unnamed harness"}</strong>
                 <small>
                   {(harness.files || []).length} files,{" "}
-                  {(harness.quantities || []).length} quantities
+                  {(harness.quantities || []).filter((quantity) => Number(quantity) > 0).length}{" "}
+                  price breaks
                 </small>
               </span>
             </button>
@@ -1333,8 +1446,14 @@ function DesignPackageStep({
             )}
 
             <div className="upload-count-strip">
-              <span>{engineeringFileCount} engineering source file</span>
-              <span>{supportingFileCount} supporting reference file</span>
+              <span>
+                {engineeringFileCount} engineering source file
+                {engineeringFileCount === 1 ? "" : "s"}
+              </span>
+              <span>
+                {supportingFileCount} supporting reference file
+                {supportingFileCount === 1 ? "" : "s"}
+              </span>
             </div>
 
             <div className="upload-quantity-section">
@@ -1350,6 +1469,7 @@ function DesignPackageStep({
                       type="number"
                       min="1"
                       value={quantity}
+                      placeholder="Enter qty"
                       onChange={(event) =>
                         updateQuantity(activeHarness.id, index, event.target.value)
                       }
@@ -1402,12 +1522,12 @@ function DesignPackageStep({
                 </select>
               </UploadField>
               <UploadField label="Design notes" className="full">
-                <textarea
+                  <textarea
                   value={activeHarness.notes}
                   onChange={(event) =>
                     updateHarness(activeHarness.id, { notes: event.target.value })
                   }
-                  placeholder="Special materials, labels, shielding, packaging, testing, or assembly notes..."
+                  placeholder="Explain what the files are for, the connection goal, key changes, approximate length, or anything Easy Harness should notice..."
                   rows={4}
                 />
               </UploadField>
@@ -1478,14 +1598,24 @@ function ReviewStep({
         <strong>Harness specifications ({harnesses.length})</strong>
         {harnesses.map((harness) => (
           <div className="upload-review-harness" key={harness.id}>
-            <div>
+            <div className="upload-review-harness-details">
               <strong>{harness.name}</strong>
               <small>
-                {(harness.files || []).length} file(s),{" "}
-                {(harness.quantities || []).length} quantity break(s)
+                Files: {(harness.files || []).map((file) => file.name).join(", ")}
               </small>
+              <small>
+                Component substitution: {harness.substitution}. Tolerancing:{" "}
+                {harness.tolerance}.
+              </small>
+              {String(harness.notes || "").trim() ? (
+                <p><strong>Submission note:</strong> {harness.notes}</p>
+              ) : (
+                <small>No additional submission note.</small>
+              )}
             </div>
-            <span>{(harness.quantities || []).join(", ")} units</span>
+            <span>
+              Quote quantities: {(harness.quantities || []).filter(Boolean).join(", ")}
+            </span>
           </div>
         ))}
       </div>

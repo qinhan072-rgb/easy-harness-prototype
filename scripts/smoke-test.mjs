@@ -419,6 +419,10 @@ const checks = [
     name: "upload page embeds a non-blocking assistant sidecar",
     pass: uploadDesign.includes("engineeringExtensions") &&
       uploadDesign.includes("supportingExtensions") &&
+      uploadDesign.includes('".fcstd"') &&
+      uploadDesign.includes('".3mf"') &&
+      uploadDesign.includes('quantities: [""]') &&
+      !uploadDesign.includes("quantities: [10, 50, 100]") &&
       uploadDesign.includes("fileDrafts: allFiles") &&
       uploadDesign.includes("schemaVersion: \"easy-harness.upload-design.v1\"") &&
       uploadDesign.includes("UploadAssistantSidecar") &&
@@ -433,25 +437,35 @@ const checks = [
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING") &&
       checkingFunction.includes("enable_thinking: Boolean(options.enableThinking)") &&
+      checkingFunction.includes("AI_UPLOAD_ASSISTANT_THINKING_BUDGET") &&
+      checkingFunction.includes("thinking_budget: options.thinkingBudget") &&
       checkingFunction.includes("temperature: 0") &&
-      checkingFunction.includes("buildUploadAssistantGuidancePolicy") &&
-      checkingFunction.includes("structured_starting_basis") &&
+      checkingFunction.includes("buildUploadAssistantEvidenceContext") &&
+      checkingFunction.includes("not a readiness decision") &&
+      !checkingFunction.includes("buildUploadAssistantGuidancePolicy") &&
+      !checkingFunction.includes("structured_starting_basis") &&
+      !checkingFunction.includes("asks_for_note") &&
+      !checkingFunction.includes("uploadAssistantNoteDraftReply") &&
       checkingFunction.includes("Canvas configurator") &&
       checkingFunction.includes("visibleTextPreview") &&
       checkingFunction.includes("Do not require a drawing, 3D model") &&
-      checkingFunction.includes("suggested_note: a concise upload note") &&
-      checkingFunction.includes("Summarize the actual uploaded basis") &&
+      checkingFunction.includes("Decide semantically whether the customer wants") &&
+      checkingFunction.includes("Return suggested_note as an empty string") &&
+      checkingFunction.includes("response_json_valid") &&
       uploadDesign.includes("uploadAssistantFilePreview") &&
       uploadDesign.includes("visibleTextPreviewStatus: \"included\"") &&
       uploadDesign.includes("assistantTextPreviewExtensions") &&
       uploadDesign.includes("assistantSpreadsheetPreviewExtensions") &&
       uploadDesign.includes("visibleTextPreviewKind: \"spreadsheet_sample\"") &&
+      uploadDesign.includes("conversation: assistantMessages.slice(-8)") &&
+      uploadDesign.includes("assistantSuggestions") &&
       uploadDesign.includes("chatMessages.map") &&
       stylesCss.includes("min-height: 340px") &&
-      checkingFunction.includes("uploadAssistantNoteDraftReply") &&
-      checkingFunction.includes("asks_for_note") &&
+      stylesCss.includes("align-content: start") &&
       uploadDesign.includes("took longer than this step allows") &&
-      uploadDesign.includes("suggested upload note") &&
+      uploadDesign.includes("prepared upload note") &&
+      uploadDesign.includes("Professional source received") &&
+      uploadDesign.includes("Submission note:") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS") &&
@@ -467,12 +481,15 @@ const checks = [
       uploadDesign.includes("readFunctionErrorBody") &&
       !uploadDesign.includes("function localAssistantReply") &&
       uploadDesign.includes("upload-assistant-note-preview") &&
-      uploadDesign.includes("Add to design notes") &&
+      uploadDesign.includes("Add to {assistantNoteTarget?.name") &&
       !uploadDesign.includes("setAssistantNote={setAssistantNote}") &&
       !stylesCss.includes(".upload-assistant-note textarea") &&
       uploadDesign.includes("Upload and submit still work without it") &&
       uploadDesign.includes("Upload package needs at least one drawing") &&
       app.includes("Upload package needs at least one drawing") &&
+      app.includes("requireAllUploads: true") &&
+      app.includes("attachmentFailures") &&
+      app.includes("initial_upload_package") &&
       app.includes("pruneServerBackedStorageForHostedMode")
   },
   {
@@ -969,7 +986,9 @@ const checks = [
       envExample.includes("AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000") &&
       envExample.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=45000") &&
       envExample.includes("AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS=115000") &&
-      envExample.includes("AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=false") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=true") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS=2400") &&
+      envExample.includes("AI_UPLOAD_ASSISTANT_THINKING_BUDGET=1400") &&
       envExample.includes("AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS=30000") &&
       !envExample.includes("AI_DRAFT_USE_EXTERNAL_WORKER") &&
       aiProviderDoc.includes("EdgeRuntime.waitUntil")

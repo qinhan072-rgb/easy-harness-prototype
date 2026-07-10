@@ -263,7 +263,42 @@ I need a harness for a washdown pump motor. One end should match the pump pigtai
 - 前端调用 `run-checking`，payload 中包含 `mode: "upload_assistant_preview"`。
 - Edge Function 校验登录用户后调用 Qwen。
 - 返回紧凑 JSON：`reply`、`suggestedNote`、`quickChecks`、`riskLevel`、`askNext`。
+- Qwen 生成的 `askNext` / `quickChecks` 应成为右侧可见的下一步建议，不应被前端丢弃。
 - 如果 Qwen 或 Supabase 失败，上传页仍可继续使用，只显示通用 fallback，而不是伪装成 AI 已理解附件。
+
+## 用例 10：多轮上下文与不同表达方式
+
+步骤：
+
+1. 第一轮说明：`J1 是控制器端，另一端我还没决定。`
+2. 第二轮只补充：`另一头做 400 mm 带标签的散线，先要 20 条。`
+3. 第三轮用不包含“总结、备注、review”等词的表达：`把现在这些变成我能直接交出去的那段话。`
+
+期望：
+
+- 第二轮不得重复询问另一端或数量。
+- 第三轮由模型理解用户意图并生成可加入 harness notes 的内容，不依赖固定关键词触发。
+- AI 应保留第一轮的 J1 控制器端信息，但不得编造 J1 表格中未实际可见的内容。
+
+## 用例 11：建议卡只在真正有内容时出现
+
+- 用户问一个普通上传方式问题时，只显示聊天回答和有价值的下一步建议，不生成空泛提交备注。
+- 用户要求整理材料，或当前上下文已有可复用的明确事实时，才显示 `Harness Guide prepared upload note`。
+- 加入后，Review 页必须显示这段 note，并明确它属于哪根 harness。
+
+## 用例 12：文件未完整保存时禁止显示提交成功
+
+步骤：在最终提交期间人为中断一个 Storage 上传，或使用会被 Storage 拒绝的测试文件。
+
+期望：
+
+- 页面停留在当前表单并指出失败文件。
+- 不进入看似成功的 request thread。
+- 已失败文件不能被记录成已上传；重新提交前用户的本地表单和文件选择仍然保留。
+
+## 用例 13：专业 CAD 格式接收
+
+`FCStd`、`3MF`、`OBJ` 等专业机械参考文件应可上传。当前无法解析的格式可以标记为需要 Easy Harness 后续处理，但不能在文件选择阶段直接拒绝。
 
 ## 判断标准
 
@@ -272,4 +307,4 @@ I need a harness for a washdown pump motor. One end should match the pump pigtai
 - AI 不喧宾夺主，不把上传页变成聊天页。
 - AI 不按测试用例背答案。
 - UI 的快捷问题可以根据当前文件类型变化，但 AI 的回答必须来自当前上下文和模型推理。
-- 上传前只做轻量整理；正式 request basis 和附件解析仍属于提交后的 Easy Harness review 链路。
+- 上传前只做轻量整理；提交成功后必须自动进入正式 request basis 和附件解析链路。

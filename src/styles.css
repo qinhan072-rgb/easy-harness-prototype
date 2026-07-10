@@ -8415,13 +8415,19 @@ button:disabled {
   position: sticky;
   top: 18px;
   display: grid;
+  grid-template-rows: auto auto minmax(220px, 1fr) auto auto auto;
   gap: 12px;
   max-height: calc(100vh - 36px);
+  overflow-y: auto;
   padding: 14px;
   border: 1px solid rgba(18, 153, 139, 0.2);
   border-radius: 12px;
   background: rgba(255, 255, 255, 0.96);
   box-shadow: 0 18px 48px rgba(18, 32, 29, 0.11);
+}
+
+.upload-assistant-sidecar:has(.upload-ai-thread.empty) {
+  grid-template-rows: auto auto auto auto auto auto;
 }
 
 .upload-assistant-sidecar-head {
@@ -8467,6 +8473,7 @@ button:disabled {
 
 .upload-ai-thread {
   display: grid;
+  align-content: start;
   gap: 8px;
   min-height: 340px;
   max-height: min(520px, calc(100vh - 310px));
@@ -8474,8 +8481,13 @@ button:disabled {
   padding: 4px 2px;
 }
 
+.upload-ai-thread.empty {
+  min-height: 0;
+}
+
 .upload-ai-message {
   display: grid;
+  align-self: start;
   gap: 4px;
   max-width: 92%;
   padding: 10px 11px;
@@ -8494,6 +8506,7 @@ button:disabled {
 .upload-ai-message p {
   margin: 0;
   color: #24332f;
+  white-space: pre-wrap;
 }
 
 .upload-ai-message.assistant {
@@ -8819,6 +8832,16 @@ button:disabled {
   color: #8a4300;
   font-size: 13px;
   line-height: 1.45;
+}
+
+.upload-quality-gate.satisfied {
+  border-color: rgba(18, 153, 139, 0.34);
+  background: #effaf7;
+  color: var(--teal);
+}
+
+.upload-quality-gate.satisfied p {
+  color: #37635b;
 }
 
 .upload-spec-layout {
@@ -9180,6 +9203,25 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
+.upload-review-harness-details {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.upload-review-harness-details small,
+.upload-review-harness-details p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.upload-review-harness-details p strong {
+  font-size: inherit;
+}
+
 .upload-review-harness:first-of-type {
   border-top: 0;
   padding-top: 0;
@@ -9381,14 +9423,20 @@ button:disabled {
     grid-template-columns: 1fr;
   }
 
+  .upload-form-column {
+    grid-row: 2;
+  }
+
   .upload-assistant-sidecar {
     position: static;
+    grid-row: 1;
+    grid-template-rows: auto auto minmax(180px, auto) auto auto auto;
     max-height: none;
   }
 
   .upload-ai-thread {
-    min-height: 300px;
-    max-height: 480px;
+    min-height: 180px;
+    max-height: 280px;
   }
 
   .upload-spec-layout {

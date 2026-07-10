@@ -1780,9 +1780,15 @@ function uploadDesignSummaryText(uploadDesign = {}) {
     `Requested review speed: ${uploadDesign.leadTime?.title || "Standard review"}`,
   ];
   harnesses.forEach((harness) => {
+    const harnessFiles = (harness.files || [])
+      .map((file) => file.name || file.displayName)
+      .filter(Boolean);
     lines.push(
-      `${harness.name || "Harness"}: quantities ${(harness.quantities || []).join(", ") || "not specified"}; tolerance ${harness.tolerance || "Easy Harness review"}.`,
+      `${harness.name || "Harness"}: quantities ${(harness.quantities || []).join(", ") || "not specified"}; component substitution ${harness.substitution || "Easy Harness review"}; tolerance ${harness.tolerance || "Easy Harness review"}; files ${harnessFiles.join(", ") || "not listed"}.`,
     );
+    if (String(harness.notes || "").trim()) {
+      lines.push(`${harness.name || "Harness"} submission note: ${harness.notes.trim()}`);
+    }
   });
   if (uploadDesign.reviewItems?.length) {
     lines.push(`Easy Harness will review: ${uploadDesign.reviewItems.join("; ")}`);
@@ -3492,6 +3498,7 @@ function App() {
   const [processingRequestId, setProcessingRequestId] = useState("");
   const [submittingRequest, setSubmittingRequest] = useState(false);
   const [submissionPhase, setSubmissionPhase] = useState("");
+  const [submissionProgress, setSubmissionProgress] = useState(null);
   const [sendingUserMessage, setSendingUserMessage] = useState(false);
   const [agentActivities, setAgentActivities] = useState({});
   const [userComposer, setUserComposer] = useState("");
@@ -5006,6 +5013,7 @@ function App() {
     firstMessage,
     uploadDrafts,
     actor,
+    options = {},
   ) {
     if (!supabase || !isUuidLike(actor?.id)) return null;
 
@@ -5056,15 +5064,30 @@ function App() {
         realRequestNumber,
         messageError.message,
       );
-      return { requestRow, messageRow: null, attachments: [] };
+      return {
+        requestRow,
+        messageRow: null,
+        attachments: [],
+        attachmentFailures: [
+          {
+            name: "Request message",
+            stage: "message_metadata",
+            message: messageError.message,
+          },
+        ],
+      };
     }
 
-    const savedAttachments = await persistSupabaseAttachments(
+    const attachmentPersistence = await persistSupabaseAttachments(
       uploadDrafts,
       realRequestNumber,
       requestRow.id,
       messageRow.id,
       actor.id,
+      {
+        ...options,
+        requireAllUploads: true,
+      },
     );
 
     recordServiceEvent(
@@ -5077,7 +5100,7 @@ function App() {
     return {
       requestRow,
       messageRow,
-      attachments: (savedAttachments || []).map((attachment) => ({
+      attachments: (attachmentPersistence.attachments || []).map((attachment) => ({
         id: attachment.id,
         requestId: realRequestNumber,
         supabaseRequestId: requestRow.id,
@@ -5090,6 +5113,7 @@ function App() {
         objectPath: attachment.object_path || "",
         createdAt: displayTime(attachment.created_at),
       })),
+      attachmentFailures: attachmentPersistence.failures || [],
     };
   }
 
@@ -5099,8 +5123,12 @@ function App() {
     requestUuid,
     messageUuid,
     ownerId,
+    options = {},
   ) {
-    if (!supabase || !files.length || !isUuidLike(ownerId)) return [];
+    if (!supabase || !files.length || !isUuidLike(ownerId)) {
+      return { attachments: [], failures: [] };
+    }
+    const { requireAllUploads = false, onProgress } = options;
     const localAttachments = buildAttachmentRecords(
       files,
       localRequestId,
@@ -5108,10 +5136,18 @@ function App() {
       ownerId,
     );
     const saved = [];
+    const failures = [];
 
-    for (const attachment of localAttachments) {
+    for (const [index, attachment] of localAttachments.entries()) {
       let storageObjectId = uuidValue();
       let uploaded = false;
+
+      onProgress?.({
+        completed: index,
+        total: localAttachments.length,
+        name: attachment.name,
+        status: "uploading",
+      });
 
       if (attachment.sourceFile) {
         const { error: uploadError } = await supabase.storage
@@ -5122,6 +5158,11 @@ function App() {
           });
 
         if (uploadError) {
+          failures.push({
+            name: attachment.name,
+            stage: "storage_upload",
+            message: uploadError.message,
+          });
           recordServiceEvent(
             "supabase-storage",
             "file_upload_failed",
@@ -5132,6 +5173,22 @@ function App() {
         } else {
           uploaded = true;
         }
+      } else if (requireAllUploads) {
+        failures.push({
+          name: attachment.name,
+          stage: "browser_file_missing",
+          message: "The browser file is no longer available.",
+        });
+      }
+
+      if (requireAllUploads && !uploaded) {
+        onProgress?.({
+          completed: index,
+          total: localAttachments.length,
+          name: attachment.name,
+          status: "failed",
+        });
+        continue;
       }
 
       const { error: storageError } = await supabase
@@ -5144,6 +5201,11 @@ function App() {
 
       if (storageError) {
         storageObjectId = "";
+        failures.push({
+          name: attachment.name,
+          stage: "storage_metadata",
+          message: storageError.message,
+        });
         recordServiceEvent(
           "supabase-database",
           "storage_object_insert_failed",
@@ -5165,6 +5227,16 @@ function App() {
         );
       }
 
+      if (requireAllUploads && storageError) {
+        onProgress?.({
+          completed: index,
+          total: localAttachments.length,
+          name: attachment.name,
+          status: "failed",
+        });
+        continue;
+      }
+
       const { data: attachmentRow, error: attachmentError } = await supabase
         .from("attachments")
         .insert(
@@ -5179,6 +5251,11 @@ function App() {
         .single();
 
       if (attachmentError) {
+        failures.push({
+          name: attachment.name,
+          stage: "attachment_metadata",
+          message: attachmentError.message,
+        });
         recordServiceEvent(
           "supabase-database",
           "attachment_insert_failed",
@@ -5189,6 +5266,13 @@ function App() {
       } else {
         saved.push({ ...attachmentRow, object_path: attachment.objectPath });
       }
+
+      onProgress?.({
+        completed: attachmentError ? index : index + 1,
+        total: localAttachments.length,
+        name: attachment.name,
+        status: attachmentError ? "failed" : "uploaded",
+      });
     }
 
     if (saved.length) {
@@ -5201,7 +5285,7 @@ function App() {
       );
     }
 
-    return saved;
+    return { attachments: saved, failures };
   }
 
   async function updateSupabaseRequestFromLocal(
@@ -5298,7 +5382,9 @@ function App() {
   async function invokeSupabaseChecking(request, trigger = "manual") {
     if (!supabase || !request?.supabaseId || !currentUser) return null;
 
-    const activityMode = trigger === "initial_request" ? "initial" : "followup";
+    const activityMode = String(trigger || "").startsWith("initial")
+      ? "initial"
+      : "followup";
     setAgentActivities((current) => ({
       ...current,
       [request.id]: { mode: activityMode, startedAt: Date.now() },
@@ -6124,6 +6210,18 @@ function App() {
         setFileError("Request could not be saved. Please try again.");
         return;
       }
+      if (savedBundle?.attachmentFailures?.length) {
+        const failedNames = savedBundle.attachmentFailures
+          .map((failure) => failure.name)
+          .filter(Boolean)
+          .join(", ");
+        setDescription(text);
+        setUploadFiles(uploadDrafts);
+        setFileError(
+          `Easy Harness did not receive every file${failedNames ? `: ${failedNames}` : ""}. Please submit again.`,
+        );
+        return;
+      }
       const savedRequest = savedBundle?.requestRow
         ? {
             ...nextRequest,
@@ -6304,6 +6402,11 @@ function App() {
       );
       if (supabase && isUuidLike(actor.id) && !savedBundle?.requestRow) {
         throw new Error("Configuration could not be saved. Please try again.");
+      }
+      if (savedBundle?.attachmentFailures?.length) {
+        throw new Error(
+          "Configuration details could not be saved completely. Please try again.",
+        );
       }
       const savedRequest = savedBundle?.requestRow
         ? {
@@ -6502,15 +6605,15 @@ function App() {
         title: serializableUploadDesign.title || "Uploaded harness design",
         source: "upload_design",
         uploadDesign: serializableUploadDesign,
-        status: "in_review",
+        status: "checking",
         checkResult: {
-          status: "accepted",
-          adapter: "upload-design-v1",
+          status: "queued",
+          adapter: platformAdapters.checking.id,
           reason:
-            "Customer submitted prepared engineering design files for Easy Harness quote review.",
+            "The professional upload package is saved and ready for request-basis organization.",
           customer_summary: text,
-          missing: serializableUploadDesign.reviewItems || [],
-          checkedAt: new Date().toISOString(),
+          missing: [],
+          checkedAt: "",
         },
         quotes: [],
         activeQuoteId: "",
@@ -6522,14 +6625,47 @@ function App() {
       };
 
       setSubmissionPhase("uploading");
+      setSubmissionProgress({
+        completed: 0,
+        total: uploadDrafts.length,
+        name: "",
+        status: "uploading",
+      });
       const savedBundle = await createSupabaseRequestBundle(
         nextRequest,
         firstMessage,
         uploadDrafts,
         actor,
+        {
+          onProgress: setSubmissionProgress,
+        },
       );
       if (supabase && isUuidLike(actor.id) && !savedBundle?.requestRow) {
         throw new Error("Uploaded design package could not be saved. Please try again.");
+      }
+      if (savedBundle?.attachmentFailures?.length) {
+        const failedNames = savedBundle.attachmentFailures
+          .map((failure) => failure.name)
+          .filter(Boolean);
+        if (savedBundle?.requestRow?.id) {
+          await supabase
+            .from("requests")
+            .update({
+              status: "draft_saved",
+              check_status: "failed",
+              check_result: {
+                status: "upload_failed",
+                adapter: "supabase-storage",
+                reason: "One or more package files were not stored.",
+                missing: failedNames,
+                checkedAt: new Date().toISOString(),
+              },
+            })
+            .eq("id", savedBundle.requestRow.id);
+        }
+        throw new Error(
+          `Easy Harness did not receive every file${failedNames.length ? `: ${failedNames.join(", ")}` : ""}. The form is still here; please submit again.`,
+        );
       }
       const savedRequest = savedBundle?.requestRow
         ? {
@@ -6593,10 +6729,14 @@ function App() {
       setActiveRequestId(savedRequest.id);
       setRequestEntryMode("upload");
       setUserView("thread");
+      if (savedRequest.supabaseId) {
+        void invokeSupabaseChecking(savedRequest, "initial_upload_package");
+      }
     } finally {
       submittingRequestRef.current = false;
       setSubmittingRequest(false);
       setSubmissionPhase("");
+      setSubmissionProgress(null);
     }
   }
 
@@ -6710,13 +6850,14 @@ function App() {
             ),
           }));
 
-          const savedAttachments = await persistSupabaseAttachments(
+          const attachmentPersistence = await persistSupabaseAttachments(
             filesToSend,
             activeRequest.id,
             activeRequest.supabaseId,
             messageRow.id,
             currentUser.id,
           );
+          const savedAttachments = attachmentPersistence.attachments;
 
           if (!savedAttachments.length && filesToSend.length) {
             appendAttachmentRecords(
@@ -6902,13 +7043,14 @@ function App() {
           ? saved.savedMessages[0].id
           : staffMessageId;
       if (activeRequest.supabaseId && isUuidLike(savedStaffMessageId)) {
-        const savedAttachments = await persistSupabaseAttachments(
+        const attachmentPersistence = await persistSupabaseAttachments(
           attachmentFiles,
           activeRequest.id,
           activeRequest.supabaseId,
           savedStaffMessageId,
           currentUser.id,
         );
+        const savedAttachments = attachmentPersistence.attachments;
         if (savedAttachments?.length) {
           setAttachmentRecords((current) => [
             ...savedAttachments.map((attachment) => ({
@@ -7427,11 +7569,18 @@ function App() {
             startRequest={startRequest}
             submittingRequest={submittingRequest}
             submissionPhase={submissionPhase}
+            submissionProgress={submissionProgress}
             currentUser={currentUser}
             requestEntryMode={requestEntryMode}
             setRequestEntryMode={setRequestEntryMode}
             submitCanvasConfiguration={submitCanvasConfiguration}
             submitUploadDesign={submitUploadDesign}
+            requestAssistantSignIn={() =>
+              openAuthModal(
+                "login",
+                "Sign in to use Harness Guide. Your current upload form will stay open.",
+              )
+            }
             uploadTermsAccepted={uploadTermsAccepted}
             termsChecked={termsChecked}
             setTermsChecked={setTermsChecked}
@@ -7483,11 +7632,18 @@ function App() {
               startRequest={startRequest}
               submittingRequest={submittingRequest}
               submissionPhase={submissionPhase}
+              submissionProgress={submissionProgress}
               currentUser={currentUser}
               requestEntryMode={requestEntryMode}
               setRequestEntryMode={setRequestEntryMode}
               submitCanvasConfiguration={submitCanvasConfiguration}
               submitUploadDesign={submitUploadDesign}
+              requestAssistantSignIn={() =>
+                openAuthModal(
+                  "login",
+                  "Sign in to use Harness Guide. Your current upload form will stay open.",
+                )
+              }
               uploadTermsAccepted={uploadTermsAccepted}
               termsChecked={termsChecked}
               setTermsChecked={setTermsChecked}
@@ -8285,11 +8441,13 @@ function WiringBackdrop() {
 
 function StartScreen({
   submittingRequest = false,
+  submissionProgress,
   currentUser,
   requestEntryMode = "upload",
   setRequestEntryMode,
   submitCanvasConfiguration,
   submitUploadDesign,
+  requestAssistantSignIn,
 }) {
   if (requestEntryMode === "canvas") {
     return (
@@ -8311,7 +8469,9 @@ function StartScreen({
         activeMode="upload"
         onSwitchMode={setRequestEntryMode}
         onSubmitUploadDesign={submitUploadDesign}
+        onRequestAssistantSignIn={requestAssistantSignIn}
         submitting={submittingRequest}
+        submissionProgress={submissionProgress}
         currentUser={currentUser}
       />
     </section>

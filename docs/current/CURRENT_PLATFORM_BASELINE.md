@@ -61,9 +61,16 @@ platform yet.
   sidecar inside the upload form that helps explain and organize the current
   package; it is not a separate chat-first entry path.
 - The pre-submit AI sidecar has one visible chat entry. It automatically uses a
-  short budget for quick guidance and a longer package-aware budget when the
-  customer has uploaded files and asks about review readiness, missing material,
-  or upload notes. No separate "deep check" button is exposed to customers.
+  short budget for quick guidance and a longer package-aware budget whenever the
+  customer has uploaded files. The package path carries recent conversation,
+  uses bounded Qwen thinking, and does not depend on exact question phrases. No
+  separate "deep check" button is exposed to customers.
+- Professional upload submission requires every browser file, Storage object,
+  storage metadata row, and attachment row to succeed before the customer is
+  shown a completed request. A failed file keeps the upload form available.
+- A successfully submitted upload package enters `checking` and starts the
+  formal `run-checking` request-basis path. Customer-approved design notes and
+  structured upload-form details are included in that run.
 - `run-checking` Edge Function exists for AI intake and Easy Harness upload
   assistant behavior. It can run through Qwen or DeepSeek; Qwen is the
   recommended first live provider for the next deployment pass.

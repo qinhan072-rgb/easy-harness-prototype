@@ -40,8 +40,9 @@ AI_UPLOAD_ASSISTANT_FAST_RESPONSE_MS=45000
 AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS=45000
 AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS=800
 AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS=115000
-AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS=1200
-AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=false
+AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS=2400
+AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=true
+AI_UPLOAD_ASSISTANT_THINKING_BUDGET=1400
 AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS=30000
 AI_UPLOAD_ASSISTANT_PING_MAX_TOKENS=64
 AI_DRAFT_PLATFORM_WALL_CLOCK_MS=140000
@@ -73,17 +74,18 @@ more time, the same Supabase Edge Function run registers background work with
 
 `AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS` controls quick pre-submit AI guidance
 inside `Upload with AI assistance`.
-`AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS` controls the same visible chat when the
-customer already has uploaded files and asks whether the package is clear enough,
-what is missing, or how to summarize it. Keep this below the Supabase Edge wall
+`AI_UPLOAD_ASSISTANT_PACKAGE_TIMEOUT_MS` controls the same visible chat whenever
+the customer has uploaded files. The route does not depend on exact question
+phrases. Keep this below the Supabase Edge wall
 clock limit with safety buffer; `115000` ms is intended for the Free-plan
 150-second wall-clock envelope.
 `AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS` and
 `AI_UPLOAD_ASSISTANT_PACKAGE_MAX_TOKENS` keep sidecar answers short compared
 with the long-form request-basis budget.
-`AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING` can enable Qwen thinking for
-package-aware upload chat after staging proves the model still returns stable
-compact JSON. Leave it `false` for the first live pass.
+`AI_UPLOAD_ASSISTANT_ENABLE_DEEP_THINKING=true` enables Qwen thinking for
+package-aware upload chat. `AI_UPLOAD_ASSISTANT_THINKING_BUDGET` bounds reasoning
+so the final customer response still fits the Supabase request window and the
+JSON contract. Keep quick guidance without files on the shorter non-thinking path.
 Use `/ping` in the upload assistant input during staging to run the minimal live
 AI connection check before testing the real upload assistant prompt.
 
