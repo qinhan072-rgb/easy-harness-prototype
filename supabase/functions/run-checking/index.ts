@@ -4390,10 +4390,6 @@ function uploadAssistantInteractionIntent(payload: CheckingRequest) {
   const userMessage = normalizePreviewString(preview.user_message).toLowerCase();
   const visibleTextLength = previewVisibleText(payload).length;
   const engineeringSources = Number(counts.engineering_sources || 0);
-  const asksAboutPackage =
-    /review|ready|submit|enough|missing|add|upload|package|material|file|note|summary|summarize|explain|check|缺|补|够|审|提交|上传|资料|文件|说明|备注|总结|整理/.test(
-      userMessage,
-    );
   const hasFiles = files.length > 0;
   const depth = hasFiles ? "package_context" : "quick_guidance";
   const timeoutMs =
@@ -4403,7 +4399,6 @@ function uploadAssistantInteractionIntent(payload: CheckingRequest) {
   return {
     depth,
     has_files: hasFiles,
-    asks_about_package: asksAboutPackage,
     asks_for_note:
       /note|summary|summarize|remark|description|draft|organize|整理|总结|备注|说明|提交|描述/.test(
         userMessage,

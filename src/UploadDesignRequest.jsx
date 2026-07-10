@@ -409,16 +409,10 @@ export default function UploadDesignRequest({
   }
 
   function uploadAssistantInteractionIntent(message) {
-    const normalized = String(message || "").toLowerCase();
-    const asksAboutPackage =
-      /review|ready|submit|enough|missing|add|upload|package|material|file|note|summary|summarize|explain|check|缺|补|够|审|提交|上传|资料|文件|说明|备注|总结|整理/.test(
-        normalized,
-      );
     const hasFiles = allFiles.length > 0;
     const depth = hasFiles ? "package_context" : "quick_guidance";
     return {
       depth,
-      asks_about_package: asksAboutPackage,
       has_files: hasFiles,
       has_engineering_source: engineeringFileCount > 0,
       visible_wait_copy: hasFiles
