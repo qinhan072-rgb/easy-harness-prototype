@@ -19,6 +19,7 @@ Thumbs.db
 *.pid
 vite-policy-check.log
 vite-policy-check.err.log
+.codex-tmp/
 
 # Supabase CLI local cache
 supabase/.temp/

@@ -458,6 +458,8 @@ const checks = [
       uploadAssistantPrompt.includes("without endpoint/interface identity and electrical mapping") &&
       uploadAssistantPrompt.includes("Decide semantically whether a reusable upload note helps") &&
       uploadAssistantPrompt.includes("Return an empty note when no useful note is justified") &&
+      uploadAssistantPrompt.includes("non-clickable checklist") &&
+      uploadAssistantPrompt.includes("non-clickable clarification") &&
       checkingFunction.includes("response_json_valid") &&
       uploadDesign.includes("uploadAssistantFilePreview") &&
       uploadDesign.includes("visibleTextPreviewStatus: \"included\"") &&
@@ -465,7 +467,24 @@ const checks = [
       uploadDesign.includes("assistantSpreadsheetPreviewExtensions") &&
       uploadDesign.includes("visibleTextPreviewKind: \"spreadsheet_sample\"") &&
       uploadDesign.includes("conversation: assistantMessages.slice(-8)") &&
-      uploadDesign.includes("assistantSuggestions") &&
+      uploadDesign.includes("assistantNextActions") &&
+      uploadDesign.includes("assistantFollowUp") &&
+      uploadDesign.includes("assistantPackageFit") &&
+      uploadDesign.includes("assistantAssessmentBasis") &&
+      uploadDesign.includes("previousAssistantAssessmentBasis") &&
+      !uploadDesign.includes("assistantSuggestions") &&
+      uploadDesign.includes("One detail to clarify") &&
+      uploadDesign.includes("What to add next") &&
+      uploadDesign.includes("Continue in Canvas") &&
+      uploadDesign.includes("onOpenCanvas={() => onSwitchMode?.(\"canvas\")}") &&
+      stylesCss.includes(".upload-assistant-next-actions") &&
+      stylesCss.includes(".upload-assistant-route") &&
+      uploadDesign.includes("upload-ai-message-working") &&
+      uploadDesign.includes("aria-busy=\"true\"") &&
+      uploadDesign.includes("upload-ai-thinking-dots") &&
+      stylesCss.includes("@keyframes upload-assistant-shimmer") &&
+      stylesCss.includes("@keyframes upload-assistant-dot") &&
+      stylesCss.includes("prefers-reduced-motion: reduce") &&
       uploadDesign.includes("chatMessages.map") &&
       stylesCss.includes("min-height: 340px") &&
       stylesCss.includes("align-content: start") &&

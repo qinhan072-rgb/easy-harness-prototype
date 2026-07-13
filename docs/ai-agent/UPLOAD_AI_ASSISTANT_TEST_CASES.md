@@ -265,9 +265,13 @@ I need a harness for a washdown pump motor. One end should match the pump pigtai
 
 - 前端调用 `run-checking`，payload 中包含 `mode: "upload_assistant_preview"`。
 - Edge Function 校验登录用户后调用 Qwen。
-- 返回紧凑 JSON：`reply`、`suggestedNote`、`quickChecks`、`riskLevel`、`askNext`。
-- Qwen 生成的 `askNext` / `quickChecks` 应成为右侧可见的下一步建议，不应被前端丢弃。
-- 如果 Qwen 或 Supabase 失败，上传页仍可继续使用，只显示通用 fallback，而不是伪装成 AI 已理解附件。
+- 返回紧凑 JSON：`reply`、`suggestedNote`、`quickChecks`、`riskLevel`、`askNext`、`packageFit`、`criticalGaps`。
+- `askNext` 应显示为不可点击的“待澄清问题”，用户可在下方输入框回答；`quickChecks` 应显示为不可点击的“下一步行动”清单。
+- 只有尚未开始对话时的示例问题可以一键发送给 Harness Guide。AI 回答后的行动建议不能再次作为用户消息发送，否则会造成重复问答。
+- 当 `packageFit` 为 `supplement_first` 或 `canvas_recommended` 时，应在聊天记录之外显示独立的 Canvas 路径提示和直接入口。
+- 文件、数量、备注或交期发生变化后，旧的行动清单、Canvas 路径判断和建议备注应清空；聊天历史保留，等待下一次基于新资料判断。
+- 等待 Qwen 时显示持续变化的处理状态：柔和流动高光与三个跳动圆点；减少动画偏好开启时停止动画，但仍保留明确的处理中状态。
+- 如果 Qwen 或 Supabase 失败，上传页仍可继续使用，只显示普通错误提示，不能伪装成 AI 已理解附件。
 
 ## 用例 10：多轮上下文与不同表达方式
 
@@ -309,5 +313,5 @@ I need a harness for a washdown pump motor. One end should match the pump pigtai
 - 用户不懂时，AI 像小助理一样帮他把现有材料说清楚。
 - AI 不喧宾夺主，不把上传页变成聊天页。
 - AI 不按测试用例背答案。
-- UI 的快捷问题可以根据当前文件类型变化，但 AI 的回答必须来自当前上下文和模型推理。
+- 初始快捷问题可以根据当前文件类型变化；AI 回答后的建议必须改为行动清单，不再是可点击的提问按钮。
 - 上传前只做轻量整理；提交成功后必须自动进入正式 request basis 和附件解析链路。

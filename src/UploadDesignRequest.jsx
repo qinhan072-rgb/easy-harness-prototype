@@ -366,11 +366,13 @@ export default function UploadDesignRequest({
   const [assistantNoteHarnessId, setAssistantNoteHarnessId] = useState("");
   const [assistantInput, setAssistantInput] = useState("");
   const [assistantMessages, setAssistantMessages] = useState([]);
-  const [assistantSuggestions, setAssistantSuggestions] = useState([]);
+  const [assistantNextActions, setAssistantNextActions] = useState([]);
+  const [assistantFollowUp, setAssistantFollowUp] = useState("");
+  const [assistantPackageFit, setAssistantPackageFit] = useState("");
   const [assistantLoading, setAssistantLoading] = useState(false);
   const [assistantError, setAssistantError] = useState("");
   const [assistantWorkingCopy, setAssistantWorkingCopy] = useState(
-    "Checking the current upload state...",
+    "Checking the current upload state",
   );
 
   useEffect(() => {
@@ -392,6 +394,39 @@ export default function UploadDesignRequest({
     () => harnesses.flatMap((harness) => harness.files || []),
     [harnesses],
   );
+
+  const assistantAssessmentBasis = useMemo(
+    () =>
+      JSON.stringify({
+        leadTimeId,
+        harnesses: harnesses.map((harness) => ({
+          id: harness.id,
+          name: harness.name,
+          quantities: harness.quantities || [],
+          substitution: harness.substitution,
+          tolerance: harness.tolerance,
+          notes: harness.notes,
+          files: (harness.files || []).map((file) => ({
+            id: file.id,
+            name: file.name,
+            size: file.size,
+            category: file.category,
+          })),
+        })),
+      }),
+    [harnesses, leadTimeId],
+  );
+  const previousAssistantAssessmentBasis = useRef(assistantAssessmentBasis);
+
+  useEffect(() => {
+    if (previousAssistantAssessmentBasis.current === assistantAssessmentBasis) return;
+    previousAssistantAssessmentBasis.current = assistantAssessmentBasis;
+    setAssistantNextActions([]);
+    setAssistantFollowUp("");
+    setAssistantPackageFit("");
+    setAssistantNote("");
+    setAssistantNoteHarnessId("");
+  }, [assistantAssessmentBasis]);
 
   const engineeringFileCount = allFiles.filter(
     (file) => file.category === "engineering_source",
@@ -447,8 +482,8 @@ export default function UploadDesignRequest({
       has_files: hasFiles,
       has_engineering_source: engineeringFileCount > 0,
       visible_wait_copy: hasFiles
-        ? "Reading the uploaded file summaries and preparing a clear upload note..."
-        : "Checking what would help this upload package...",
+        ? "Reading the uploaded file summaries and preparing a clear upload note"
+        : "Checking what would help this upload package",
     };
   }
 
@@ -553,10 +588,12 @@ export default function UploadDesignRequest({
     setAssistantMessages((current) => [...current, userMessage]);
     setAssistantInput("");
     setAssistantError("");
-    setAssistantSuggestions([]);
+    setAssistantNextActions([]);
+    setAssistantFollowUp("");
+    setAssistantPackageFit("");
     setAssistantWorkingCopy(
       pingMode
-        ? "Checking the live assistant connection..."
+        ? "Checking the live assistant connection"
         : interactionIntent.visible_wait_copy,
     );
     setAssistantLoading(true);
@@ -593,14 +630,18 @@ export default function UploadDesignRequest({
       }
       const reply = String(data.reply || "").trim();
       const suggestedNote = String(data.suggestedNote || "").trim();
-      const nextSuggestions = [
-        String(data.askNext || "").trim(),
-        ...(Array.isArray(data.quickChecks) ? data.quickChecks : []),
-      ]
+      const nextActions = (Array.isArray(data.quickChecks) ? data.quickChecks : [])
         .map((item) => String(item || "").trim())
         .filter(Boolean)
         .filter((item, index, items) => items.indexOf(item) === index)
         .slice(0, 3);
+      const packageFit = [
+        "prepared_upload",
+        "supplement_first",
+        "canvas_recommended",
+      ].includes(data.packageFit)
+        ? data.packageFit
+        : "";
       setAssistantMessages((current) => [
         ...current,
         {
@@ -612,7 +653,9 @@ export default function UploadDesignRequest({
         },
       ]);
       if (!pingMode) {
-        setAssistantSuggestions(nextSuggestions);
+        setAssistantNextActions(nextActions);
+        setAssistantFollowUp(String(data.askNext || "").trim());
+        setAssistantPackageFit(packageFit);
         setAssistantNote(suggestedNote);
         setAssistantNoteHarnessId(suggestedNote ? assistantTargetHarnessId : "");
       }
@@ -950,11 +993,14 @@ export default function UploadDesignRequest({
             assistantInput={assistantInput}
             setAssistantInput={setAssistantInput}
             assistantMessages={assistantMessages}
-            assistantSuggestions={assistantSuggestions}
+            assistantNextActions={assistantNextActions}
+            assistantFollowUp={assistantFollowUp}
+            assistantPackageFit={assistantPackageFit}
             assistantLoading={assistantLoading}
             assistantWorkingCopy={assistantWorkingCopy}
             assistantError={assistantError}
             askUploadAssistant={askUploadAssistant}
+            onOpenCanvas={() => onSwitchMode?.("canvas")}
           />
         </div>
       </main>
@@ -1078,11 +1124,14 @@ function UploadAssistantSidecar({
   assistantInput,
   setAssistantInput,
   assistantMessages,
-  assistantSuggestions,
+  assistantNextActions,
+  assistantFollowUp,
+  assistantPackageFit,
   assistantLoading,
   assistantWorkingCopy,
   assistantError,
   askUploadAssistant,
+  onOpenCanvas,
 }) {
   const threadRef = useRef(null);
   const files = harnesses.flatMap((harness) => harness.files || []);
@@ -1106,9 +1155,10 @@ function UploadAssistantSidecar({
           body: guidance.read,
         },
       ];
-  const visiblePrompts = assistantSuggestions.length
-    ? assistantSuggestions
-    : guidance.quickPrompts;
+  const initialPrompts = assistantMessages.length ? [] : guidance.quickPrompts;
+  const showCanvasRoute =
+    assistantPackageFit === "supplement_first" ||
+    assistantPackageFit === "canvas_recommended";
 
   useEffect(() => {
     const thread = threadRef.current;
@@ -1145,25 +1195,82 @@ function UploadAssistantSidecar({
           </div>
         ))}
         {assistantLoading && (
-          <div className="upload-ai-message assistant">
+          <div
+            className="upload-ai-message assistant upload-ai-message-working"
+            role="status"
+            aria-live="polite"
+            aria-busy="true"
+          >
             <small>{uploadAssistantName}</small>
-            <p>{assistantWorkingCopy}</p>
+            <p>
+              <span>{assistantWorkingCopy}</span>
+              <span className="upload-ai-thinking-dots" aria-hidden="true">
+                <i />
+                <i />
+                <i />
+              </span>
+            </p>
           </div>
         )}
       </div>
 
-      <div className="upload-ai-prompts" aria-label="AI upload prompts">
-        {visiblePrompts.map((prompt) => (
-          <button
-            key={prompt}
-            type="button"
-            onClick={() => askUploadAssistant(prompt)}
-            disabled={assistantLoading}
-          >
-            {prompt}
+      {!!initialPrompts.length && (
+        <div className="upload-ai-prompts" aria-label="Questions to try with Harness Guide">
+          <small>Try asking</small>
+          <div>
+            {initialPrompts.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                onClick={() => askUploadAssistant(prompt)}
+                disabled={assistantLoading}
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {assistantFollowUp && (
+        <div className="upload-assistant-clarification">
+          <strong>One detail to clarify</strong>
+          <p>{assistantFollowUp}</p>
+        </div>
+      )}
+
+      {!!assistantNextActions.length && (
+        <div className="upload-assistant-next-actions">
+          <strong>What to add next</strong>
+          <ul>
+            {assistantNextActions.map((action) => (
+              <li key={action}>
+                <ChevronRight size={14} />
+                <span>{action}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {showCanvasRoute && (
+        <div className={`upload-assistant-route ${assistantPackageFit}`}>
+          <strong>
+            {assistantPackageFit === "canvas_recommended"
+              ? "Canvas is a better fit"
+              : "Don't have the missing source?"}
+          </strong>
+          <p>
+            {assistantPackageFit === "canvas_recommended"
+              ? "Define the endpoints and pin connections in Canvas, then submit the configuration."
+              : "Canvas can help define endpoints and connections when there is no prepared connection document to upload."}
+          </p>
+          <button type="button" onClick={onOpenCanvas}>
+            Continue in Canvas
+            <ChevronRight size={15} />
           </button>
-        ))}
-      </div>
+        </div>
+      )}
 
       <div className="upload-ai-compose">
         <input
