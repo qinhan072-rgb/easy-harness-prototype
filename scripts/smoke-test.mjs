@@ -32,6 +32,7 @@ const shippingFunctionPath = resolve(root, "supabase", "functions", "quote-shipp
 const shipmentFunctionPath = resolve(root, "supabase", "functions", "create-shipment", "index.ts");
 const storageFunctionPath = resolve(root, "supabase", "functions", "create-storage-upload", "index.ts");
 const checkingFunctionPath = resolve(root, "supabase", "functions", "run-checking", "index.ts");
+const uploadAssistantPromptPath = resolve(root, "supabase", "functions", "run-checking", "upload-assistant-prompt.ts");
 const agentDraftLabApiPath = resolve(root, "scripts", "agent-draft-lab-api.mjs");
 const agentDraftLabPath = resolve(root, "src", "AgentDraftLab.jsx");
 const requirementMapVisualPath = resolve(root, "src", "RequirementMapVisual.jsx");
@@ -80,6 +81,7 @@ const shippingFunction = readIfExists(shippingFunctionPath);
 const shipmentFunction = readIfExists(shipmentFunctionPath);
 const storageFunction = readIfExists(storageFunctionPath);
 const checkingFunction = readIfExists(checkingFunctionPath);
+const uploadAssistantPrompt = readIfExists(uploadAssistantPromptPath);
 const agentDraftLabApi = readIfExists(agentDraftLabApiPath);
 const agentDraftLab = readIfExists(agentDraftLabPath);
 const agentDraftLabEval = readIfExists(agentDraftLabEvalPath);
@@ -446,11 +448,16 @@ const checks = [
       !checkingFunction.includes("structured_starting_basis") &&
       !checkingFunction.includes("asks_for_note") &&
       !checkingFunction.includes("uploadAssistantNoteDraftReply") &&
-      checkingFunction.includes("Canvas configurator") &&
+      uploadAssistantPrompt.includes("Canvas configurator") &&
       checkingFunction.includes("visibleTextPreview") &&
-      checkingFunction.includes("Do not require a drawing, 3D model") &&
-      checkingFunction.includes("Decide semantically whether the customer wants") &&
-      checkingFunction.includes("Return suggested_note as an empty string") &&
+      checkingFunction.includes("package_fit") &&
+      uploadAssistantPrompt.includes("prepared_upload") &&
+      uploadAssistantPrompt.includes("supplement_first") &&
+      uploadAssistantPrompt.includes("canvas_recommended") &&
+      uploadAssistantPrompt.includes("Do not confuse 'Easy Harness can receive these files'") &&
+      uploadAssistantPrompt.includes("without endpoint/interface identity and electrical mapping") &&
+      uploadAssistantPrompt.includes("Decide semantically whether a reusable upload note helps") &&
+      uploadAssistantPrompt.includes("Return an empty note when no useful note is justified") &&
       checkingFunction.includes("response_json_valid") &&
       uploadDesign.includes("uploadAssistantFilePreview") &&
       uploadDesign.includes("visibleTextPreviewStatus: \"included\"") &&
@@ -464,7 +471,8 @@ const checks = [
       stylesCss.includes("align-content: start") &&
       uploadDesign.includes("took longer than this step allows") &&
       uploadDesign.includes("prepared upload note") &&
-      uploadDesign.includes("Professional source received") &&
+      uploadDesign.includes("Engineering-format file received") &&
+      uploadDesign.includes("File format alone does not confirm package completeness") &&
       uploadDesign.includes("Submission note:") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_TIMEOUT_MS") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PREVIEW_MAX_TOKENS") &&
@@ -473,7 +481,7 @@ const checks = [
       checkingFunction.includes("payload.mode === \"upload_assistant_ping\"") &&
       checkingFunction.includes("buildUploadAssistantPing") &&
       checkingFunction.includes("AI_UPLOAD_ASSISTANT_PING_TIMEOUT_MS") &&
-      checkingFunction.includes("Do not claim you visually inspected") &&
+      uploadAssistantPrompt.includes("Never claim to have read hidden content") &&
       uploadDesign.includes("supabase.auth.getSession") &&
       uploadDesign.includes("Authorization: `Bearer ${accessToken}`") &&
       uploadDesign.includes("upload_assistant_ping") &&

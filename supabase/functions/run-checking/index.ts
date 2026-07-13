@@ -6,6 +6,7 @@ import {
   readJson,
   requiredEnv,
 } from "../_shared/response.ts";
+import { uploadAssistantSystemPrompt } from "./upload-assistant-prompt.ts";
 
 type CheckingRequest = {
   mode?: "upload_assistant_preview" | string;
@@ -1438,7 +1439,7 @@ async function buildQwenFileExtractObservation(
 }
 
 function logCheckingEvent(event: string, payload: Record<string, unknown>) {
-  console.log(
+  globalThis.console.log(
     JSON.stringify({
       event: `easy_harness_run_checking_${event}`,
       ...payload,
@@ -4476,33 +4477,7 @@ async function buildUploadAssistantPreview(
       ? uploadAssistantPackageModelConfig()
       : uploadAssistantPreviewModelConfig();
   const startedAt = Date.now();
-  const system = [
-    "You are Harness Guide, the Easy Harness package agent inside the upload flow.",
-    "Help a customer who may not be a harness engineer make their upload package clearer before submission.",
-    "There is only one customer-facing AI chat. Do not mention quick mode, deep mode, timeout budgets, Qwen, Supabase, Edge Functions, fallback, or internal routing.",
-    "Use only the provided form state, file names, file categories, visibleTextPreview snippets, quantities, and notes.",
-    "When visibleTextPreview is included, treat it as actual user-provided file text. When it is absent, do not pretend to know the file contents.",
-    "Do not use keyword workflows, fixture names, or case-specific scripts; reason from the current upload state.",
-    "Use the recent conversation as real context. Do not repeat a question that the customer has already answered, and treat the latest customer correction as authoritative over earlier chat or reference material.",
-    "Do not claim you visually inspected, parsed, OCR-read, or understood hidden file contents.",
-    "Do not ask for factory-only details such as crimp tooling, BOM, cut list, terminal sourcing, or manufacturing test methods.",
-    "Do not require a drawing, 3D model, exact connector model, wire gauge, or full manufacturing detail just to start Easy Harness review.",
-    "CSV, TSV, TXT route notes, photos, sketches, PDFs, CAD, and spreadsheets can all be useful starting materials. Explain what would make the upload clearer, not what blocks all review.",
-    "If the customer has uploaded files, answer as a package-aware upload assistant: read the available snippets, reconcile them with the latest message, then decide whether the package is enough for initial Easy Harness review or what single supplement would help most.",
-    "Professional materials such as CAD, drawings, PDFs, pinouts, spreadsheets, and connector photos are valuable. Encourage them when useful, but frame them as high-value supplements unless the current request cannot be understood at all.",
-    "If the customer has no professional source material and is mainly describing a new harness in natural language, suggest the Canvas configurator as an easier path without forcing the customer away from upload.",
-    "Decide semantically whether the customer wants a reusable upload note; do not depend on exact words or a fixed list of phrases.",
-    "The suggested_note should read like a customer-approved upload note for Easy Harness review, not like a chat answer. It should be specific, evidence-based, and avoid phrases such as 'your package is clear' unless that wording belongs in the customer's actual note.",
-    "Return suggested_note as an empty string when a reusable note would not help yet. Do not produce a generic note merely because the response schema contains this field.",
-    "Reply in the same language as the customer's latest message when possible.",
-    "Return compact JSON only with keys: reply, suggested_note, quick_checks, risk_level, ask_next, response_kind.",
-    "reply: one or two short, helpful customer-facing sentences.",
-    "suggested_note: when useful, a concise note the customer can add to the active harness. Summarize only the actual uploaded basis and known connection, route, quantity, length, purpose, or change clues. Do not include optional supplements inside the customer-approved note and do not overclaim hidden file contents.",
-    "quick_checks: zero to three short, context-specific actions the customer could ask you to perform next.",
-    "risk_level: ok, needs_source, or needs_context.",
-    "ask_next: the single most valuable optional follow-up question, or an empty string when no question is needed.",
-    "response_kind: guidance, package_assessment, or note_draft.",
-  ].join("\n");
+  const system = uploadAssistantSystemPrompt;
   const userContent = [
     buildUploadAssistantEvidenceContext(payload),
     "",
@@ -4558,6 +4533,28 @@ async function buildUploadAssistantPreview(
       ? "I could not finish a clear package response this time. Your upload form is unchanged, so you can ask again."
       : unstructuredReply,
   );
+  const requestedPackageFit = normalizePreviewString(
+    parsed.package_fit,
+    "supplement_first",
+  );
+  const criticalGaps = normalizePreviewList(parsed.critical_gaps).slice(0, 4);
+  const packageFit =
+    requestedPackageFit === "prepared_upload" && criticalGaps.length === 0
+      ? "prepared_upload"
+      : requestedPackageFit === "canvas_recommended"
+        ? "canvas_recommended"
+        : "supplement_first";
+  const evidencePresent = normalizePreviewList(parsed.evidence_present).slice(
+    0,
+    5,
+  );
+  logCheckingEvent("upload_assistant_preview_decision", {
+    user_id: userId,
+    package_fit: packageFit,
+    evidence_count: evidencePresent.length,
+    critical_gap_count: criticalGaps.length,
+    response_kind: normalizePreviewString(parsed.response_kind, "guidance"),
+  });
   return {
     ok: true,
     mode: "upload_assistant_preview",
@@ -4569,6 +4566,9 @@ async function buildUploadAssistantPreview(
     riskLevel: normalizePreviewString(parsed.risk_level, "needs_context"),
     askNext: normalizePreviewString(parsed.ask_next),
     responseKind: normalizePreviewString(parsed.response_kind, "guidance"),
+    packageFit,
+    evidencePresent,
+    criticalGaps,
   };
 }
 

@@ -65,6 +65,11 @@ platform yet.
   customer has uploaded files. The package path carries recent conversation,
   uses bounded Qwen thinking, and does not depend on exact question phrases. No
   separate "deep check" button is exposed to customers.
+- A professional file extension confirms receipt format only. Harness Guide
+  reasons over visible evidence and classifies the current basis as
+  `prepared_upload`, `supplement_first`, or `canvas_recommended`; it must not
+  treat missing endpoint identity or electrical mapping as a future Easy
+  Harness review task merely to make an incomplete package sound ready.
 - Professional upload submission requires every browser file, Storage object,
   storage metadata row, and attachment row to succeed before the customer is
   shown a completed request. A failed file keeps the upload form available.

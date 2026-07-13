@@ -1319,13 +1319,14 @@ function DesignPackageStep({
         <div>
           <strong>
             {engineeringFileCount
-              ? "Professional source received"
+              ? "Engineering-format file received"
               : "Engineering source required"}
           </strong>
           {engineeringFileCount ? (
             <p>
-              The package has a professional source file. Add photos or notes only
-              when they make the drawing, table, CAD, or quote package easier to use.
+              File format alone does not confirm package completeness. Prepared
+              uploads should define the electrical connections as well as the
+              physical layout; Harness Guide can help check the current basis.
             </p>
           ) : (
             <p>
